@@ -1,9 +1,10 @@
 /**
  * dsh-theme-endfield — Edge Intelligence Theme
- * 还原自 https://github.com/ymh0000123/Cloudflare-Showcase 的「边缘智能」编辑风。
+ * 还原自《明日方舟：终末地》（Arknights: Endfield）官网的「工业编辑风」。
+ * 参考：https://endfield.hypergryph.com
  *
  * 动态 Cordis 插件（Client 半部）：
- *   1) theme.overrideTokens —— 覆盖 13 个主题令牌（亮/暗双色），映射参考页色板；
+ *   1) theme.overrideTokens —— 覆盖 13 个主题令牌（亮/暗双色），映射终末地官网色板；
  *   2) styles.insert —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
  *
  * 使用方法：以动态 Cordis 插件的 Client 代码加载本文件（apply 返回 Cordis Plugin）。
