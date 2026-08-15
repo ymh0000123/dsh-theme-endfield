@@ -4,7 +4,7 @@
  * 参考：https://endfield.hypergryph.com
  *
  * 动态 Cordis 插件（Client 半部）：
- *   1) theme.overrideTokens —— 覆盖 13 个主题令牌（亮/暗双色），映射终末地官网色板；
+ *   1) theme.overrideTokens —— 覆盖主题令牌（亮/暗双色），映射终末地官网色板；
  *   2) styles.insert —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
  *
  * 由 dsh-client-modules 以 /plugins/theme-endfield/client.js 形式加载；
@@ -55,7 +55,7 @@ function apply(ctx) {
         dark: '#f5f5f0',
       },
       '--dsw-alias-label-secondary': {
-        light: '#757874',
+        light: '#4a4c48',
         dark: '#898d89',
       },
       '--dsw-alias-state-error-primary': {
@@ -101,7 +101,7 @@ function apply(ctx) {
       [class*='card'], [class*='Card'], [class*='input'], [class*='Input'], [class*='button'], [class*='Button'], [class*='menu'], [class*='Menu'], [class*='tooltip'], [class*='Tooltip'], [class*='dialog'], [class*='Dialog'], [class*='popover'], [class*='Popover'], [class*='tag'], [class*='Tag'], [class*='pill'], [class*='bubble'], [class*='composer'], [class*='sidebar'], [class*='Sidebar'], [class*='tab'], [class*='Tab'], [class*='badge'], [class*='Badge'], [class*='icon'], [class*='Icon'], [class*='tool' i], [class*='Tool' i] {
         border-radius: 0 !important;
       }
-      [class*='avatar'], [class*='Avatar'], [class*='spinner'], [class*='Spinner'], [class*='dot'], [class*='Dot'], [class*='actionButton' i] {
+      [class*='avatar'], [class*='Avatar'], [class*='spinner'], [class*='Spinner'], [class*='dot'], [class*='Dot'], [class*='actionButton' i], [class$='_iconButton'] {
         border-radius: 50% !important;
       }
       [class*='scrollbar'], [class*='Scrollbar'] {
@@ -110,6 +110,12 @@ function apply(ctx) {
       * {
         scrollbar-width: thin;
         scrollbar-color: var(--edge-line) transparent;
+      }
+      /* ---------- Light mode: deepen tertiary/secondary labels for icon visibility ---------- */
+      body:not([data-ds-dark-theme]) {
+        --dsw-alias-label-tertiary: #6a6d68;
+        --dsw-alias-label-caption: #5a5d58;
+        --dsw-alias-label-dimmed: #9a9d98;
       }
       /* ---------- Neutralize remaining DeepSeek brand blues ---------- */
       body {
@@ -253,6 +259,17 @@ function apply(ctx) {
       .YDXeBa_searchResultRow.YDXeBa_selected * {
         color: #000 !important;
       }
+      /* ---------- Light mode: workspace folder / icon buttons ink ---------- */
+      body:not([data-ds-dark-theme]) .YDXeBa_folder,
+      body:not([data-ds-dark-theme]) .YDXeBa_folderActive,
+      body:not([data-ds-dark-theme]) .YDXeBa_chevron,
+      body:not([data-ds-dark-theme]) .YDXeBa_arrow,
+      body:not([data-ds-dark-theme]) .YDXeBa_iconButton,
+      body:not([data-ds-dark-theme]) .qDHVXG_iconButton,
+      body:not([data-ds-dark-theme]) .qDHVXG_searchButton,
+      body:not([data-ds-dark-theme]) .qDHVXG_clearButton {
+        color: #101110 !important;
+      }
       /* ---------- Dark mode: solid signal-yellow inversions ---------- */
       body[data-ds-dark-theme] .YDXeBa_projectRow:hover,
       body[data-ds-dark-theme] .YDXeBa_sessionRow:hover,
@@ -264,6 +281,40 @@ function apply(ctx) {
       body[data-ds-dark-theme] [class*='badge' i]:hover,
       body[data-ds-dark-theme] [class*='badge' i][data-active] {
         background: #fff500 !important;
+      }
+      /* ---------- Dark mode: icon buttons (plus / ellipsis / stop / actions) ---------- */
+      body[data-ds-dark-theme] [class$='_iconButton'],
+      body[data-ds-dark-theme] [data-cordis-approve],
+      body[data-ds-dark-theme] [data-cordis-approve-plugin],
+      body[data-ds-dark-theme] [data-cordis-decline],
+      body[data-ds-dark-theme] [data-cordis-switch],
+      body[data-ds-dark-theme] [class*='actionButton' i] {
+        color: #fff500 !important;
+      }
+      body[data-ds-dark-theme] [class$='_iconButton']:hover:not(:disabled),
+      body[data-ds-dark-theme] [data-cordis-switch]:hover:not(:disabled),
+      body[data-ds-dark-theme] [class*='actionButton' i]:hover:not(:disabled) {
+        color: #000 !important;
+        background: #fff500 !important;
+      }
+      /* ---------- Cordis approval buttons (allow once / allow plugin / decline) ---------- */
+      [data-cordis-approve],
+      [data-cordis-approve-plugin] {
+        color: #101110 !important;
+        background: #fff500 !important;
+      }
+      [data-cordis-decline] {
+        color: #fff !important;
+        background: var(--dsw-alias-state-error-primary) !important;
+      }
+      [data-cordis-approve]:hover:not(:disabled),
+      [data-cordis-approve-plugin]:hover:not(:disabled) {
+        color: #000 !important;
+        background: #e8e000 !important;
+      }
+      [data-cordis-decline]:hover:not(:disabled) {
+        color: #fff !important;
+        background: #d6281d !important;
       }
       /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
       [class*='tableScroll' i] th,
