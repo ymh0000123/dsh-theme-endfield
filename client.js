@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+
 function apply(ctx) {
     const theme = ctx.get('theme')
     if (theme === undefined) return
@@ -66,7 +67,7 @@ function apply(ctx) {
         dark: '#4fbf5c',
       },
       '--dsw-alias-state-warn-primary': {
-        light: '#f59e0b',
+        light: '#d9822b',
         dark: '#ffb700',
       },
       '--dsw-specific-sidebar-fill': {
@@ -125,14 +126,14 @@ function apply(ctx) {
         --dsw-static-blue-900: #101110;
         --dsw-alias-button-info-fill: #101110;
         --dsw-alias-button-info-hover: #2a2b28;
-        --dsw-alias-state-business-primary: #fff500;
-        --dsw-alias-state-business-tertiary: rgba(255, 245, 0, 0.22);
+        --dsw-alias-state-business-primary: #101110;
+        --dsw-alias-state-business-tertiary: rgba(255, 245, 0, 0.10);
         --dsw-alias-brand-primary-new-colorprimary-new-color: #101110;
         --dsw-alias-label-primary-bluish: #101110;
         --dsw-specific-bubble: #ffffff;
         --dsw-specific-bubble-highlight: #e8e9e5;
-        --dsw-specific-sidebar-nav-item-active-accent: #fff500;
-        --dsw-alias-interactive-bg-hover-accent: rgba(255, 245, 0, 0.24);
+        --dsw-specific-sidebar-nav-item-active-accent: #101110;
+        --dsw-alias-interactive-bg-hover-accent: rgba(255, 245, 0, 0.10);
         --dsw-alias-border-l3: #b6b8b3;
         --dsw-alias-border-l4: #9a9d98;
       }
@@ -163,23 +164,23 @@ function apply(ctx) {
       }
       /* ---------- Signal yellow everywhere (bright) ---------- */
       body {
-        --dsw-alias-interactive-bg-hover: rgba(255, 245, 0, 0.18);
-        --dsw-alias-interactive-bg-active: rgba(255, 245, 0, 0.30);
+        --dsw-alias-interactive-bg-hover: rgba(255, 245, 0, 0.10);
+        --dsw-alias-interactive-bg-active: rgba(255, 245, 0, 0.16);
         --dsw-alias-interactive-bg-hover-solid: #fff500;
-        --dsw-alias-bg-multi-select: rgba(255, 245, 0, 0.20);
-        --dsw-alias-bg-skeleton: rgba(255, 245, 0, 0.14);
-        --dsw-alias-markdown-citation: rgba(255, 245, 0, 0.20);
-        --dsw-alias-markdown-code-block-banner: rgba(255, 245, 0, 0.12);
-        --dsw-alias-markdown-code-segment-selected: rgba(255, 245, 0, 0.28);
-        --dsw-alias-markdown-code-segment-unselected: rgba(255, 245, 0, 0.08);
-        --dsw-alias-markdown-inline-code: rgba(255, 245, 0, 0.18);
-        --dsw-alias-markdown-tag: rgba(255, 245, 0, 0.24);
+        --dsw-alias-bg-multi-select: rgba(255, 245, 0, 0.10);
+        --dsw-alias-bg-skeleton: rgba(255, 245, 0, 0.08);
+        --dsw-alias-markdown-citation: rgba(255, 245, 0, 0.10);
+        --dsw-alias-markdown-code-block-banner: rgba(255, 245, 0, 0.06);
+        --dsw-alias-markdown-code-segment-selected: rgba(255, 245, 0, 0.14);
+        --dsw-alias-markdown-code-segment-unselected: rgba(255, 245, 0, 0.04);
+        --dsw-alias-markdown-inline-code: rgba(255, 245, 0, 0.09);
+        --dsw-alias-markdown-tag: rgba(255, 245, 0, 0.12);
         --dsw-alias-scrollbar-bg-l1: transparent;
         --dsw-alias-scrollbar-bg-l2: transparent;
         --dsw-alias-scrollbar-hover-l1: #fff500;
         --dsw-alias-scrollbar-hover-l2: #fff500;
-        --dsw-specific-sidebar-nav-item-active: rgba(255, 245, 0, 0.18);
-        --dsw-specific-sidebar-nav-item-hover: rgba(255, 245, 0, 0.14);
+        --dsw-specific-sidebar-nav-item-active: rgba(255, 245, 0, 0.10);
+        --dsw-specific-sidebar-nav-item-hover: rgba(255, 245, 0, 0.08);
       }
       body[data-ds-dark-theme] {
         --dsw-alias-interactive-bg-hover: rgba(255, 245, 0, 0.18);
@@ -311,6 +312,8 @@ function apply(ctx) {
       disposeToken()
       disposeStyles()
     })
+  }
+
 		exports.name = "dsh-theme-endfield";
 		exports.apply = apply;
 		return module.exports;
