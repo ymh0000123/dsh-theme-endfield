@@ -387,6 +387,129 @@ function apply(ctx) {
       [class$='_label'] svg {
         opacity: 1 !important;
       }
+      /* ================= pkg-23 audit: dark compaction notice + residual blues ================= */
+      /* Dark mode: warm label grays (compaction notice title/summary/sep used bluish defaults) */
+      body[data-ds-dark-theme] {
+        --dsw-alias-label-tertiary: #9a9d98;
+        --dsw-alias-label-caption: #8a8d88;
+        --dsw-alias-label-dimmed: #70736f;
+        --dsw-alias-label-primary-dimmed: #d8d9d5;
+        --dsw-alias-label-primary-inverted: #2a2b28;
+      }
+      /* Light + dark: warm the remaining bluish-gray surfaces / buttons / code blocks */
+      body {
+        --dsw-alias-bg-layer-3: #dcddd6;
+        --dsw-alias-bg-module-platform: #f2f2ec;
+        --dsw-alias-markdown-code-block: #ecece6;
+        --dsw-alias-button-elevated-fill: #f2f2ec;
+        --dsw-alias-button-floating-fill: #f2f2ec;
+        --dsw-alias-button-floating-hover: #e8e8e2;
+        --dsw-alias-button-ghost-active-fill: #dcddd6;
+        --dsw-alias-button-ghost-active-hover: #d8d9d5;
+        --dsw-alias-button-ghost-active-border: #b6b8b3;
+        --dsw-alias-button-primary-hover: #2a2b28;
+        --dsw-alias-button-contrast-fill: #3a3c38;
+        --dsw-alias-tooltip-bg: #2a2b28;
+        --dsw-specific-input-major: #f2f2ec;
+        --dsw-specific-selector: #e8e8e2;
+        --dsw-specific-tip: #e8e8e2;
+        --dsw-static-blue-400: #757874;
+        --dsw-static-blue-450: #fff500;
+        --dsw-static-blue-500: #101110;
+        --dsw-alias-label-quaternary: #6a6d68;
+        --dsw-alias-label-error: #ff3b30;
+        --dsw-alias-label-inverse: #101110;
+        --dsw-alias-line-secondary: #d8d9d5;
+        --dsw-alias-separator-primary: #9a9d98;
+        --dsw-alias-border-secondary: #b6b8b3;
+        --dsw-alias-bg-primary: #f2f2ec;
+        --dsw-alias-interactive-bg-primary: #fff500;
+        --dsw-alias-fill-l2: #dcddd6;
+        --dsw-alias-fill-tsp-secondary: #dcddd6;
+      }
+      body[data-ds-dark-theme] {
+        --dsw-alias-bg-layer-3: #242624;
+        --dsw-alias-bg-module-platform: #242624;
+        --dsw-alias-markdown-code-block: #181a18;
+        --dsw-alias-button-elevated-fill: #2a2b28;
+        --dsw-alias-button-floating-fill: #242624;
+        --dsw-alias-button-floating-hover: #2a2b28;
+        --dsw-alias-button-ghost-active-fill: #2a2b28;
+        --dsw-alias-button-ghost-active-hover: #343633;
+        --dsw-alias-button-ghost-active-border: #4a4d49;
+        --dsw-alias-button-primary-hover: #e8e000;
+        --dsw-alias-button-contrast-fill: #f5f5f0;
+        --dsw-alias-tooltip-bg: #2a2b28;
+        --dsw-specific-input-major: #1c1e1c;
+        --dsw-specific-selector: #242624;
+        --dsw-specific-tip: #242624;
+        --dsw-static-blue-400: #9a9d98;
+        --dsw-static-blue-450: #fff500;
+        --dsw-static-blue-500: #f5f5f0;
+        --dsw-alias-label-quaternary: #9a9d98;
+        --dsw-alias-label-error: #ff6b61;
+        --dsw-alias-label-inverse: #101110;
+        --dsw-alias-line-secondary: #343633;
+        --dsw-alias-separator-primary: #70736f;
+        --dsw-alias-border-secondary: #4a4d49;
+        --dsw-alias-bg-primary: #181a18;
+        --dsw-alias-interactive-bg-primary: #fff500;
+        --dsw-alias-fill-l2: #242624;
+        --dsw-alias-fill-tsp-secondary: #242624;
+      }
+      /* Token meter: messages segment signal yellow, system warm gray (tools keeps purple) */
+      .JObwrW_colorMessages {
+        --meter-tint: #fff500 !important;
+      }
+      .JObwrW_colorSystem {
+        --meter-tint: #9a9d98 !important;
+      }
+      /* Appearance theme cube selected border: warm */
+      ._8HJdBW_selected {
+        border-color: var(--dsw-alias-border-l2) !important;
+      }
+      /* Compaction notice row: soft yellow wash + accent in dark, hover = solid inversion */
+      body[data-ds-dark-theme] [class$='_compactionRow'] {
+        background: rgba(255, 245, 0, 0.08) !important;
+        border-left: 2px solid rgba(255, 245, 0, 0.55) !important;
+      }
+      body[data-ds-dark-theme] [class$='_compactionButton']:hover:not(:disabled),
+      body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible {
+        background: #fff500 !important;
+      }
+      body[data-ds-dark-theme] [class$='_compactionButton']:hover *,
+      body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible * {
+        color: #000 !important;
+      }
+      body[data-ds-dark-theme] [class$='_compactionButton']:hover [class$='_compactionSep'],
+      body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible [class$='_compactionSep'] {
+        background: #000 !important;
+      }
+      /* ================= pkg-25: composer add (+) button hover inversion ================= */
+      /* Dark: + icon signal yellow at rest; on hover solid yellow bg + black icon */
+      body[data-ds-dark-theme] .uV2eYG_add {
+        color: #fff500 !important;
+      }
+      body[data-ds-dark-theme] .uV2eYG_add:hover:not(:disabled),
+      body[data-ds-dark-theme] .uV2eYG_add:focus-visible {
+        color: #000 !important;
+        background: #fff500 !important;
+      }
+      /* ================= pkg-26: composer primary send/stop button ================= */
+      /* Dark: hardcoded #fff icon on yellow info-fill -> black icon; hover deeper yellow */
+      body[data-ds-dark-theme] .uV2eYG_primary {
+        color: #101110 !important;
+      }
+      body[data-ds-dark-theme] .uV2eYG_primary:hover:not(:disabled) {
+        color: #101110 !important;
+        background: #e8e000 !important;
+      }
+      /* ================= pkg-27: light-mode white-on-dark buttons keep white icon ================= */
+      /* Generic hover inversion would make the white send icon black on the dark fill */
+      body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton),
+      body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton):hover:not(:disabled) {
+        color: #fff !important;
+      }
     `)
 
     ctx.effect(() => () => {
