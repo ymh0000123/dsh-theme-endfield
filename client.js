@@ -253,6 +253,18 @@ function apply(ctx) {
       .YDXeBa_searchResultRow.YDXeBa_selected * {
         color: #000 !important;
       }
+      /* ---------- Dark mode: solid signal-yellow inversions ---------- */
+      body[data-ds-dark-theme] .YDXeBa_projectRow:hover,
+      body[data-ds-dark-theme] .YDXeBa_sessionRow:hover,
+      body[data-ds-dark-theme] .YDXeBa_sessionRow.YDXeBa_selected,
+      body[data-ds-dark-theme] .YDXeBa_searchResultRow:hover,
+      body[data-ds-dark-theme] .YDXeBa_searchResultRow.YDXeBa_selected {
+        background: #fff500 !important;
+      }
+      body[data-ds-dark-theme] [class*='badge' i]:hover,
+      body[data-ds-dark-theme] [class*='badge' i][data-active] {
+        background: #fff500 !important;
+      }
       /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
       [class*='tableScroll' i] th,
       [class*='table' i] th {
