@@ -20,6 +20,22 @@
 1. **`theme.overrideTokens`** — 覆盖 13 个主题令牌（亮/暗双色），映射终末地官网色板；
 2. **`styles.insert`** — 注入全局样式：字体栈、直角化、信号黄强调、中和 DSH 内部 DeepSeek 品牌蓝、hover 反色、表格/按钮/徽章/头部动作黄化等。
 
+## 安装
+
+```bash
+git clone https://github.com/ymh0000123/dsh-theme-endfield.git
+cd dsh-theme-endfield
+```
+
+本主题以**动态 Cordis 插件**（Client 半部）形式加载到 DSH：
+
+1. 打开 `client.js`，复制 `module.exports` 中的 `apply(ctx) { ... }` 函数体；
+2. 在 DSH 会话中用 `cordis_define` 新建插件，将函数体粘贴为 **Client 代码**（`return { apply(ctx) { ... } }`），
+   在 `cordis_run` 中激活该 Package；
+3. 刷新页面即生效；在 Run 卡片上停止插件即可完全卸载（token 层与样式层自动拆除）。
+
+> 提示：`client.js` 依赖 DSH Client 运行时提供的 `theme` 服务、`styles` 内建与 `ctx.effect`，仅在 DSH Web 环境中可用，不能直接在普通浏览器中运行。
+
 ## 使用
 
 以动态 Cordis 插件的 **Client 代码**加载 `client.js` 的内容（`apply` 返回 Cordis Plugin），激活后刷新页面即生效；停止插件会自动拆除全部样式副作用。
