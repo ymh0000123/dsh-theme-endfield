@@ -1,0 +1,17 @@
+# dsh-theme-endfield bundle patch
+#
+# This file is the `dsh.bundle.patch` layer of the package: when installed
+# through the official CLI —
+#
+#   dsh plugin --profile web add github:ymh0000123/dsh-theme-endfield
+#
+# — the command reconciles `dsh.profile.bundles` against installed packages
+# and, seeing this declaration, appends `dsh-theme-endfield` to the bundle
+# stack. Profile boot then merges THIS patch (a single `insert` of the plugin
+# row) exactly like a manual cordis.patch.yml mount line. No profile file
+# edits needed — one command installs and mounts. The same row is also the
+# `dsh.client` browser-roster entry the web modules half scans for the client
+# bundle (exports["./client"] -> client.js).
+- insert:
+    - id: theme-endfield
+      name: 'dsh-theme-endfield'

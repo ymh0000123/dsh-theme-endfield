@@ -1,5 +1,5 @@
 /**
- * dsh-theme-endfield — Edge Intelligence Theme
+ * dsh-theme-endfield — Edge Intelligence Theme (browser client bundle)
  * 还原自《明日方舟：终末地》（Arknights: Endfield）官网的「工业编辑风」。
  * 参考：https://endfield.hypergryph.com
  *
@@ -7,10 +7,16 @@
  *   1) theme.overrideTokens —— 覆盖 13 个主题令牌（亮/暗双色），映射终末地官网色板；
  *   2) styles.insert —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
  *
- * 使用方法：以动态 Cordis 插件的 Client 代码加载本文件（apply 返回 Cordis Plugin）。
+ * 由 dsh-client-modules 以 /plugins/theme-endfield/client.js 形式加载；
+ * 通过 `dsh plugin --profile web add github:ymh0000123/dsh-theme-endfield` 安装挂载。
  */
-module.exports = {
-  apply(ctx) {
+window.__ModuleLoader__.load({
+	id: "dsh-theme-endfield",
+	factory: (require) => {
+		var module = { exports: {} };
+		var exports = module.exports;
+		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+function apply(ctx) {
     const theme = ctx.get('theme')
     if (theme === undefined) return
 
@@ -302,5 +308,8 @@ module.exports = {
       disposeToken()
       disposeStyles()
     })
-  },
-}
+		exports.name = "dsh-theme-endfield";
+		exports.apply = apply;
+		return module.exports;
+	}
+});

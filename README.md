@@ -22,19 +22,30 @@
 
 ## 安装
 
+### 作为 DSH 插件（推荐）
+
 ```bash
-git clone https://github.com/ymh0000123/dsh-theme-endfield.git
-cd dsh-theme-endfield
+dsh plugin --profile web add github:ymh0000123/dsh-theme-endfield
 ```
 
-本主题以**动态 Cordis 插件**（Client 半部）形式加载到 DSH：
+`dsh plugin` 会转发给 profile 目录的 pnpm 完成安装，并根据包内的 `cordis.patch.yml`（`dsh.bundle.patch`）自动把插件行挂进 bundle 栈，同时把 `exports["./client"]`（`client.js`）登记为浏览器端 client bundle。安装后重启（或重新加载）web profile 即生效。
 
-1. 打开 `client.js`，复制 `module.exports` 中的 `apply(ctx) { ... }` 函数体；
+> 本主题是纯 Client 半部插件：Host 半部（`index.js`）为空实现，全部效果由浏览器端的 token 覆盖 + 样式注入完成。
+
+### 作为动态 Cordis 插件（临时试用）
+
+1. 打开 `client.js`，复制 `apply(ctx) { ... }` 函数体；
 2. 在 DSH 会话中用 `cordis_define` 新建插件，将函数体粘贴为 **Client 代码**（`return { apply(ctx) { ... } }`），
    在 `cordis_run` 中激活该 Package；
 3. 刷新页面即生效；在 Run 卡片上停止插件即可完全卸载（token 层与样式层自动拆除）。
 
 > 提示：`client.js` 依赖 DSH Client 运行时提供的 `theme` 服务、`styles` 内建与 `ctx.effect`，仅在 DSH Web 环境中可用，不能直接在普通浏览器中运行。
+
+## 卸载
+
+```bash
+dsh plugin --profile web rm dsh-theme-endfield
+```
 
 ## 使用
 
