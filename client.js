@@ -245,8 +245,11 @@ function apply(ctx) {
         border-bottom-color: var(--edge-line) !important;
       }
       tbody tr:hover,
+      tbody tr:hover *,
       [class*='table' i] tbody tr:hover,
-      [class*='tableScroll' i] tbody tr:hover {
+      [class*='table' i] tbody tr:hover *,
+      [class*='tableScroll' i] tbody tr:hover,
+      [class*='tableScroll' i] tbody tr:hover * {
         color: #000 !important;
         background: #fff500 !important;
       }
