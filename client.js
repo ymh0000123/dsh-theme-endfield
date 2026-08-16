@@ -56,6 +56,92 @@ function apply(ctx) {
       else document.body.classList.remove('theme-endfield-round')
     }
 
+    /* ---------- background ENDFIELD watermark (hero page only, settings-toggleable) ---------- */
+    const WATERMARK_KEY = 'dsh-theme-endfield-watermark'
+    const isWatermarkOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_KEY)) !== '0'
+    const isHeroVisible = () => {
+      if (typeof document === 'undefined') return false
+      const hero = document.querySelector('[class*="pXSMma_root"]')
+      if (!hero) return false
+      const r = hero.getBoundingClientRect()
+      return r.width > 0 && r.height > 0
+    }
+    const findVisibleHeadline = () => {
+      if (typeof document === 'undefined') return null
+      const all = document.querySelectorAll('[class*="pXSMma_headline"]')
+      for (const h of all) {
+        const r = h.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0) return h
+      }
+      return null
+    }
+    let watermarkEl = null
+    let watermarkRaf = null
+    const positionWatermark = () => {
+      const headline = findVisibleHeadline()
+      if (!headline || !watermarkEl) return
+      const r = headline.getBoundingClientRect()
+      if (r.width === 0 || r.height === 0) return
+      const cy = r.top + r.height / 2
+      const cx = r.left + r.width / 2
+      const vw = (typeof window !== 'undefined' && window.innerWidth) || (typeof document !== 'undefined' ? document.documentElement.clientWidth : 0)
+      const top = (cy - 55) + 'px'
+      const tx = 'translateX(' + (cx - vw / 2) + 'px)'
+      // Only write when the value actually changed, so a stable layout costs nothing.
+      if (watermarkEl.style.top !== top) watermarkEl.style.top = top
+      if (watermarkEl.style.transform !== tx) watermarkEl.style.transform = tx
+    }
+    const watermarkRafLoop = () => {
+      if (!watermarkEl) { watermarkRaf = null; return }
+      positionWatermark()
+      watermarkRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(watermarkRafLoop) : null
+    }
+    const syncWatermarkVisibility = () => {
+      const shouldShow = isEnabled() && isWatermarkOn() && isHeroVisible()
+      if (shouldShow && !watermarkEl) {
+        const el = document.createElement('div')
+        el.setAttribute('data-endfield-watermark', '')
+        el.textContent = 'ENDFIELD'
+        const s = el.style
+        s.position = 'fixed'
+        s.left = '0'
+        s.right = '0'
+        s.height = '110px'
+        s.display = 'flex'
+        s.alignItems = 'center'
+        s.justifyContent = 'center'
+        s.pointerEvents = 'none'
+        s.zIndex = '1'
+        s.fontSize = '9.5vw'
+        s.fontWeight = '900'
+        s.letterSpacing = '0.1em'
+        s.color = 'var(--dsw-alias-label-primary)'
+        s.opacity = '0.13'
+        s.textTransform = 'uppercase'
+        s.userSelect = 'none'
+        s.fontFamily = 'var(--dsw-font-family)'
+        document.body.appendChild(el)
+        watermarkEl = el
+      } else if (!shouldShow && watermarkEl) {
+        if (watermarkEl.parentNode) watermarkEl.parentNode.removeChild(watermarkEl)
+        watermarkEl = null
+      }
+      // While visible, follow the headline every frame (page switches, sidebar
+      // width changes, animations) — no reliance on observer timing.
+      if (watermarkEl && !watermarkRaf && typeof requestAnimationFrame === 'function') {
+        watermarkRaf = requestAnimationFrame(watermarkRafLoop)
+      }
+    }
+    const onWatermarkResize = () => { if (watermarkEl) positionWatermark() }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', onWatermarkResize)
+    }
+    let watermarkObserver = null
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
+      watermarkObserver = new MutationObserver(() => syncWatermarkVisibility())
+      watermarkObserver.observe(document.body, { childList: true, subtree: true })
+    }
+
     let disposeToken = () => {}
     let disposeStyles = () => {}
     let mounted = false
@@ -465,10 +551,14 @@ function apply(ctx) {
       /* Dark mode: warm label grays (compaction notice title/summary/sep used bluish defaults) */
       body[data-ds-dark-theme] {
         --dsw-alias-label-tertiary: #9a9d98;
-        --dsw-alias-label-caption: #8a8d88;
+        --dsw-alias-label-caption: #a4a6a1;
         --dsw-alias-label-dimmed: #70736f;
         --dsw-alias-label-primary-dimmed: #d8d9d5;
-        --dsw-alias-label-primary-inverted: #2a2b28;
+        --dsw-alias-label-primary-inverted: #101110;
+      }
+      /* Preset menu descriptions readable without hover in dark */
+      body[data-ds-dark-theme] [class$='_itemDesc'] {
+        color: #c5c7c2 !important;
       }
       /* Light + dark: warm the remaining bluish-gray surfaces / buttons / code blocks */
       body {
@@ -543,6 +633,20 @@ function apply(ctx) {
       ._8HJdBW_selected {
         border-color: var(--dsw-alias-border-l2) !important;
       }
+      /* Hero preview badge: solid signal-yellow + black (reference accent chip) */
+      .pXSMma_previewBadge {
+        color: #101110 !important;
+        background: #fff500 !important;
+        border-color: #fff500 !important;
+      }
+      /* Brand wordmark HARNESS chip: signal-yellow box + black letters (both modes) */
+      body {
+        --dsw-alias-label-primary-inverted: #101110;
+      }
+      [class*='brand'] svg rect,
+      [class$='_newSession'] svg rect {
+        fill: #fff500 !important;
+      }
       /* Compaction notice row: soft yellow wash + accent in dark, hover = solid inversion */
       body[data-ds-dark-theme] [class$='_compactionRow'] {
         background: rgba(255, 245, 0, 0.08) !important;
@@ -585,6 +689,17 @@ function apply(ctx) {
       body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton):hover:not(:disabled) {
         color: #fff !important;
       }
+      /* ================= dark mode: selected rows = solid signal-yellow + black text ================= */
+      /* The translucent yellow wash makes white text look muddy olive; the reference
+         inverts to black-on-signal-yellow, so selected rows get the full inversion. */
+      body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) {
+        color: #000 !important;
+        background: #fff500 !important;
+        border-color: #fff500 !important;
+      }
+      body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) *:not(svg):not(path) {
+        color: #000 !important;
+      }
     `)
       syncRadiusMode()
     }
@@ -598,77 +713,68 @@ function apply(ctx) {
       document.body.classList.remove('theme-endfield-round')
     }
 
-    if (isEnabled()) mount()
+    if (isEnabled()) { mount(); syncWatermarkVisibility() }
 
-    /* ---------- Settings rows: theme master switch + corner mode ---------- */
+    /* ---------- Settings page: 主题 (own settings.section) ---------- */
     const slots = ctx.get('slots')
     const disposeRows = []
     let disposeSettings = () => { disposeRows.forEach((d) => d()) }
     if (slots !== undefined) {
-      slots.inject('settings.general.item', () => {
+      slots.inject('settings.section', () => {
         const d = slots.register(
-        { name: 'settings.general.item', id: 'theme-endfield-switch', order: 14 },
+        { name: 'settings.section', id: 'theme-endfield', order: 35, label: '终末地主题设置' },
         () => {
           const R = (typeof React !== 'undefined') ? React : ((typeof require === 'function') ? require('react') : null)
           if (!R) return null
           const [enabled, setEnabled] = R.useState(isEnabled())
-          const radiusMode = (typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square'
-          const toggle = () => {
-            const next = !enabled
-            if (typeof localStorage !== 'undefined') localStorage.setItem(ENABLED_KEY, next ? '1' : '0')
-            setEnabled(next)
-            if (next) mount()
-            else unmount()
-          }
-          const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0' }
+          const [wmOn, setWmOn] = R.useState(isWatermarkOn())
+          const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
+          const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
-          const btnStyle = {
-            color: enabled ? '#000' : 'var(--dsw-alias-label-primary)',
-            background: enabled ? '#fff500' : 'var(--edge-btn-muted)',
+          const btnStyleFor = (on) => ({
+            color: on ? '#000' : 'var(--dsw-alias-label-primary)',
+            background: on ? '#fff500' : 'var(--edge-btn-muted)',
             border: '1px solid var(--dsw-alias-border-l2)',
-            borderRadius: radiusMode === 'round' ? '999px' : '0',
+            borderRadius: mode === 'round' ? '999px' : '0',
             padding: '4px 14px',
             fontSize: '12px',
             cursor: 'pointer',
+          })
+          const toggleTheme = () => {
+            const next = !enabled
+            if (typeof localStorage !== 'undefined') localStorage.setItem(ENABLED_KEY, next ? '1' : '0')
+            setEnabled(next)
+            if (next) { mount(); syncWatermarkVisibility() }
+            else { unmount(); syncWatermarkVisibility() }
           }
-          return R.createElement('div', { style: rowStyle },
-            R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
-            R.createElement('button', { type: 'button', onClick: toggle, style: btnStyle }, enabled ? '关闭主题' : '开启主题')
-          )
-        }
-      )
-      disposeRows.push(d)
-      return d
-    })
-      slots.inject('settings.general.item', () => {
-        const d = slots.register(
-        { name: 'settings.general.item', id: 'theme-endfield-radius', order: 15 },
-        () => {
-          const R = (typeof React !== 'undefined') ? React : ((typeof require === 'function') ? require('react') : null)
-          if (!R) return null
-          const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
-          const toggle = () => {
+          const toggleWm = () => {
+            const next = !wmOn
+            if (typeof localStorage !== 'undefined') localStorage.setItem(WATERMARK_KEY, next ? '1' : '0')
+            setWmOn(next)
+            syncWatermarkVisibility()
+          }
+          const toggleMode = () => {
             const next = mode === 'round' ? 'square' : 'round'
             if (typeof localStorage !== 'undefined') localStorage.setItem(RADIUS_KEY, next)
             setMode(next)
             if (next === 'round') document.body.classList.add('theme-endfield-round')
             else document.body.classList.remove('theme-endfield-round')
           }
-          const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0' }
-          const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
-          const btnStyle = {
-            color: mode === 'round' ? '#000' : 'var(--dsw-alias-label-primary)',
-            background: mode === 'round' ? '#fff500' : 'var(--edge-btn-muted)',
-            border: '1px solid var(--dsw-alias-border-l2)',
-            borderRadius: mode === 'round' ? '999px' : '0',
-            padding: '4px 14px',
-            fontSize: '12px',
-            cursor: 'pointer',
-          }
-          return R.createElement('div', { style: rowStyle },
-            R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
-            R.createElement('button', { type: 'button', onClick: toggle, style: btnStyle }, mode === 'round' ? '切换直角' : '切换圆角')
-          )
+          const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
+          return R.createElement('div', { style: pageStyle }, [
+            R.createElement('div', { style: rowStyle },
+              R.createElement('span', { style: labelStyle }, '背景水印：' + (wmOn ? '开启' : '关闭')),
+              R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, wmOn ? '关闭水印' : '开启水印')
+            ),
+            R.createElement('div', { style: rowStyle },
+              R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
+              R.createElement('button', { type: 'button', onClick: toggleTheme, style: btnStyleFor(enabled) }, enabled ? '关闭主题' : '开启主题')
+            ),
+            R.createElement('div', { style: rowStyle },
+              R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
+              R.createElement('button', { type: 'button', onClick: toggleMode, style: btnStyleFor(mode === 'round') }, mode === 'round' ? '切换直角' : '切换圆角')
+            ),
+          ])
         }
       )
       disposeRows.push(d)
@@ -678,6 +784,10 @@ function apply(ctx) {
 
     ctx.effect(() => () => {
       unmount()
+      if (watermarkObserver) watermarkObserver.disconnect()
+      if (watermarkRaf !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(watermarkRaf)
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') window.removeEventListener('resize', onWatermarkResize)
+      if (watermarkEl && watermarkEl.parentNode) watermarkEl.parentNode.removeChild(watermarkEl)
       disposeSettings()
     })
   }
