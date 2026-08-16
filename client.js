@@ -3,9 +3,12 @@
  * 还原自《明日方舟：终末地》（Arknights: Endfield）官网的「工业编辑风」。
  * 参考：https://endfield.hypergryph.com
  *
- * 动态 Cordis 插件（Client 半部）：
+ * Client 半部：
  *   1) theme.overrideTokens —— 覆盖主题令牌（亮/暗双色），映射终末地官网色板；
- *   2) styles.insert —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
+ *   2) insertCss —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
+ *      （动态插件环境走 styles.insert；安装为独立 bundle 时直接注入 <style> 到 head。）
+ *   3) 设置页「主题圆角」开关 —— 直角（默认）/ 圆角（恢复应用原生圆角）切换，
+ *      localStorage 持久化（key: dsh-theme-endfield-radius）。
  *
  * 由 dsh-client-modules 以 /plugins/theme-endfield/client.js 形式加载；
  * 通过 `dsh plugin --profile web add github:ymh0000123/dsh-theme-endfield` 安装挂载。
@@ -17,11 +20,49 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
+function insertCss(css) {
+  // Dynamic Cordis runner provides the `styles` global; standalone bundle does not.
+  if (typeof styles !== 'undefined' && styles && typeof styles.insert === 'function') {
+    return styles.insert(css)
+  }
+  // Idempotency: the installed bundle can be applied more than once (boot loader +
+  // cordis composition both mount it). Never stack duplicate theme stylesheets.
+  document.querySelectorAll('style[data-plugin="dsh-theme-endfield"]').forEach((old) => old.remove())
+  const el = document.createElement('style')
+  el.setAttribute('data-plugin', 'dsh-theme-endfield')
+  el.textContent = css
+  document.head.appendChild(el)
+  return () => {
+    if (el.parentNode) el.parentNode.removeChild(el)
+  }
+}
+
 function apply(ctx) {
+    // Idempotency: the installed bundle can be applied more than once (boot loader +
+    // cordis composition both mount it). Only the first application owns tokens/styles;
+    // duplicate overrideTokens would replace the layer and break the toggle's dispose.
+    if (typeof window !== 'undefined' && window.__dshThemeEndfieldApplied) return
+    if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = true
+
     const theme = ctx.get('theme')
     if (theme === undefined) return
 
-    const disposeToken = theme.overrideTokens('edge-intelligence-theme', {
+    const RADIUS_KEY = 'dsh-theme-endfield-radius'
+    const ENABLED_KEY = 'dsh-theme-endfield-enabled'
+    const isEnabled = () => (typeof localStorage !== 'undefined' && localStorage.getItem(ENABLED_KEY)) !== '0'
+    const syncRadiusMode = () => {
+      const mode = (typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square'
+      if (mode === 'round') document.body.classList.add('theme-endfield-round')
+      else document.body.classList.remove('theme-endfield-round')
+    }
+
+    let disposeToken = () => {}
+    let disposeStyles = () => {}
+    let mounted = false
+    const mount = () => {
+      if (mounted) return
+      mounted = true
+      disposeToken = theme.overrideTokens('edge-intelligence-theme', {
       '--dsw-alias-bg-base': {
         light: '#e8e8e2',
         dark: '#101110',
@@ -32,7 +73,7 @@ function apply(ctx) {
       },
       '--dsw-alias-bg-layer-2': {
         light: '#dcddd6',
-        dark: '#242624',
+        dark: '#1e201d',
       },
       '--dsw-alias-bg-overlay': {
         light: '#f2f2ec',
@@ -76,7 +117,7 @@ function apply(ctx) {
       },
     })
 
-    const disposeStyles = styles.insert(`
+    disposeStyles = insertCss(`
       :root {
         --dsw-font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
         --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
@@ -95,16 +136,34 @@ function apply(ctx) {
         color: #000;
         background: var(--edge-signal, #fff500);
       }
-      button, input, textarea, select, [role='button'], [role='dialog'], [role='menu'], [role='tooltip'], [role='tab'] {
+      /* Square corners (default): zero EVERY classed element, then restore circles/pills below.
+         body.theme-endfield-round disables all of this and restores app-native rounding. */
+      body:not(.theme-endfield-round) button,
+      body:not(.theme-endfield-round) input,
+      body:not(.theme-endfield-round) textarea,
+      body:not(.theme-endfield-round) select,
+      body:not(.theme-endfield-round) [role='button'],
+      body:not(.theme-endfield-round) [role='dialog'],
+      body:not(.theme-endfield-round) [role='menu'],
+      body:not(.theme-endfield-round) [role='tooltip'],
+      body:not(.theme-endfield-round) [role='tab'] {
         border-radius: 0 !important;
       }
-      [class*='card'], [class*='Card'], [class*='input'], [class*='Input'], [class*='button'], [class*='Button'], [class*='menu'], [class*='Menu'], [class*='tooltip'], [class*='Tooltip'], [class*='dialog'], [class*='Dialog'], [class*='popover'], [class*='Popover'], [class*='tag'], [class*='Tag'], [class*='pill'], [class*='bubble'], [class*='composer'], [class*='sidebar'], [class*='Sidebar'], [class*='tab'], [class*='Tab'], [class*='badge'], [class*='Badge'], [class*='icon'], [class*='Icon'], [class*='tool' i], [class*='Tool' i] {
+      body:not(.theme-endfield-round) [class] {
         border-radius: 0 !important;
       }
-      [class*='avatar'], [class*='Avatar'], [class*='spinner'], [class*='Spinner'], [class*='dot'], [class*='Dot'], [class*='actionButton' i], [class$='_iconButton'] {
+      body:not(.theme-endfield-round) [class*='avatar'],
+      body:not(.theme-endfield-round) [class*='Avatar'],
+      body:not(.theme-endfield-round) [class*='spinner'],
+      body:not(.theme-endfield-round) [class*='Spinner'],
+      body:not(.theme-endfield-round) [class*='dot'],
+      body:not(.theme-endfield-round) [class*='Dot'],
+      body:not(.theme-endfield-round) [class*='actionButton' i],
+      body:not(.theme-endfield-round) [class$='_iconButton'] {
         border-radius: 50% !important;
       }
-      [class*='scrollbar'], [class*='Scrollbar'] {
+      body:not(.theme-endfield-round) [class*='scrollbar'],
+      body:not(.theme-endfield-round) [class*='Scrollbar'] {
         border-radius: 0 !important;
       }
       * {
@@ -116,6 +175,7 @@ function apply(ctx) {
         --dsw-alias-label-tertiary: #6a6d68;
         --dsw-alias-label-caption: #5a5d58;
         --dsw-alias-label-dimmed: #9a9d98;
+        --edge-btn-muted: #dcddd6;
       }
       /* ---------- Neutralize remaining DeepSeek brand blues ---------- */
       body {
@@ -124,7 +184,7 @@ function apply(ctx) {
         --dsw-static-deepseek-200: #d8d9d5;
         --dsw-static-deepseek-300: #c8cac5;
         --dsw-static-deepseek-400: #757874;
-        --dsw-static-deepseek-450: #fff500;
+        --dsw-static-deepseek-450: #d9c700;
         --dsw-static-deepseek-500: #101110;
         --dsw-static-deepseek-600: #101110;
         --dsw-static-deepseek-800: #3a3c38;
@@ -167,6 +227,7 @@ function apply(ctx) {
         --dsw-alias-interactive-bg-hover-accent: rgba(255, 245, 0, 0.22);
         --dsw-alias-border-l3: #4f534f;
         --dsw-alias-border-l4: #5f6460;
+        --edge-btn-muted: #3a3c38;
       }
       /* ---------- Signal yellow everywhere (light: visible but soft) ---------- */
       body {
@@ -238,7 +299,9 @@ function apply(ctx) {
         background: transparent;
       }
       /* ---------- Hover text contrast (reference page inversion) ---------- */
-      :is(button, [role='button'], [role='tab'], [role='menuitem'], [role='option'], [role='link'], [role='treeitem'], [role='checkbox'], [role='switch'], [role='radio'], [role='combobox'], [class*='nav-item' i], [class*='menu-item' i], [class*='list-item' i], [class*='session-item' i], [class*='workspace-item' i], [class*='search-result' i], [class*='item' i], [class*='tab' i], [class*='card' i], [class*='row' i], [class*='tool' i], [class*='composer' i]):hover {
+      /* Note: plain buttons are excluded — their own fill/text color must survive hover
+         (e.g. yellow toggle button keeps black text; white-on-dark send button stays white). */
+      :is([role='tab'], [role='menuitem'], [role='option'], [role='link'], [role='treeitem'], [role='checkbox'], [role='switch'], [role='radio'], [role='combobox'], [class*='nav-item' i], [class*='menu-item' i], [class*='list-item' i], [class*='session-item' i], [class*='workspace-item' i], [class*='search-result' i], [class*='item' i], [class*='tab' i], [class*='card' i], [class*='row' i], [class*='tool' i], [class*='composer' i]):hover {
         color: var(--dsw-alias-label-primary) !important;
       }
       /* ---------- Workspace browser rows (YDXeBa) ---------- */
@@ -340,6 +403,8 @@ function apply(ctx) {
         color: #000 !important;
         background: #fff500 !important;
         border-color: #fff500 !important;
+      }
+      body:not(.theme-endfield-round) [class$='_newSession'] {
         border-radius: 0 !important;
       }
       [class$='_newSession']:hover,
@@ -367,8 +432,8 @@ function apply(ctx) {
         color: #000 !important;
         background: #fff500 !important;
       }
-      [data-cordis-switch],
-      [class*='actionButton' i] {
+      body:not(.theme-endfield-round) [data-cordis-switch],
+      body:not(.theme-endfield-round) [class*='actionButton' i] {
         border-radius: 999px !important;
       }
       /* ---------- Session header actions (agent preset / subagent / jobs) ---------- */
@@ -378,16 +443,25 @@ function apply(ctx) {
         color: #000 !important;
         background: #fff500 !important;
       }
-      [class$='_label'] {
+      /* ---------- Agent-preset header chip: signal yellow, stretches to fill the action row ---------- */
+      /* (scoped: the old broad [class$='_label'] rule yellowed plain text labels like 产物/settings/jobs names) */
+      .SVAs4q_label {
         color: #000 !important;
         background: #fff500 !important;
+        flex: 1 1 auto !important;
+        max-width: none !important;
+        justify-content: center !important;
+        padding: 0 12px !important;
+      }
+      body:not(.theme-endfield-round) .SVAs4q_label {
         border-radius: 0 !important;
       }
-      [class$='_label'] .SVAs4q_icon,
-      [class$='_label'] svg {
+      .SVAs4q_label .SVAs4q_icon,
+      .SVAs4q_label svg {
         opacity: 1 !important;
+        color: #000 !important;
       }
-      /* ================= pkg-23 audit: dark compaction notice + residual blues ================= */
+      /* ================= dark compaction notice + residual blues ================= */
       /* Dark mode: warm label grays (compaction notice title/summary/sep used bluish defaults) */
       body[data-ds-dark-theme] {
         --dsw-alias-label-tertiary: #9a9d98;
@@ -428,21 +502,22 @@ function apply(ctx) {
         --dsw-alias-fill-tsp-secondary: #dcddd6;
       }
       body[data-ds-dark-theme] {
-        --dsw-alias-bg-layer-3: #242624;
-        --dsw-alias-bg-module-platform: #242624;
+        --dsw-alias-bg-layer-3: #2c2e2a;
+        --dsw-alias-bg-module-platform: #2c2e2a;
+        --dsw-alias-bg-layer-2: #1e201d;
         --dsw-alias-markdown-code-block: #181a18;
-        --dsw-alias-button-elevated-fill: #2a2b28;
-        --dsw-alias-button-floating-fill: #242624;
-        --dsw-alias-button-floating-hover: #2a2b28;
-        --dsw-alias-button-ghost-active-fill: #2a2b28;
-        --dsw-alias-button-ghost-active-hover: #343633;
-        --dsw-alias-button-ghost-active-border: #4a4d49;
+        --dsw-alias-button-elevated-fill: #3a3c38;
+        --dsw-alias-button-floating-fill: #343633;
+        --dsw-alias-button-floating-hover: #3a3c38;
+        --dsw-alias-button-ghost-active-fill: #343633;
+        --dsw-alias-button-ghost-active-hover: #3f413d;
+        --dsw-alias-button-ghost-active-border: #5f6460;
         --dsw-alias-button-primary-hover: #e8e000;
         --dsw-alias-button-contrast-fill: #f5f5f0;
         --dsw-alias-tooltip-bg: #2a2b28;
-        --dsw-specific-input-major: #1c1e1c;
-        --dsw-specific-selector: #242624;
-        --dsw-specific-tip: #242624;
+        --dsw-specific-input-major: #202220;
+        --dsw-specific-selector: #2c2e2a;
+        --dsw-specific-tip: #2c2e2a;
         --dsw-static-blue-400: #9a9d98;
         --dsw-static-blue-450: #fff500;
         --dsw-static-blue-500: #f5f5f0;
@@ -485,7 +560,7 @@ function apply(ctx) {
       body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible [class$='_compactionSep'] {
         background: #000 !important;
       }
-      /* ================= pkg-25: composer add (+) button hover inversion ================= */
+      /* ================= composer add (+) button hover inversion ================= */
       /* Dark: + icon signal yellow at rest; on hover solid yellow bg + black icon */
       body[data-ds-dark-theme] .uV2eYG_add {
         color: #fff500 !important;
@@ -495,7 +570,7 @@ function apply(ctx) {
         color: #000 !important;
         background: #fff500 !important;
       }
-      /* ================= pkg-26: composer primary send/stop button ================= */
+      /* ================= composer primary send/stop button ================= */
       /* Dark: hardcoded #fff icon on yellow info-fill -> black icon; hover deeper yellow */
       body[data-ds-dark-theme] .uV2eYG_primary {
         color: #101110 !important;
@@ -504,17 +579,106 @@ function apply(ctx) {
         color: #101110 !important;
         background: #e8e000 !important;
       }
-      /* ================= pkg-27: light-mode white-on-dark buttons keep white icon ================= */
+      /* ================= light-mode white-on-dark buttons keep white icon ================= */
       /* Generic hover inversion would make the white send icon black on the dark fill */
       body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton),
       body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton):hover:not(:disabled) {
         color: #fff !important;
       }
     `)
-
-    ctx.effect(() => () => {
+      syncRadiusMode()
+    }
+    const unmount = () => {
+      if (!mounted) return
+      mounted = false
       disposeToken()
       disposeStyles()
+      disposeToken = () => {}
+      disposeStyles = () => {}
+      document.body.classList.remove('theme-endfield-round')
+    }
+
+    if (isEnabled()) mount()
+
+    /* ---------- Settings rows: theme master switch + corner mode ---------- */
+    const slots = ctx.get('slots')
+    const disposeRows = []
+    let disposeSettings = () => { disposeRows.forEach((d) => d()) }
+    if (slots !== undefined) {
+      slots.inject('settings.general.item', () => {
+        const d = slots.register(
+        { name: 'settings.general.item', id: 'theme-endfield-switch', order: 14 },
+        () => {
+          const R = (typeof React !== 'undefined') ? React : ((typeof require === 'function') ? require('react') : null)
+          if (!R) return null
+          const [enabled, setEnabled] = R.useState(isEnabled())
+          const radiusMode = (typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square'
+          const toggle = () => {
+            const next = !enabled
+            if (typeof localStorage !== 'undefined') localStorage.setItem(ENABLED_KEY, next ? '1' : '0')
+            setEnabled(next)
+            if (next) mount()
+            else unmount()
+          }
+          const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0' }
+          const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
+          const btnStyle = {
+            color: enabled ? '#000' : 'var(--dsw-alias-label-primary)',
+            background: enabled ? '#fff500' : 'var(--edge-btn-muted)',
+            border: '1px solid var(--dsw-alias-border-l2)',
+            borderRadius: radiusMode === 'round' ? '999px' : '0',
+            padding: '4px 14px',
+            fontSize: '12px',
+            cursor: 'pointer',
+          }
+          return R.createElement('div', { style: rowStyle },
+            R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
+            R.createElement('button', { type: 'button', onClick: toggle, style: btnStyle }, enabled ? '关闭主题' : '开启主题')
+          )
+        }
+      )
+      disposeRows.push(d)
+      return d
+    })
+      slots.inject('settings.general.item', () => {
+        const d = slots.register(
+        { name: 'settings.general.item', id: 'theme-endfield-radius', order: 15 },
+        () => {
+          const R = (typeof React !== 'undefined') ? React : ((typeof require === 'function') ? require('react') : null)
+          if (!R) return null
+          const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
+          const toggle = () => {
+            const next = mode === 'round' ? 'square' : 'round'
+            if (typeof localStorage !== 'undefined') localStorage.setItem(RADIUS_KEY, next)
+            setMode(next)
+            if (next === 'round') document.body.classList.add('theme-endfield-round')
+            else document.body.classList.remove('theme-endfield-round')
+          }
+          const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0' }
+          const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
+          const btnStyle = {
+            color: mode === 'round' ? '#000' : 'var(--dsw-alias-label-primary)',
+            background: mode === 'round' ? '#fff500' : 'var(--edge-btn-muted)',
+            border: '1px solid var(--dsw-alias-border-l2)',
+            borderRadius: mode === 'round' ? '999px' : '0',
+            padding: '4px 14px',
+            fontSize: '12px',
+            cursor: 'pointer',
+          }
+          return R.createElement('div', { style: rowStyle },
+            R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
+            R.createElement('button', { type: 'button', onClick: toggle, style: btnStyle }, mode === 'round' ? '切换直角' : '切换圆角')
+          )
+        }
+      )
+      disposeRows.push(d)
+      return d
+    })
+    }
+
+    ctx.effect(() => () => {
+      unmount()
+      disposeSettings()
     })
   }
 
