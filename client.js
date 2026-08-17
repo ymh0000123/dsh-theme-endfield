@@ -432,37 +432,61 @@ function apply(ctx) {
         background: #fff500 !important;
       }
       /* ---------- Dark mode: icon buttons (plus / ellipsis / stop / actions) ---------- */
+      /* The cordis approval trio is EXCLUDED here. Those three buttons carry their own
+         solid fill (signal yellow for approve, error red for decline) from the approval
+         block below, so a signal-yellow glyph renders yellow-on-yellow — an invisible
+         check. A 'body[data-ds-dark-theme] [attr]' selector (0,2,1) also outranks the
+         plain '[data-cordis-approve]' (0,1,0) rules below, so source order cannot undo it:
+         the exclusion has to happen in this selector. Their ink is set below. */
       body[data-ds-dark-theme] [class$='_iconButton'],
-      body[data-ds-dark-theme] [data-cordis-approve],
-      body[data-ds-dark-theme] [data-cordis-approve-plugin],
-      body[data-ds-dark-theme] [data-cordis-decline],
       body[data-ds-dark-theme] [data-cordis-switch],
-      body[data-ds-dark-theme] [class*='actionButton' i] {
+      body[data-ds-dark-theme] [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]) {
         color: #fff500 !important;
       }
       body[data-ds-dark-theme] [class$='_iconButton']:hover:not(:disabled),
       body[data-ds-dark-theme] [data-cordis-switch]:hover:not(:disabled),
-      body[data-ds-dark-theme] [class*='actionButton' i]:hover:not(:disabled) {
+      body[data-ds-dark-theme] [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]):hover:not(:disabled) {
         color: #000 !important;
         background: #fff500 !important;
       }
       /* ---------- Cordis approval buttons (allow once / allow plugin / decline) ---------- */
+      /* Each button is a solid chip, so its glyph must contrast with its OWN fill:
+         black check on signal yellow, white X on error red. The icons are
+         fill="currentColor" svg paths, so 'color' alone drives the glyph — but the
+         svg/path are also targeted explicitly, because any inherited-color rule that
+         wins on a descendant would otherwise repaint the glyph and hide it again. */
+      [data-cordis-approve],
+      [data-cordis-approve-plugin],
+      [data-cordis-approve] svg,
+      [data-cordis-approve-plugin] svg,
+      [data-cordis-approve] svg path,
+      [data-cordis-approve-plugin] svg path {
+        color: #101110 !important;
+        fill: currentColor !important;
+      }
       [data-cordis-approve],
       [data-cordis-approve-plugin] {
-        color: #101110 !important;
         background: #fff500 !important;
       }
-      [data-cordis-decline] {
+      [data-cordis-decline],
+      [data-cordis-decline] svg,
+      [data-cordis-decline] svg path {
         color: #fff !important;
+        fill: currentColor !important;
+      }
+      [data-cordis-decline] {
         background: var(--dsw-alias-state-error-primary) !important;
+      }
+      /* The second check of the double-check icon is dimmed to .7 opacity by the panel's
+         own stylesheet; on the solid chip keep both strokes at full ink. */
+      [data-cordis-approve-plugin] [class$='_doubleCheck'] svg {
+        opacity: 1 !important;
       }
       [data-cordis-approve]:hover:not(:disabled),
       [data-cordis-approve-plugin]:hover:not(:disabled) {
-        color: #000 !important;
         background: #e8e000 !important;
       }
       [data-cordis-decline]:hover:not(:disabled) {
-        color: #fff !important;
         background: #d6281d !important;
       }
       /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
@@ -512,9 +536,11 @@ function apply(ctx) {
       [class*='badge' i][data-active] * {
         color: #000 !important;
       }
-      /* ---------- Cordis action buttons (run/stop/approve) ---------- */
+      /* ---------- Cordis action buttons (run/stop) ---------- */
+      /* Approval chips excluded again: they already own a solid fill, and this blanket
+         hover would repaint the decline chip yellow and re-tint the approve glyphs. */
       [data-cordis-switch]:hover:not(:disabled),
-      [class*='actionButton' i]:hover:not(:disabled) {
+      [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]):hover:not(:disabled) {
         color: #000 !important;
         background: #fff500 !important;
       }
