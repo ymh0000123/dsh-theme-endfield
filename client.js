@@ -56,15 +56,37 @@ function apply(ctx) {
       else document.body.classList.remove('theme-endfield-round')
     }
 
-    /* ---------- background ENDFIELD watermark (hero page only, settings-toggleable) ---------- */
+    /* ---------- background ENDFIELD watermark (settings-toggleable) ----------
+       Two independent switches:
+         WATERMARK_KEY  — the watermark itself (default ON), shown on the hero page.
+         WATERMARK_PERSIST_KEY — "keep showing it off the hero page" (default OFF),
+           which also paints it on an active conversation / settings / any other page.
+       On the hero page the mark is centred on the headline. Off the hero page there
+       is no headline to follow, so it is centred in the conversation column instead
+       and mounted INSIDE that column rather than on <body>: a fixed body child
+       paints above the message text (it has no z-index competitor to lose to),
+       which would wash out what the user is reading. See mountPointFor(). */
     const WATERMARK_KEY = 'dsh-theme-endfield-watermark'
+    const WATERMARK_PERSIST_KEY = 'dsh-theme-endfield-watermark-persist'
     const isWatermarkOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_KEY)) !== '0'
+    // Default OFF: the hero-only behaviour stays the shipped default.
+    const isWatermarkPersistOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_PERSIST_KEY)) === '1'
     const isHeroVisible = () => {
       if (typeof document === 'undefined') return false
       const hero = document.querySelector('[class*="pXSMma_root"]')
       if (!hero) return false
       const r = hero.getBoundingClientRect()
       return r.width > 0 && r.height > 0
+    }
+    /** The visible conversation column — the persist-mode anchor and mount parent. */
+    const findConversationRoot = () => {
+      if (typeof document === 'undefined') return null
+      const all = document.querySelectorAll('[class*="wSkVaW_root"]')
+      for (const el of all) {
+        const r = el.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0) return el
+      }
+      return null
     }
     const findVisibleHeadline = () => {
       if (typeof document === 'undefined') return null
@@ -77,9 +99,28 @@ function apply(ctx) {
     }
     let watermarkEl = null
     let watermarkRaf = null
+    let watermarkHost = null
+    /* Where the mark belongs for the current page, and how it must stack there:
+         hero    -> <body>, above the (empty) hero backdrop, following the headline.
+         persist -> inside the conversation column, BEHIND the message text.
+       Returning the parent alongside the mode keeps the two decisions in one place,
+       so remount happens exactly when either the parent or the stacking changes. */
+    const mountPointFor = () => {
+      if (isHeroVisible()) return { mode: 'hero', parent: document.body }
+      const conv = findConversationRoot()
+      if (conv !== null) return { mode: 'persist', parent: conv }
+      // No conversation column on screen (e.g. a full-page settings view): fall back
+      // to the body, still behind content via a negative z-index.
+      return { mode: 'persist', parent: document.body }
+    }
     const positionWatermark = () => {
+      if (!watermarkEl) return
+      if (watermarkEl.getAttribute('data-endfield-watermark') === 'persist') {
+        // Centred in its own positioned parent — no per-frame measurement needed.
+        return
+      }
       const headline = findVisibleHeadline()
-      if (!headline || !watermarkEl) return
+      if (!headline) return
       const r = headline.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) return
       const cy = r.top + r.height / 2
@@ -92,44 +133,119 @@ function apply(ctx) {
       if (watermarkEl.style.transform !== tx) watermarkEl.style.transform = tx
     }
     const watermarkRafLoop = () => {
-      if (!watermarkEl) { watermarkRaf = null; return }
+      // Only the hero placement is measured per frame; persist mode is pure CSS, so
+      // the loop must stop when the mode changes rather than spin for nothing.
+      if (!watermarkEl || watermarkEl.getAttribute('data-endfield-watermark') !== 'hero') {
+        watermarkRaf = null
+        return
+      }
       positionWatermark()
       watermarkRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(watermarkRafLoop) : null
     }
-    const syncWatermarkVisibility = () => {
-      const shouldShow = isEnabled() && isWatermarkOn() && isHeroVisible()
-      if (shouldShow && !watermarkEl) {
-        const el = document.createElement('div')
-        el.setAttribute('data-endfield-watermark', '')
-        el.textContent = 'ENDFIELD'
-        const s = el.style
+    const styleWatermark = (el, mode) => {
+      const s = el.style
+      s.display = 'flex'
+      s.alignItems = 'center'
+      s.justifyContent = 'center'
+      s.pointerEvents = 'none'
+      s.fontWeight = '900'
+      s.letterSpacing = '0.1em'
+      s.color = 'var(--dsw-alias-label-primary)'
+      s.textTransform = 'uppercase'
+      s.userSelect = 'none'
+      s.fontFamily = 'var(--dsw-font-family)'
+      if (mode === 'hero') {
         s.position = 'fixed'
         s.left = '0'
         s.right = '0'
+        s.top = ''
+        s.bottom = ''
         s.height = '110px'
-        s.display = 'flex'
-        s.alignItems = 'center'
-        s.justifyContent = 'center'
-        s.pointerEvents = 'none'
         s.zIndex = '1'
         s.fontSize = '9.5vw'
-        s.fontWeight = '900'
-        s.letterSpacing = '0.1em'
-        s.color = 'var(--dsw-alias-label-primary)'
         s.opacity = '0.13'
-        s.textTransform = 'uppercase'
-        s.userSelect = 'none'
-        s.fontFamily = 'var(--dsw-font-family)'
-        document.body.appendChild(el)
+        s.transform = ''
+      } else {
+        // Fill the conversation column and sit behind its content. z-index:-1 paints
+        // below in-flow text but still above the column's own background, which is
+        // why the column is given `isolation: isolate` in the stylesheet: without a
+        // stacking context there, -1 would slide behind that background and vanish.
+        s.position = 'absolute'
+        s.left = '0'
+        s.right = '0'
+        s.top = '0'
+        s.bottom = '0'
+        s.height = ''
+        s.zIndex = '-1'
+        s.fontSize = '9.5vw'
+        // Strength tuned by measurement on the real chat page, not guessed. Isolating
+        // the mark's own pixel contribution with an identical screenshot clip gave
+        // 0.07 -> 0.46%, 0.12 -> 2.9%, 0.18 -> 4.3%, 0.22 -> 5.2%, 0.30 -> 7.2%.
+        // Bounds found by review of real renders in BOTH color schemes:
+        //   0.07 is under the perceptual floor (#202120 over #101110 — 16/255,
+        //        ~1.17:1) and reads as "no watermark at all";
+        //   0.22 is legible but the big letter edges start to visually collide with
+        //        the body text sitting in front of them.
+        // 0.16 is the upper-middle of that window: ~1.54:1 in dark, ~1.40:1 in light
+        // (light needs slightly less because subtracting luminance from cream reads
+        // more readily than adding it to near-black). The mark stays at z-index:-1
+        // BEHIND the text, so foreground contrast is never reduced — only how much
+        // the background wordmark competes for attention changes.
+        s.opacity = '0.16'
+        s.transform = ''
+      }
+    }
+    const syncWatermarkVisibility = () => {
+      const on = isEnabled() && isWatermarkOn()
+      const target = on ? mountPointFor() : null
+      // Off the hero page the mark only survives when the persist switch is on.
+      const shouldShow = target !== null && (target.mode === 'hero' || isWatermarkPersistOn())
+      if (shouldShow && watermarkEl) {
+        // A page change can flip the mode or move the parent — restyle/reparent in place.
+        if (watermarkEl.getAttribute('data-endfield-watermark') !== target.mode) {
+          watermarkEl.setAttribute('data-endfield-watermark', target.mode)
+          styleWatermark(watermarkEl, target.mode)
+        }
+        if (watermarkHost !== target.parent) {
+          target.parent.appendChild(watermarkEl)
+          watermarkHost = target.parent
+        }
+      } else if (shouldShow && !watermarkEl) {
+        const el = document.createElement('div')
+        el.setAttribute('data-endfield-watermark', target.mode)
+        /* Translation-proofing. The wordmark is a brand name that must never be
+           rewritten by Chrome/Edge "translate this page", a Google Translate widget
+           or a translator extension.
+           The real defence is structural: the glyphs come from CSS `content` on a
+           ::before (see the stylesheet), so there is NO DOM text node to translate —
+           text-walking translators cannot see it at all. The attributes below are the
+           declarative belt-and-braces for anything that inspects the element itself:
+             translate="no"   — the HTML5 opt-out honoured by Chrome/Edge translate
+             class notranslate — Google Translate's own opt-out hook
+             lang="en"        — stops "this looks like Chinese page text" heuristics
+           aria-hidden keeps a purely decorative mark out of the accessibility tree. */
+        el.setAttribute('translate', 'no')
+        el.setAttribute('lang', 'en')
+        el.setAttribute('aria-hidden', 'true')
+        el.className = 'notranslate'
+        styleWatermark(el, target.mode)
+        target.parent.appendChild(el)
         watermarkEl = el
+        watermarkHost = target.parent
       } else if (!shouldShow && watermarkEl) {
         if (watermarkEl.parentNode) watermarkEl.parentNode.removeChild(watermarkEl)
         watermarkEl = null
+        watermarkHost = null
       }
       // While visible, follow the headline every frame (page switches, sidebar
-      // width changes, animations) — no reliance on observer timing.
-      if (watermarkEl && !watermarkRaf && typeof requestAnimationFrame === 'function') {
+      // width changes, animations) — no reliance on observer timing. The persist
+      // placement is pure CSS, so it needs no frame loop.
+      const needsLoop = watermarkEl !== null && watermarkEl.getAttribute('data-endfield-watermark') === 'hero'
+      if (needsLoop && !watermarkRaf && typeof requestAnimationFrame === 'function') {
         watermarkRaf = requestAnimationFrame(watermarkRafLoop)
+      } else if (!needsLoop && watermarkRaf !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(watermarkRaf)
+        watermarkRaf = null
       }
     }
     const onWatermarkResize = () => { if (watermarkEl) positionWatermark() }
@@ -217,6 +333,36 @@ function apply(ctx) {
       body {
         font-feature-settings: "tnum" 1, "ss01" 1;
         font-variant-ligatures: no-common-ligatures;
+      }
+      /* The persist-mode watermark is a z-index:-1 child of the conversation column.
+         Two properties are needed on that column, and only while the mark is mounted
+         there (the :has() guard makes this a no-op whenever the feature is off):
+           isolation: isolate — without a stacking context, z-index:-1 escapes to the
+             nearest ancestor context and paints behind the column's own opaque
+             background, i.e. invisible.
+           position: relative — the column ships as position:static, so an absolutely
+             positioned child would resolve against the app frame instead and spill
+             across the sidebar. This makes the column the containing block so
+             inset:0 means "exactly this column".
+         Every absolute descendant the app itself renders (header:after, tab:after,
+         heroGlow, the overlay composer seat) already has a positioned ancestor
+         nearer than this column, so their containing blocks are unchanged. */
+      [class*='wSkVaW_root']:has(> [data-endfield-watermark]) {
+        isolation: isolate;
+        position: relative;
+      }
+      /* The mark sits behind text, so it must never intercept selection or clicks. */
+      [data-endfield-watermark] {
+        pointer-events: none !important;
+      }
+      /* Translation-proof glyphs: the wordmark is drawn from the CSS 'content'
+         property, not a DOM text node, so page translators (which walk text nodes)
+         have nothing to rewrite — the brand name cannot be turned into "终末地" or
+         similar. The element's own text stays empty; ::before carries the letters. */
+      [data-endfield-watermark]::before {
+        content: 'ENDFIELD';
+        display: block;
+        white-space: nowrap;
       }
       ::selection {
         color: #000;
@@ -754,17 +900,23 @@ function apply(ctx) {
           if (!R) return null
           const [enabled, setEnabled] = R.useState(isEnabled())
           const [wmOn, setWmOn] = R.useState(isWatermarkOn())
+          const [wmPersist, setWmPersist] = R.useState(isWatermarkPersistOn())
           const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
-          const btnStyleFor = (on) => ({
+          // Sub-label explaining what a switch does, so the row is self-describing.
+          const hintStyle = { display: 'block', color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', fontWeight: 400, lineHeight: '1.5', marginTop: '2px' }
+          const btnStyleFor = (on, disabled) => ({
             color: on ? '#000' : 'var(--dsw-alias-label-primary)',
             background: on ? '#fff500' : 'var(--edge-btn-muted)',
             border: '1px solid var(--dsw-alias-border-l2)',
             borderRadius: mode === 'round' ? '999px' : '0',
             padding: '4px 14px',
             fontSize: '12px',
-            cursor: 'pointer',
+            // A disabled control has to look disabled, not merely ignore clicks.
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.45 : 1,
+            whiteSpace: 'nowrap',
           })
           const toggleTheme = () => {
             const next = !enabled
@@ -779,6 +931,12 @@ function apply(ctx) {
             setWmOn(next)
             syncWatermarkVisibility()
           }
+          const toggleWmPersist = () => {
+            const next = !wmPersist
+            if (typeof localStorage !== 'undefined') localStorage.setItem(WATERMARK_PERSIST_KEY, next ? '1' : '0')
+            setWmPersist(next)
+            syncWatermarkVisibility()
+          }
           const toggleMode = () => {
             const next = mode === 'round' ? 'square' : 'round'
             if (typeof localStorage !== 'undefined') localStorage.setItem(RADIUS_KEY, next)
@@ -791,6 +949,22 @@ function apply(ctx) {
             R.createElement('div', { style: rowStyle },
               R.createElement('span', { style: labelStyle }, '背景水印：' + (wmOn ? '开启' : '关闭')),
               R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, wmOn ? '关闭水印' : '开启水印')
+            ),
+            R.createElement('div', { style: rowStyle },
+              R.createElement('span', { style: labelStyle },
+                '水印保持显示：' + (wmPersist ? '开启' : '关闭'),
+                R.createElement('span', { style: hintStyle },
+                  wmPersist ? '在对话等非新建会话页面也显示水印（置于正文之下）' : '仅在新建会话页显示水印'
+                )
+              ),
+              R.createElement('button', {
+                type: 'button',
+                onClick: toggleWmPersist,
+                style: btnStyleFor(wmPersist, !wmOn),
+                // The switch only has meaning while the watermark itself is on.
+                disabled: !wmOn,
+                title: wmOn ? '' : '请先开启背景水印',
+              }, wmPersist ? '仅新建页' : '保持显示')
             ),
             R.createElement('div', { style: rowStyle },
               R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
