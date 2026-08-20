@@ -14,6 +14,20 @@
   ],
   "license": "MIT",
   "main": "index.js",
+  "scripts": {
+    "check": "node check.js",
+    "selftest": "node selftest.js",
+    "test:contour": "node test/contour-render.test.js",
+    "test:settings": "node test/settings-rows.test.js",
+    "test:specks": "node test/contour-specks.test.js",
+    "test:watermark": "node test/watermark-stacking.test.js",
+    "test:smoothness": "node test/contour-smoothness.test.js",
+    "test:a11y": "node test/contour-a11y.test.js",
+    "test:coverage": "node test/contour-coverage.test.js",
+    "test:perf": "node test/contour-perf.test.js",
+    "test": "node check.js && node selftest.js && node test/settings-rows.test.js && node test/contour-render.test.js && node test/contour-specks.test.js && node test/watermark-stacking.test.js && node test/contour-smoothness.test.js && node test/contour-a11y.test.js && node test/contour-coverage.test.js && node test/contour-perf.test.js",
+    "shots": "node test/shoot.js"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

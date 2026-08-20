@@ -65,7 +65,13 @@ function apply(ctx) {
        is no headline to follow, so it is centred in the conversation column instead
        and mounted INSIDE that column rather than on <body>: a fixed body child
        paints above the message text (it has no z-index competitor to lose to),
-       which would wash out what the user is reading. See mountPointFor(). */
+       which would wash out what the user is reading. See mountPointFor().
+
+       Both placements must stay strictly BEHIND the app's own chrome. That is a
+       z-index question in the hero case and it is genuinely subtle -- see the long
+       note on s.zIndex in styleWatermark(); it is locked down by
+       test/watermark-stacking.test.js, which compares real screenshots because a
+       pointer-events:none layer cannot be hit-tested. */
     const WATERMARK_KEY = 'dsh-theme-endfield-watermark'
     const WATERMARK_PERSIST_KEY = 'dsh-theme-endfield-watermark-persist'
     const isWatermarkOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_KEY)) !== '0'
@@ -154,6 +160,12 @@ function apply(ctx) {
       s.textTransform = 'uppercase'
       s.userSelect = 'none'
       s.fontFamily = 'var(--dsw-font-family)'
+      /* Strength comes from a CSS variable, never a literal number, so the two
+         colour schemes can carry DIFFERENT alphas (defined in the stylesheet) and
+         a scheme flip simply re-resolves the variable — no observer, no repaint
+         logic here. An inline numeric opacity would also outrank the stylesheet,
+         which is exactly what made this value unthemeable before. */
+      s.opacity = 'var(--edge-wm-alpha)'
       if (mode === 'hero') {
         s.position = 'fixed'
         s.left = '0'
@@ -161,9 +173,23 @@ function apply(ctx) {
         s.top = ''
         s.bottom = ''
         s.height = '110px'
-        s.zIndex = '1'
+        /* z-index 0, NOT 1 — this is the fix for the wordmark painting on top of
+           the app's own popovers, and the cause was a z-index TIE:
+             .wSkVaW_composerHero is position:relative + z-index:1, so it IS a
+             stacking context and the model-select menu's z-index:20 is trapped
+             inside it; that 20 never competes at body level.
+           The mark used to be z-index:1 too — the same level as composerHero in
+           the root stacking context — and ties are broken by DOM order. Appended
+           to <body> last, the mark won every tie and painted over the whole
+           composer subtree, dropdown included (measured: 12027 changed pixels
+           inside the opaque menu box, matching 11002 px found in a real capture).
+           At 0 it loses to composerHero (1), the tabs (1) and the composer seat
+           (7), yet still paints ABOVE the app frame's own opaque bg-base: the
+           frame is position:relative with z-index:auto, so it creates no stacking
+           context, both boxes paint in the same step, and the mark is still the
+           later sibling. Verified by test/watermark-stacking.test.js. */
+        s.zIndex = '0'
         s.fontSize = '9.5vw'
-        s.opacity = '0.13'
         s.transform = ''
       } else {
         // Fill the conversation column and sit behind its content. z-index:-1 paints
@@ -178,20 +204,6 @@ function apply(ctx) {
         s.height = ''
         s.zIndex = '-1'
         s.fontSize = '9.5vw'
-        // Strength tuned by measurement on the real chat page, not guessed. Isolating
-        // the mark's own pixel contribution with an identical screenshot clip gave
-        // 0.07 -> 0.46%, 0.12 -> 2.9%, 0.18 -> 4.3%, 0.22 -> 5.2%, 0.30 -> 7.2%.
-        // Bounds found by review of real renders in BOTH color schemes:
-        //   0.07 is under the perceptual floor (#202120 over #101110 — 16/255,
-        //        ~1.17:1) and reads as "no watermark at all";
-        //   0.22 is legible but the big letter edges start to visually collide with
-        //        the body text sitting in front of them.
-        // 0.16 is the upper-middle of that window: ~1.54:1 in dark, ~1.40:1 in light
-        // (light needs slightly less because subtracting luminance from cream reads
-        // more readily than adding it to near-black). The mark stays at z-index:-1
-        // BEHIND the text, so foreground contrast is never reduced — only how much
-        // the background wordmark competes for attention changes.
-        s.opacity = '0.16'
         s.transform = ''
       }
     }
@@ -253,10 +265,817 @@ function apply(ctx) {
       window.addEventListener('resize', onWatermarkResize)
     }
     let watermarkObserver = null
+    /* Assigned to syncContour once that is defined below. Declared here as a real
+       mutable binding rather than referenced directly, because a `const` declared
+       later is in its temporal dead zone during apply() — and `typeof` does NOT
+       protect against a TDZ ReferenceError the way it does for an undeclared name. */
+    let contourSyncHook = () => {}
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
-      watermarkObserver = new MutationObserver(() => syncWatermarkVisibility())
+      watermarkObserver = new MutationObserver(() => {
+        syncWatermarkVisibility()
+        // The app frame does not exist during early boot and is replaced on some
+        // route changes, so the layer has to be able to (re)attach later. This
+        // fires on every DOM change on the page, including every streaming token,
+        // so the hook's first act is an O(1) "still attached?" check.
+        contourSyncHook()
+      })
       watermarkObserver.observe(document.body, { childList: true, subtree: true })
     }
+
+    /* ---------- contour (topographic) background ------------------------------
+       A signal-yellow topographic sheet behind the whole app, in the style of the
+       supplied reference: nested closed loops forming irregular "islands", thin
+       even strokes, organic spacing.
+
+       Two independent switches, each a no-op when off:
+         CONTOUR_KEY        the layer itself (default OFF — it is decoration).
+         CONTOUR_ANIM_KEY   the field slowly morphs (islands breathe/drift).
+
+       HOW IT IS DRAWN. The lines are real iso-contours of a scalar field, not a
+       tiled bitmap or a hand-drawn path set, because the field is what makes the
+       animation coherent: morphing one field and re-extracting gives loops that
+       merge and split like terrain, which a translated texture cannot do.
+         field  = sum of gaussian bumps of mixed sign (peaks AND basins)
+         lines  = marching squares at ~20 evenly spaced levels
+         joins  = segments stitched into polylines via EDGE IDS
+       Stitching turns thousands of loose segments into ~85 continuous strokes, so
+       the whole sheet is drawn as one canvas path instead of thousands of moveTo
+       pairs.
+
+       WHERE IT IS MOUNTED, and why this specific parent. Measured from the app's
+       own CSS, three elements paint an OPAQUE --dsw-alias-bg-base over any
+       body-level layer: the app frame ([class$='_frame']), the conversation column
+       ([class*='wSkVaW_root']) and the details column. A fixed <body> child would
+       therefore be invisible on every real page. The layer is instead a child of
+       the app FRAME, with those descendant fills neutralised to transparent while
+       the layer is mounted (the :has() guard makes all of it vanish when off).
+       The frame is already position:relative and creates NO stacking context, so
+       an inset:0 z-index:0 child sits above the frame's own background and below
+       every positioned descendant. The sidebar keeps its own colour because in
+       this theme --dsw-specific-sidebar-fill and --dsw-alias-bg-base are the same
+       value, so making it transparent changes no pixel except letting the sheet
+       through.
+
+       COST. One canvas, throttled, and completely idle when the switch is off:
+         static  one extraction, redrawn only on resize/scheme change;
+         animated ~24fps, measured in the verification renderer at 1440x900,
+                  step 10 (145x91 grid), 20 levels, 22 bumps:
+                    naive per-point evaluation  8.30 ms/frame
+                    bounded scatter (used here) 4.40 ms/frame  -> 1.9x faster
+                  Bounded scatter is the reason this is affordable: a gaussian is
+                  numerically dead past ~2.6 sigma, so each bump writes only the
+                  cells inside its own bounding box instead of every bump being
+                  evaluated at every grid point. */
+    const CONTOUR_KEY = 'dsh-theme-endfield-contour'
+    const CONTOUR_ANIM_KEY = 'dsh-theme-endfield-contour-anim'
+    // Default OFF (=== '1'): a background pattern must be opt-in.
+    const isContourOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_KEY)) === '1'
+    // Defaults ON, so enabling the layer shows the effect at once; it is
+    // meaningless while the layer itself is off.
+    const isContourAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_ANIM_KEY)) !== '0'
+
+    /* Deterministic PRNG (mulberry32), used with a PER-PAGE-LOAD seed.
+       Determinism is still required WITHIN one load: contourBuild() is re-run on
+       every resize, and if the bump layout were re-drawn from Math.random() each
+       time, dragging the window would reshuffle the whole landscape instead of
+       re-fitting it. So the seed is drawn once per load and reused for every
+       rebuild in that load.
+       It used to be a hardcoded constant, which made the "random" terrain the
+       SAME picture on every single visit -- measured: two independent page loads
+       produced 85 paths and 42497px of stroke, identical vertex for vertex. */
+    const contourRng = (seed) => {
+      let a = seed >>> 0
+      return () => {
+        a = (a + 0x6D2B79F5) >>> 0
+        let t = Math.imul(a ^ (a >>> 15), 1 | a)
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+      }
+    }
+    /* One seed per page load. crypto.getRandomValues() when available, else a
+       time/Math.random mix -- neither global is guaranteed in this sandbox, so both
+       are probed rather than assumed. Forced to a non-zero uint32 because
+       mulberry32 seeded with 0 is a legal but needlessly degenerate start. */
+    const contourSeed = (() => {
+      let s = 0
+      const c = (typeof crypto !== 'undefined' && crypto
+        && typeof crypto.getRandomValues === 'function') ? crypto : null
+      if (c !== null) {
+        try {
+          const buf = new Uint32Array(1)
+          c.getRandomValues(buf)
+          s = buf[0]
+        } catch (e) { s = 0 }
+      }
+      if (s === 0) {
+        const t = (typeof Date !== 'undefined' && typeof Date.now === 'function') ? Date.now() : 0
+        const r = (typeof Math !== 'undefined' && typeof Math.random === 'function') ? Math.random() : 0
+        s = ((t ^ Math.floor(r * 0xFFFFFFFF)) >>> 0)
+      }
+      return (s >>> 0) || 0x5eed4242
+    })()
+
+    let contourHost = null      // the frame element the layer is mounted in
+    let contourWrap = null      // positioned wrapper holding the canvas
+    let contourLineCv = null
+    let contourRaf = null
+    let contourRo = null        // ResizeObserver on the frame
+    let contourPaths = []       // stitched polylines
+    let contourGeom = null      // { w, h, cols, rows, step } of the current field
+    let contourField = null     // typed-array state, rebuilt only on resize
+    let contourLastField = -1   // timestamp of the last field extraction
+    let contourPhase = 0
+    /* Last applied animation state. Declared HERE, above every function that touches
+       it, because contourTeardown() assigns it and is itself reachable from
+       unmount() — a `let` declared further down would still be in its temporal dead
+       zone at that point and throw a ReferenceError. */
+    let contourSwitchSig = ''
+
+    const CONTOUR_STEP = 10     // grid pitch in px; 10 measured as the cost/detail knee
+    const CONTOUR_LEVELS = 20
+    const CONTOUR_SPAN = 1.45   // levels span [-SPAN, +SPAN]
+    const CONTOUR_FIELD_FPS = 24 // the field is the expensive half; 24 reads as fluid
+    /* Speck rejection. Marching squares legitimately produces two kinds of debris
+       that read as "mysterious little dots" rather than terrain:
+
+         1. OFF-CANVAS SLIVERS. The grid is ceil(w/step)+1 by ceil(h/step)+1, so its
+            last row/column lands ON or BEYOND the canvas edge (measured at
+            1432x753: +8px horizontally, +7px vertically). Contours found out there
+            are clipped to a stub, or to nothing at all: of 85 paths, 33 held
+            vertices outside the canvas and 3 had ZERO visible length -- pure cost,
+            no pixels.
+         2. APEX RINGS. Within a couple of grid cells of a gaussian peak the
+            innermost level closes into a tiny circle. Measured: 4 closed rings with
+            a bounding box under 26x26, the smallest 11.8x15.1px.
+
+       Both are judged against the sheet's OWN scale, not an absolute guess. The
+       inter-line gap was measured over 7322 samples: median 21px, p25 13px. A ring
+       whose whole bounding box is under one line spacing cannot read as a nested
+       island -- there is no room for a neighbour inside it -- so it reads as a dot.
+       MIN_VISIBLE_LEN removes fragments too short to be a stroke; dropping
+       everything under 40px costs 0.223% of total ink length, so this is debris
+       removal, not thinning. */
+    const CONTOUR_MIN_LEN = 40      // px of on-canvas stroke; below this it is a speck
+    const CONTOUR_MIN_RING_BOX = 21 // px; one median line spacing
+    /* keep() judges the RAW stitched polyline, but contourDrawLines() redraws it as
+       quadratic curves whose endpoints are segment MIDPOINTS (each original vertex
+       becomes a control point). The curve therefore has different vertices, and
+       measured against the real output a path can land slightly SHORTER or with a
+       slightly smaller box than its raw form -- so a raw measurement sitting just
+       above a threshold can still draw a speck. Observed exactly that: raw-clean
+       runs still emitted a 35.1px stroke and 15.4x17.8 / 2.1x20.1 rings.
+       The thresholds are therefore applied with headroom, and the curve shrinks a
+       path by at most one half-segment at each end (segments average 7.8px), so
+       ~1.35x on length and ~1.5x on ring box covers it with margin. */
+    const CONTOUR_KEEP_LEN = CONTOUR_MIN_LEN * 1.35
+    const CONTOUR_KEEP_RING = CONTOUR_MIN_RING_BOX * 1.5
+    /* Minimum level bands a coverage cell's field must sweep for that region to read
+       as terrain. Measured: at 1 the predicate passed cells that rendered 0.16-0.44%
+       ink (a level grazing one corner), so 1 is geometrically true but visually
+       blank. 3 is the smallest value that survived the sweep below without pushing
+       the re-roll loop to its attempt cap. */
+    const CONTOUR_MIN_CROSSINGS = 3
+
+    const isDarkScheme = () => typeof document !== 'undefined'
+      && document.body
+      && document.body.hasAttribute('data-ds-dark-theme')
+
+    /* Someone who asked the OS for less motion gets the pattern without the motion.
+       The boot plate already honours this (see finish()), so the contour sheet must
+       not be the one animated surface that ignores it. The layer itself still
+       renders — a static topographic texture is not motion — but the field morph
+       does not start. This is checked live rather than cached so changing the OS
+       setting takes effect on the next reconciliation. */
+    const prefersReducedMotion = () => typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const contourWantsAnim = () => isContourAnimOn() && !prefersReducedMotion()
+
+    /** Allocate the field + marching-squares scratch buffers for a viewport size. */
+    const contourBuild = (w, h) => {
+      /* ACCEPT-OR-REROLL. A random layout is not automatically a GOOD layout, and
+         this is the concrete lesson from making the seed per-load: the old fixed
+         seed had silently guaranteed a well-spread field, and once real randomness
+         arrived, some layouts left regions with no contour lines at all. Measured on
+         the 8x5 coverage grid ("near-empty" = under 0.6% ink):
+             independent uniform placement   5 failures in 12 seeds (up to 3 cells)
+             stratified placement alone      6 failures in 24 seeds (down to 0.00%)
+         Stratification fixes clumping but cannot fix the real mechanism: lines
+         appear only where the field CROSSES one of the 21 fixed levels, so a region
+         that is locally flat between two levels is blank no matter how the bumps
+         sit. Forcing a gradient steep enough to guarantee a crossing per cell would
+         take ~9.5 parallel lines across the width, which reads as stripes, not
+         terrain -- so distorting the field is the wrong lever.
+         Instead the candidate layout is CHECKED against the same invariant the test
+         asserts, and rejected if it fails. Each attempt is cheap (one field
+         evaluation on a coarse grid, no extraction, no drawing) and bounded, so the
+         worst case is a handful of evaluations at mount/resize time only.
+
+         The two halves are BOTH load-bearing, which was verified rather than
+         assumed -- with the validator in place but placement reverted to uniform,
+         4 of 8 loads exhausted the 12-attempt cap and shipped a fallback layout
+         (one run in four still rendered a blank cell). Stratification is what makes
+         an acceptable layout the common case: mean 2.5 candidates, max 6, never at
+         the cap. Validation is what makes it a guarantee. */
+      const attempts = 12
+      let best = null
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const cand = contourBuildCandidate(w, h, attempt)
+        const score = contourCoverageScore(cand, w, h)
+        if (best === null || score.worst > best.score.worst) best = { cand, score }
+        // Comfortably above the 0.6%-ink failure line, in field terms: every cell
+        // must contain a spread of values wider than one level gap, so at least one
+        // level is guaranteed to cross it.
+        if (score.ok) break
+      }
+      contourField = best.cand.field
+      contourGeom = { w, h, cols: best.cand.cols, rows: best.cand.rows, step: CONTOUR_STEP }
+    }
+
+    /* One candidate landscape. `salt` varies the draw per attempt while staying
+       deterministic for a given page load, so a resize reproduces the same accepted
+       layout instead of reshuffling the terrain under the user. */
+    const contourBuildCandidate = (w, h, salt) => {
+      const step = CONTOUR_STEP
+      const cols = Math.ceil(w / step) + 1
+      const rows = Math.ceil(h / step) + 1
+      const K = 22                       // bump count: tuned to the reference's island density
+      const rnd = contourRng((contourSeed + salt * 0x9E3779B1) >>> 0)
+      const m = Math.min(w, h)
+      const bx = new Float32Array(K), by = new Float32Array(K)
+      const ba = new Float32Array(K), bs = new Float32Array(K)
+      const dx = new Float32Array(K), dy = new Float32Array(K)
+      /* STRATIFIED placement, not independent uniform draws.
+
+         Uniform sampling clumps: measured over 12 random seeds it left up to 3
+         near-empty cells. Jittered grid instead -- the viewport is cut into a
+         near-square lattice of at least K cells and each bump is placed at a random
+         point inside its own cell. That keeps placement random while making a large
+         empty patch geometrically impossible. Cells are ordered by a Fisher-Yates
+         shuffle so the bump INDEX carries no positional bias: index drives
+         amplitude, radius and drift below, and walking cells in raster order would
+         correlate "left side of the screen" with "first sizes drawn".
+         The lattice spans the same -0.1..1.1 over-scan as before, so islands are
+         still cut by the viewport edges rather than all sitting fully inside. */
+      const gx = Math.max(1, Math.round(Math.sqrt(K * (w / Math.max(1, h)))))
+      const gy = Math.max(1, Math.ceil(K / gx))
+      const cells = []
+      for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) cells.push(i + j * gx)
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd() * (i + 1))
+        const t = cells[i]; cells[i] = cells[j]; cells[j] = t
+      }
+      const spanX = 1.2 * w, spanY = 1.2 * h
+      for (let k = 0; k < K; k++) {
+        const cell = cells[k % cells.length]
+        const ci = cell % gx
+        const cj = Math.floor(cell / gx)
+        // Random point inside this cell, in the over-scanned -0.1..1.1 space.
+        bx[k] = -0.1 * w + ((ci + rnd()) / gx) * spanX
+        by[k] = -0.1 * h + ((cj + rnd()) / gy) * spanY
+        // Mixed sign gives peaks AND basins; equal signs would read as one blob.
+        ba[k] = (rnd() < 0.5 ? -1 : 1) * (0.6 + rnd() * 0.9)
+        bs[k] = (0.05 + rnd() * 0.09) * m
+        dx[k] = rnd() * 2 - 1
+        dy[k] = rnd() * 2 - 1
+      }
+      /* Base undulation: three long, low-amplitude sine ridges spanning the whole
+         viewport. Reason this exists, from reviewing the first render: a sum of
+         gaussians decays to EXACTLY zero between islands, so the field there is
+         perfectly flat, no level ever crosses it, and the result had large blank
+         patches that exposed the construction. Real terrain has no such voids. The
+         ridges are far too gentle to create islands of their own — they just tilt
+         the whole sheet enough that contour lines keep running through the gaps,
+         which is what turns isolated bullseyes into one continuous landscape. */
+      const W2 = new Float32Array(9)
+      for (let i = 0; i < 3; i++) {
+        W2[i * 3] = (0.35 + rnd() * 0.5) * (Math.PI * 2) / Math.max(1, w)  // x freq
+        W2[i * 3 + 1] = (0.35 + rnd() * 0.5) * (Math.PI * 2) / Math.max(1, h) // y freq
+        W2[i * 3 + 2] = rnd() * Math.PI * 2                                 // phase
+      }
+      const hCount = (cols - 1) * rows
+      const eCount = hCount + cols * (rows - 1)
+      const field = {
+        cols, rows, step, K, bx, by, ba, bs, dx, dy, hCount, W2,
+        F: new Float32Array(cols * rows),
+        ex: new Float32Array(eCount),
+        ey: new Float32Array(eCount),
+        es: new Int32Array(eCount).fill(-1),
+        n1: new Int32Array(eCount).fill(-1),
+        n2: new Int32Array(eCount).fill(-1),
+        seen: new Int32Array(eCount).fill(-1),
+        touched: new Int32Array(eCount),
+        seq: 0,
+      }
+      return { field, cols, rows }
+    }
+
+    /* Score a candidate landscape on the SAME invariant the coverage test asserts,
+       but measured on the field rather than on rendered pixels -- no extraction and
+       no canvas needed, so a rejected attempt costs one coarse evaluation.
+
+       A cell gets contour lines when the field inside it SPANS level boundaries.
+       Counting them is the right question, but "at least one" is NOT enough, and
+       that was measured: with a 1-crossing bar, 4 blank cells still slipped through
+       and every one of them DID contain drawn vertices -- a level was crossed in
+       just a corner of the cell, yielding a few pixels of stroke against a 0.6%-ink
+       bar. A grazing crossing is geometrically present and visually absent.
+       CONTOUR_MIN_CROSSINGS therefore demands the field sweep several level bands in
+       every cell, which is what "this region reads as terrain" actually means. */
+    const contourCoverageScore = (cand, w, h) => {
+      const f = cand.field
+      // Evaluate at phase 0: the accepted layout must be sound as first painted.
+      const prev = contourField
+      contourField = f
+      contourEvaluate(0)
+      contourField = prev
+      const { cols, rows, F } = f
+      const GX = 8, GY = 5
+      const span = CONTOUR_SPAN
+      const levelStep = (span * 2) / CONTOUR_LEVELS
+      let worst = Infinity
+      let ok = true
+      for (let gy = 0; gy < GY; gy++) {
+        for (let gx = 0; gx < GX; gx++) {
+          const i0 = Math.floor(gx * (cols - 1) / GX), i1 = Math.ceil((gx + 1) * (cols - 1) / GX)
+          const j0 = Math.floor(gy * (rows - 1) / GY), j1 = Math.ceil((gy + 1) * (rows - 1) / GY)
+          let mn = Infinity, mx = -Infinity
+          for (let j = j0; j <= j1 && j < rows; j++) {
+            const row = j * cols
+            for (let i = i0; i <= i1 && i < cols; i++) {
+              const v = F[row + i]
+              if (v < mn) mn = v
+              if (v > mx) mx = v
+            }
+          }
+          // Clamp to the drawn level range: values beyond +/-SPAN produce no lines.
+          const lo = Math.max(mn, -span), hi = Math.min(mx, span)
+          // How many level boundaries fall inside this cell's clamped range.
+          const crossings = hi <= lo ? 0
+            : Math.floor(hi / levelStep) - Math.ceil(lo / levelStep) + 1
+          if (crossings < worst) worst = crossings
+          if (crossings < CONTOUR_MIN_CROSSINGS) ok = false
+        }
+      }
+      return { ok, worst }
+    }
+
+    /* Evaluate the field at `phase`. Bounded scatter: each bump adds itself only
+       within 2.6 sigma of its (drifting) centre. This is the measured 1.9x win
+       over evaluating every bump at every grid point. */
+    const contourEvaluate = (phase) => {
+      const f = contourField
+      if (f === null) return
+      const { cols, rows, step, K, bx, by, ba, bs, dx, dy, F, W2 } = f
+      /* Seed the sheet with the base undulation instead of zero, so the gaps
+         between islands still have a gradient for the levels to cross. Separable
+         evaluation: sin(a+b) is expanded so the y term is computed once per row
+         rather than once per cell, which keeps this pass cheap. */
+      const BASE = 0.62
+      for (let i = 0; i < 3; i++) {
+        const fx = W2[i * 3], fy = W2[i * 3 + 1], ph = W2[i * 3 + 2] + phase * 0.11
+        const amp = BASE / 3
+        for (let j = 0; j < rows; j++) {
+          const yb = fy * (j * step) + ph
+          const sy = Math.sin(yb), cy2 = Math.cos(yb)
+          const row = j * cols
+          for (let c2 = 0; c2 < cols; c2++) {
+            const xb = fx * (c2 * step)
+            // sin(xb + yb) without a per-cell sin() of the sum
+            const v = Math.sin(xb) * cy2 + Math.cos(xb) * sy
+            if (i === 0) F[row + c2] = amp * v
+            else F[row + c2] += amp * v
+          }
+        }
+      }
+      for (let k = 0; k < K; k++) {
+        const s = bs[k]
+        const amp = s * 0.55
+        const cx = bx[k] + Math.sin(phase * dx[k] + k * 1.7) * amp
+        const cy = by[k] + Math.cos(phase * dy[k] + k * 2.3) * amp
+        const a = ba[k]
+        const inv = 1 / (2 * s * s)
+        const rad = 2.6 * s
+        let i0 = Math.floor((cx - rad) / step)
+        let i1 = Math.ceil((cx + rad) / step)
+        let j0 = Math.floor((cy - rad) / step)
+        let j1 = Math.ceil((cy + rad) / step)
+        if (i0 < 0) i0 = 0
+        if (j0 < 0) j0 = 0
+        if (i1 > cols - 1) i1 = cols - 1
+        if (j1 > rows - 1) j1 = rows - 1
+        for (let j = j0; j <= j1; j++) {
+          const ddy = j * step - cy
+          const dy2 = ddy * ddy
+          const row = j * cols
+          for (let i = i0; i <= i1; i++) {
+            const ddx = i * step - cx
+            const q = (ddx * ddx + dy2) * inv
+            if (q < 6.76) F[row + i] += a * Math.exp(-q)
+          }
+        }
+      }
+    }
+
+    /* Marching squares for one level, stitched into polylines.
+       Adjacency uses EDGE IDS in two Int32Arrays rather than float-position
+       matching or a Map: a contour edge has at most two neighbours, adjacent cells
+       address the identical edge id, so joins are exact and allocation-free. */
+    const contourExtractLevel = (L, out) => {
+      const f = contourField
+      const { cols, rows, step, F, ex, ey, es, n1, n2, seen, touched, hCount } = f
+      const st = ++f.seq
+      let tn = 0
+      const pt = (id, i0, j0, i1, j1) => {
+        if (es[id] === st) return id
+        const a = F[j0 * cols + i0]
+        const b = F[j1 * cols + i1]
+        let t = (L - a) / (b - a)
+        if (!(t >= 0)) t = 0
+        else if (t > 1) t = 1
+        ex[id] = (i0 + (i1 - i0) * t) * step
+        ey[id] = (j0 + (j1 - j0) * t) * step
+        es[id] = st
+        n1[id] = -1
+        n2[id] = -1
+        touched[tn++] = id
+        return id
+      }
+      const link = (a, b) => {
+        if (n1[a] < 0) n1[a] = b
+        else if (n2[a] < 0) n2[a] = b
+        if (n1[b] < 0) n1[b] = a
+        else if (n2[b] < 0) n2[b] = a
+      }
+      for (let j = 0; j < rows - 1; j++) {
+        const row = j * cols
+        for (let i = 0; i < cols - 1; i++) {
+          const p0 = row + i
+          const p1 = p0 + 1
+          const p3 = p0 + cols
+          const p2 = p3 + 1
+          const v0 = F[p0], v1 = F[p1], v2 = F[p2], v3 = F[p3]
+          let mn = v0, mx = v0
+          if (v1 < mn) mn = v1; else if (v1 > mx) mx = v1
+          if (v2 < mn) mn = v2; else if (v2 > mx) mx = v2
+          if (v3 < mn) mn = v3; else if (v3 > mx) mx = v3
+          // Whole cell on one side of the level: nothing crosses it.
+          if (L <= mn || L > mx) continue
+          const idx = (v0 > L ? 1 : 0) | (v1 > L ? 2 : 0) | (v2 > L ? 4 : 0) | (v3 > L ? 8 : 0)
+          const T = () => pt(j * (cols - 1) + i, i, j, i + 1, j)
+          const B = () => pt((j + 1) * (cols - 1) + i, i, j + 1, i + 1, j + 1)
+          const Le = () => pt(hCount + j * cols + i, i, j, i, j + 1)
+          const Ri = () => pt(hCount + j * cols + i + 1, i + 1, j, i + 1, j + 1)
+          switch (idx) {
+            case 1: case 14: link(T(), Le()); break
+            case 2: case 13: link(T(), Ri()); break
+            case 3: case 12: link(Le(), Ri()); break
+            case 4: case 11: link(Ri(), B()); break
+            case 6: case 9: link(T(), B()); break
+            case 7: case 8: link(Le(), B()); break
+            // Saddles: two independent crossings in one cell.
+            case 5: link(T(), Ri()); link(Le(), B()); break
+            case 10: link(T(), Le()); link(Ri(), B()); break
+          }
+        }
+      }
+      const walk = (start) => {
+        const path = []
+        let cur = start
+        let prev = -1
+        for (;;) {
+          path.push(ex[cur], ey[cur])
+          seen[cur] = st
+          const a = n1[cur]
+          const b = n2[cur]
+          let nx = -1
+          if (a >= 0 && a !== prev && seen[a] !== st) nx = a
+          else if (b >= 0 && b !== prev && seen[b] !== st) nx = b
+          if (nx < 0) {
+            // Closed loop: step back onto the first point so the ring has no gap.
+            if ((a === start || b === start) && path.length > 4) path.push(ex[start], ey[start])
+            break
+          }
+          prev = cur
+          cur = nx
+        }
+        return path
+      }
+      /* Reject debris before it reaches the draw list. Judged on the path's
+         ON-CANVAS geometry, so an off-grid sliver with no visible pixels is
+         dropped even when its raw length looks respectable. See the note on
+         CONTOUR_MIN_LEN / CONTOUR_MIN_RING_BOX for the measurements behind both
+         thresholds. */
+      const W = contourGeom !== null ? contourGeom.w : 0
+      const H = contourGeom !== null ? contourGeom.h : 0
+      const keep = (p) => {
+        if (p.length < 8) return false
+        // Visible length, plus the bounding box of the part actually on screen.
+        let vis = 0
+        let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity
+        let seenIn = false
+        for (let k = 0; k < p.length; k += 2) {
+          const x = p[k], y = p[k + 1]
+          const inside = x >= 0 && x <= W && y >= 0 && y <= H
+          if (inside) {
+            seenIn = true
+            if (x < minx) minx = x
+            if (x > maxx) maxx = x
+            if (y < miny) miny = y
+            if (y > maxy) maxy = y
+          }
+          if (k >= 2) {
+            const px2 = p[k - 2], py2 = p[k - 1]
+            const prevIn = px2 >= 0 && px2 <= W && py2 >= 0 && py2 <= H
+            if (inside && prevIn) {
+              const dx = x - px2, dy = y - py2
+              vis += Math.sqrt(dx * dx + dy * dy)
+            }
+          }
+        }
+        if (!seenIn) return false            // entirely off-canvas: pure debris
+        if (vis < CONTOUR_KEEP_LEN) return false
+        /* A tiny CLOSED ring is an apex bullseye and reads as a dot. Open chains of
+           the same extent are left alone: they are the visible corner of a stroke
+           that continues off-canvas, and clipping one would punch a hole in a line
+           the user can see running to the edge. */
+        const gapx = p[0] - p[p.length - 2]
+        const gapy = p[1] - p[p.length - 1]
+        const closed = (gapx * gapx + gapy * gapy) < 4
+        if (closed && (maxx - minx) < CONTOUR_KEEP_RING
+          && (maxy - miny) < CONTOUR_KEEP_RING) return false
+        return true
+      }
+      // Open chains first (they have a free end), then whatever remains is a loop.
+      // Doing it in this order stops a ring being entered mid-way and split in two.
+      for (let k = 0; k < tn; k++) {
+        const id = touched[k]
+        if (seen[id] !== st && n2[id] < 0) {
+          const p = walk(id)
+          if (keep(p)) out.push(p)
+        }
+      }
+      for (let k = 0; k < tn; k++) {
+        const id = touched[k]
+        if (seen[id] !== st) {
+          const p = walk(id)
+          if (keep(p)) out.push(p)
+        }
+      }
+    }
+
+    const contourExtract = (phase) => {
+      if (contourField === null) return
+      contourEvaluate(phase)
+      contourPaths = []
+      const span = CONTOUR_SPAN
+      const stepL = (span * 2) / CONTOUR_LEVELS
+      for (let n = 0; n <= CONTOUR_LEVELS; n++) {
+        contourExtractLevel(-span + n * stepL, contourPaths)
+      }
+    }
+
+    /* Stroke colour. Values are measured, not guessed: on cream the pure signal
+       yellow #fff500 is almost invisible (it is nearly as light as the paper), so
+       light mode uses a darkened olive-yellow at higher alpha, while dark mode can
+       use the signal yellow itself at low alpha. Both were checked by sampling a
+       render: the pattern reads as texture and body text keeps full contrast
+       because the sheet sits BEHIND it. */
+    const contourStroke = () => (isDarkScheme()
+      ? 'rgba(255, 245, 0, 0.20)'
+      : 'rgba(190, 175, 0, 0.42)')
+
+    const contourDrawLines = () => {
+      if (contourLineCv === null || contourGeom === null) return
+      const ctx = contourLineCv.getContext('2d')
+      if (!ctx) return
+      const { w, h } = contourGeom
+      ctx.clearRect(0, 0, w, h)
+      ctx.strokeStyle = contourStroke()
+      ctx.lineWidth = 1
+      ctx.lineJoin = 'round'
+      /* Draw QUADRATIC CURVES through segment midpoints rather than straight lines
+         between vertices.
+
+         Why: marching squares emits at most one vertex per grid-cell edge, so with a
+         10px grid the polylines are genuinely faceted. Measured on the real output,
+         segments average 7.8 px and the turn angle at interior vertices reaches
+         41.7 degrees at p99 — visible corners on what should be a smooth contour.
+         ctx.lineJoin cannot help: a 1px stroke has no join area to round off.
+
+         Each original vertex becomes a Bezier CONTROL point while the curve passes
+         through the midpoints, which is C1-continuous — mathematically kink-free —
+         and, unlike subdivision, adds NO vertices. Measured against the alternatives:
+           chaikin x1   p99 41.7 -> 22.4 deg, 11.1k verts, +0.81 ms
+           chaikin x2   p99 41.7 -> 12.0 deg, 22.2k verts, +1.45 ms
+           this         no polyline corners left at all, 5.5k verts, +0.38 ms
+         It changed 22.1% of stroke pixels, i.e. it is doing real work, at the lowest
+         cost of the three and without inflating memory every frame. */
+      ctx.beginPath()
+      for (let i = 0; i < contourPaths.length; i++) {
+        const p = contourPaths[i]
+        const vc = p.length / 2
+        if (vc < 3) {
+          // Too short to curve; draw it straight.
+          ctx.moveTo(p[0], p[1])
+          for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1])
+          continue
+        }
+        ctx.moveTo(p[0], p[1])
+        for (let k = 1; k < vc - 1; k++) {
+          const mx = (p[k * 2] + p[(k + 1) * 2]) / 2
+          const my = (p[k * 2 + 1] + p[(k + 1) * 2 + 1]) / 2
+          ctx.quadraticCurveTo(p[k * 2], p[k * 2 + 1], mx, my)
+        }
+        // Final span: control at the penultimate vertex, ending exactly on the last
+        // one so a closed ring still meets its own start point.
+        ctx.quadraticCurveTo(p[(vc - 2) * 2], p[(vc - 2) * 2 + 1], p[(vc - 1) * 2], p[(vc - 1) * 2 + 1])
+      }
+      ctx.stroke()
+    }
+
+    /* The app frame: the only ancestor that is both position:relative and free of a
+       stacking context, so an inset:0 child paints above the frame's own background
+       and below every positioned descendant.
+
+       It is located via its CENTRE COLUMN child, not by matching '_frame' directly.
+       Verified against the installed bundles: '_frame' as a CSS-module suffix is
+       used by three different components (the layout frame, two user-question
+       components), so a [class*='_frame'] match is ambiguous and could attach the
+       layer to a question card. '_centerCol' and '_sidebarCol' are each unique to
+       the layout frame, so the frame is identified as their parent. Matching on the
+       module SUFFIX rather than the current hash keeps this working across an app
+       rebuild that rehashes the module. */
+    const findAppFrame = () => {
+      if (typeof document === 'undefined') return null
+      const col = document.querySelector('[class$="_centerCol"], [class*="_centerCol "]')
+      const frame = col !== null ? col.parentElement : null
+      if (frame === null) return null
+      const r = frame.getBoundingClientRect()
+      if (r.width === 0 || r.height === 0) return null
+      return frame
+    }
+
+    const contourSizeTo = (host) => {
+      const r = host.getBoundingClientRect()
+      const w = Math.max(1, Math.round(r.width))
+      const h = Math.max(1, Math.round(r.height))
+      if (contourGeom !== null && contourGeom.w === w && contourGeom.h === h) return false
+      contourBuild(w, h)
+      if (contourLineCv !== null) {
+        contourLineCv.width = w
+        contourLineCv.height = h
+        contourLineCv.style.width = w + 'px'
+        contourLineCv.style.height = h + 'px'
+      }
+      return true
+    }
+
+    const contourFrame = () => {
+      if (contourWrap === null) {
+        contourRaf = null
+        return
+      }
+      // Stop the loop entirely when animation is off: an "off" switch must cost
+      // nothing, not merely skip work inside a still-running rAF.
+      if (!contourWantsAnim()) {
+        contourRaf = null
+        return
+      }
+      const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now() : Date.now()
+      // Field pass, throttled: this is the expensive part (~4.4 ms measured).
+      if (contourLastField < 0 || now - contourLastField >= 1000 / CONTOUR_FIELD_FPS) {
+        const dt = contourLastField < 0 ? 0 : (now - contourLastField) / 1000
+        contourLastField = now
+        contourPhase += dt * 0.16      // slow drift: the sheet breathes, never churns
+        contourExtract(contourPhase)
+        contourDrawLines()
+      }
+      contourRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(contourFrame) : null
+    }
+
+    const contourStartLoop = () => {
+      if (contourRaf !== null) return
+      if (typeof requestAnimationFrame !== 'function') return
+      if (!contourWantsAnim()) return
+      contourLastField = -1
+      contourRaf = requestAnimationFrame(contourFrame)
+    }
+    const contourStopLoop = () => {
+      if (contourRaf !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(contourRaf)
+      contourRaf = null
+    }
+
+    const contourTeardown = () => {
+      contourStopLoop()
+      if (contourRo !== null) {
+        contourRo.disconnect()
+        contourRo = null
+      }
+      if (contourWrap !== null && contourWrap.parentNode) contourWrap.parentNode.removeChild(contourWrap)
+      contourWrap = null
+      contourLineCv = null
+      contourHost = null
+      contourPaths = []
+      contourField = null
+      contourGeom = null
+      // Nothing is drawn any more, so the next mount must re-apply the switch rather
+      // than trust a signature describing a canvas that no longer exists.
+      contourSwitchSig = ''
+    }
+
+    /* Reconcile the animation switch against what is currently on screen.
+       Separated from mounting because the two have very different costs and very
+       different triggers: mounting needs layout reads, while this only needs to run
+       when the switch actually changed. The last applied state is cached so the
+       common case (called from a subtree MutationObserver, i.e. on every streaming
+       token) is a single string compare. */
+    const contourApplySwitches = () => {
+      const anim = contourWantsAnim()
+      const sig = anim ? 'a' : '-'
+      if (sig === contourSwitchSig) return
+      contourSwitchSig = sig
+      // Animation just switched off: redraw once from the current phase so the
+      // static sheet is a complete picture rather than a half-updated frame.
+      if (!anim && contourWrap !== null && contourGeom !== null) contourDrawLines()
+      if (anim) contourStartLoop()
+      else contourStopLoop()
+    }
+
+    /** Build/refresh/remove the layer to match the switches and the current page. */
+    const syncContour = () => {
+      const on = isEnabled() && isContourOn()
+      if (!on) {
+        if (contourWrap !== null) contourTeardown()
+        contourSwitchSig = ''
+        return
+      }
+      /* Fast path for the ALREADY-MOUNTED case. This runs from a subtree
+         MutationObserver, so the common case must not touch layout: skipping
+         findAppFrame() here is what avoids forcing a synchronous reflow on every
+         mutation. Note it skips only the mount work — the switch reconciliation
+         below still runs, because that is how a settings toggle takes effect while
+         the layer is already on screen. */
+      const attached = contourWrap !== null && contourHost !== null
+        && contourWrap.parentNode === contourHost && contourHost.isConnected
+      if (!attached) {
+        const host = findAppFrame()
+        if (host === null) {
+          // The frame is not on screen yet (very early boot): a later mutation will
+          // bring us back here rather than the layer never mounting.
+          if (contourWrap !== null) contourTeardown()
+          contourSwitchSig = ''
+          return
+        }
+        if (contourWrap !== null && contourHost !== host) contourTeardown()
+        if (contourWrap === null) {
+          const wrap = document.createElement('div')
+          wrap.setAttribute('data-endfield-contour', '')
+          wrap.setAttribute('aria-hidden', 'true')
+          const line = document.createElement('canvas')
+          line.setAttribute('data-endfield-contour-lines', '')
+          wrap.appendChild(line)
+          contourLineCv = line
+          // First child: keeps the layer at the bottom of the frame's paint order.
+          if (host.firstChild) host.insertBefore(wrap, host.firstChild)
+          else host.appendChild(wrap)
+          contourWrap = wrap
+          contourHost = host
+          contourSizeTo(host)
+          contourExtract(contourPhase)
+          contourDrawLines()
+          // A fresh mount has drawn nothing switch-specific yet, so force the
+          // reconciliation below to run rather than trusting a stale signature.
+          contourSwitchSig = ''
+          if (typeof ResizeObserver !== 'undefined') {
+            contourRo = new ResizeObserver(() => {
+              if (contourHost === null) return
+              if (contourSizeTo(contourHost)) {
+                contourExtract(contourPhase)
+                contourDrawLines()
+              }
+            })
+            contourRo.observe(host)
+          }
+        }
+      }
+      contourApplySwitches()
+    }
+
+    /* Colour scheme changes are a token flip on <body>, not a resize, so the
+       stroke colour has to be re-derived when the attribute changes. */
+    let contourSchemeObserver = null
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
+      contourSchemeObserver = new MutationObserver(() => {
+        if (contourWrap === null) return
+        contourDrawLines()
+      })
+      contourSchemeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+    }
+
+    // Let the page observer declared above re-attach the layer as the app renders.
+    contourSyncHook = syncContour
 
     /* ---------- boot loading screen (settings-toggleable, default OFF) ----------
        Recreates the Endfield launcher boot screen: a full-viewport black plate with
@@ -608,6 +1427,35 @@ function apply(ctx) {
       [data-endfield-watermark] {
         pointer-events: none !important;
       }
+      /* ---------- watermark strength, per colour scheme ----------
+         One variable per scheme instead of one number in JS, because the two
+         schemes genuinely need different alphas and a scheme flip must re-resolve
+         with no JS involved.
+
+         Computed, not eyeballed — contrast of the composited ink against its own
+         background (the mark is always BEHIND text, so this measures how loudly
+         the decoration competes for attention, never foreground readability):
+
+              alpha | dark #101110  | light #e8e8e2
+              0.07  | 1.171 : 1     | 1.152 : 1
+              0.085 | 1.215 : 1     | 1.186 : 1
+              0.10  | 1.278 : 1     | 1.225 : 1
+              0.13  | 1.406 : 1     | 1.310 : 1   <- previous dark value
+              0.16  | 1.541 : 1     | 1.398 : 1   <- previous persist value
+
+         Dark mode is the reported problem: adding luminance to a near-black page
+         makes the wordmark read far louder than the same alpha subtracted from
+         cream, and at 0.13/0.16 it visibly cluttered the UI. Dark therefore drops
+         to 0.085 (1.215:1) — still clearly present, no longer competing. Light
+         keeps more strength (0.13) because cream needs it to register at all;
+         1.310:1 there looks quieter than 1.215:1 on black.
+         Floor is ~1.06:1, below which the mark reads as absent. */
+      body {
+        --edge-wm-alpha: 0.13;
+      }
+      body[data-ds-dark-theme] {
+        --edge-wm-alpha: 0.085;
+      }
       /* Translation-proof glyphs: the wordmark is drawn from the CSS 'content'
          property, not a DOM text node, so page translators (which walk text nodes)
          have nothing to rewrite — the brand name cannot be turned into "终末地" or
@@ -616,6 +1464,57 @@ function apply(ctx) {
         content: 'ENDFIELD';
         display: block;
         white-space: nowrap;
+      }
+      /* ================= contour background sheet =================
+         The layer is a child of the app frame. Every rule here is gated on the
+         frame actually CONTAINING the layer, so with the feature off none of it
+         matches and the app keeps its stock backgrounds exactly.
+
+         The wrapper is inset:0 / z-index:0 inside a frame that is position:relative
+         and creates no stacking context, so it paints above the frame's own
+         background and below every positioned descendant. */
+      [data-endfield-contour] {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      [data-endfield-contour] canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+      }
+      /* Why these three transparency rules exist. Measured from the app's own
+         stylesheets: the frame, the conversation column and the details column each
+         paint an OPAQUE var(--dsw-alias-bg-base). Any of them left opaque hides the
+         sheet completely on a real page, which is exactly why the existing
+         watermark has to mount INSIDE the conversation column instead.
+         Clearing them is safe and colour-neutral: the frame itself still supplies
+         bg-base underneath, so the composited result is unchanged except that the
+         contour is now visible through it. */
+      [class*='_frame']:has(> [data-endfield-contour]) {
+        background: transparent !important;
+      }
+      [class*='_frame']:has(> [data-endfield-contour]) [class*='wSkVaW_root'],
+      [class*='_frame']:has(> [data-endfield-contour]) [class*='ydkMvW_root'] {
+        background: transparent !important;
+      }
+      /* The sidebar reads --dsw-specific-sidebar-fill, which this theme sets to the
+         SAME value as --dsw-alias-bg-base, so clearing it shifts no colour and
+         simply lets the sheet run behind the sidebar as one continuous field. */
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_sidebarCol'] {
+        background: transparent !important;
+      }
+      /* The composer seat fades content out behind the input with a gradient to
+         bg-base. Left alone it would show as an opaque band cutting across the
+         sheet, so it fades to the base colour with alpha instead — same visual
+         falloff, but the contour stays continuous underneath. */
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_composerSeat'] {
+        background: linear-gradient(180deg,
+          rgba(0, 0, 0, 0) 0px,
+          color-mix(in srgb, var(--dsw-alias-bg-base) 82%, transparent) 36px) !important;
       }
       ::selection {
         color: #000;
@@ -1565,11 +2464,19 @@ function apply(ctx) {
       // The plate is styled by the theme stylesheet just torn down — an orphaned
       // plate would sit there as an unstyled black-less div, so drop it too.
       destroyLoader()
+      // Same reasoning for the contour sheet: its positioning and the background
+      // transparency rules it depends on both live in that stylesheet, so leaving
+      // it mounted would drop two raw canvases into the app's layout flow.
+      contourTeardown()
     }
 
     if (isEnabled()) {
       mount()
       syncWatermarkVisibility()
+      // The contour sheet needs the stylesheet mount() just inserted, and the app
+      // frame to exist; syncContour is a no-op until both are true and the
+      // watermark's MutationObserver retries it as the app renders.
+      syncContour()
       // Boot animation: only on a real page load, only when switched on, and only
       // after the stylesheet above exists (mount() inserted it).
       if (isLoaderOn()) runLoader()
@@ -1590,6 +2497,8 @@ function apply(ctx) {
           const [wmOn, setWmOn] = R.useState(isWatermarkOn())
           const [wmPersist, setWmPersist] = R.useState(isWatermarkPersistOn())
           const [loaderOn, setLoaderOn] = R.useState(isLoaderOn())
+          const [contourOn, setContourOn] = R.useState(isContourOn())
+          const [contourAnim, setContourAnim] = R.useState(isContourAnimOn())
           const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
@@ -1611,8 +2520,20 @@ function apply(ctx) {
             const next = !enabled
             if (typeof localStorage !== 'undefined') localStorage.setItem(ENABLED_KEY, next ? '1' : '0')
             setEnabled(next)
-            if (next) { mount(); syncWatermarkVisibility() }
+            if (next) { mount(); syncWatermarkVisibility(); syncContour() }
             else { unmount(); syncWatermarkVisibility() }
+          }
+          const toggleContour = () => {
+            const next = !contourOn
+            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_KEY, next ? '1' : '0')
+            setContourOn(next)
+            syncContour()
+          }
+          const toggleContourAnim = () => {
+            const next = !contourAnim
+            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_ANIM_KEY, next ? '1' : '0')
+            setContourAnim(next)
+            syncContour()
           }
           const toggleWm = () => {
             const next = !wmOn
@@ -1648,12 +2569,43 @@ function apply(ctx) {
             else document.body.classList.remove('theme-endfield-round')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
+          // These rows are passed as an ARRAY, so each one needs a stable key or
+          // React logs a key warning for the whole list on every render.
           return R.createElement('div', { style: pageStyle }, [
-            R.createElement('div', { style: rowStyle },
+            R.createElement('div', { key: 'contour', style: rowStyle },
+              R.createElement('span', { style: labelStyle },
+                '等高线背景：' + (contourOn ? '开启' : '关闭'),
+                R.createElement('span', { style: hintStyle },
+                  contourOn ? '信号黄地形等高线铺满界面底层（置于所有内容之下）' : '默认关闭；开启后在界面底层绘制等高线地形纹理'
+                )
+              ),
+              R.createElement('button', { type: 'button', onClick: toggleContour, style: btnStyleFor(contourOn) }, contourOn ? '关闭背景' : '开启背景')
+            ),
+            R.createElement('div', { key: 'contour-anim', style: rowStyle },
+              R.createElement('span', { style: labelStyle },
+                '动态等高线：' + (contourAnim ? '开启' : '关闭'),
+                R.createElement('span', { style: hintStyle },
+                  // Say so when the OS preference is overriding the switch, rather
+                  // than letting it look like the toggle is broken.
+                  (contourAnim && prefersReducedMotion())
+                    ? '系统已开启「减少动态效果」，当前保持静态'
+                    : (contourAnim ? '等高线缓慢流动变形（约 24fps，关闭后为静态图案）' : '静态等高线，不做任何逐帧计算')
+                )
+              ),
+              R.createElement('button', {
+                type: 'button',
+                onClick: toggleContourAnim,
+                style: btnStyleFor(contourAnim, !contourOn),
+                // Only meaningful while the layer itself is on.
+                disabled: !contourOn,
+                title: contourOn ? '' : '请先开启等高线背景',
+              }, contourAnim ? '切为静态' : '开启动态')
+            ),
+            R.createElement('div', { key: 'watermark', style: rowStyle },
               R.createElement('span', { style: labelStyle }, '背景水印：' + (wmOn ? '开启' : '关闭')),
               R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, wmOn ? '关闭水印' : '开启水印')
             ),
-            R.createElement('div', { style: rowStyle },
+            R.createElement('div', { key: 'watermark-persist', style: rowStyle },
               R.createElement('span', { style: labelStyle },
                 '水印保持显示：' + (wmPersist ? '开启' : '关闭'),
                 R.createElement('span', { style: hintStyle },
@@ -1669,7 +2621,7 @@ function apply(ctx) {
                 title: wmOn ? '' : '请先开启背景水印',
               }, wmPersist ? '仅新建页' : '保持显示')
             ),
-            R.createElement('div', { style: rowStyle },
+            R.createElement('div', { key: 'loader', style: rowStyle },
               R.createElement('span', { style: labelStyle },
                 '启动加载动画：' + (loaderOn ? '开启' : '关闭'),
                 R.createElement('span', { style: hintStyle },
@@ -1689,11 +2641,11 @@ function apply(ctx) {
                 R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, loaderOn ? '关闭动画' : '开启动画')
               )
             ),
-            R.createElement('div', { style: rowStyle },
+            R.createElement('div', { key: 'theme', style: rowStyle },
               R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
               R.createElement('button', { type: 'button', onClick: toggleTheme, style: btnStyleFor(enabled) }, enabled ? '关闭主题' : '开启主题')
             ),
-            R.createElement('div', { style: rowStyle },
+            R.createElement('div', { key: 'radius', style: rowStyle },
               R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
               R.createElement('button', { type: 'button', onClick: toggleMode, style: btnStyleFor(mode === 'round') }, mode === 'round' ? '切换直角' : '切换圆角')
             ),
@@ -1713,6 +2665,10 @@ function apply(ctx) {
       if (watermarkEl && watermarkEl.parentNode) watermarkEl.parentNode.removeChild(watermarkEl)
       // The plate owns a rAF handle and a fixed DOM node; both must go with the run.
       destroyLoader()
+      // The contour layer owns a rAF handle, a ResizeObserver, a MutationObserver
+      // and two canvases — every one of them has to go with the run.
+      contourTeardown()
+      if (contourSchemeObserver) contourSchemeObserver.disconnect()
       disposeSettings()
     })
   }
