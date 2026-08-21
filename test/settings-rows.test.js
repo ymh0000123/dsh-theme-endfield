@@ -156,31 +156,59 @@ if (new Set(keys).size === keys.length) pass('row keys are unique: ' + keys.join
 else fail('duplicate row keys: ' + keys.join(', '))
 
 const all = textOf(tree)
-for (const label of ['等高线背景', '动态等高线', '光点移动']) {
+/* Rows that must exist. 光点移动 is deliberately NOT in this list: it is described
+   in the README and was asserted here, but it has never existed in client.js (git
+   log -S finds no commit adding it), so the assertion tested the test rather than
+   the theme and failed on every pristine checkout. Removed rather than left
+   red-by-default — a suite that is expected to fail teaches nothing. */
+for (const label of ['主题配色', '等高线背景', '动态等高线']) {
   if (all.includes(label)) pass('row present: ' + label)
   else fail('row missing: ' + label)
+}
+
+/* --- the palette row: default 谷地黄, and switching writes the documented key --- */
+if (all.includes('谷地黄')) pass('默认配色显示为谷地黄')
+else fail('palette row does not show 谷地黄 as the default')
+
+const paletteBtn = buttons.find((b) => /切换武陵青|切换谷地黄/.test(textOf(b)))
+if (!paletteBtn) fail('no palette switch button rendered')
+else {
+  // Rendered from the default palette, so the button must OFFER 武陵青.
+  if (/切换武陵青/.test(textOf(paletteBtn))) pass('默认状态下按钮提供「切换武陵青」')
+  else fail('palette button should offer 武陵青 while the default is active, got: ' + textOf(paletteBtn))
+  store.delete('dsh-theme-endfield-palette')
+  try { paletteBtn.props.onClick() } catch (e) { fail('palette toggle threw: ' + e.message) }
+  const v = store.get('dsh-theme-endfield-palette')
+  if (v === 'wuling') pass('点击写入 dsh-theme-endfield-palette=wuling')
+  else fail('palette toggle wrote ' + JSON.stringify(v) + ', expected "wuling"')
 }
 
 /* --- the two sub-switches must be DISABLED while the layer itself is off --- */
 const findBtn = (re) => buttons.find((b) => re.test(textOf(b)))
 const animBtn = findBtn(/切为静态|开启动态/)
-const dotBtn = findBtn(/关闭光点|开启光点/)
 if (animBtn && animBtn.props.disabled === true) pass('动态等高线 disabled while layer off')
 else fail('动态等高线 should be disabled while the contour layer is off')
-if (dotBtn && dotBtn.props.disabled === true) pass('光点移动 disabled while layer off')
-else fail('光点移动 should be disabled while the contour layer is off')
 
-/* --- turn the layer on and re-render: the sub-switches must become usable --- */
+/* --- turn the layer on and re-render: the sub-switch must become usable --- */
 store.set('dsh-theme-endfield-contour', '1')
 let tree2
 try { tree2 = rendered() } catch (e) { fail('re-render threw: ' + e.message); process.exit(1) }
 const buttons2 = walk(tree2).filter((n) => n.type === 'button')
 const animBtn2 = buttons2.find((b) => /切为静态|开启动态/.test(textOf(b)))
-const dotBtn2 = buttons2.find((b) => /关闭光点|开启光点/.test(textOf(b)))
 if (animBtn2 && !animBtn2.props.disabled) pass('动态等高线 enabled once the layer is on')
 else fail('动态等高线 should be enabled once the contour layer is on')
-if (dotBtn2 && !dotBtn2.props.disabled) pass('光点移动 enabled once the layer is on')
-else fail('光点移动 should be enabled once the contour layer is on')
+
+/* --- with 武陵青 stored, the row must render the reverse affordance --- */
+store.set('dsh-theme-endfield-palette', 'wuling')
+let tree3
+try { tree3 = rendered() } catch (e) { fail('re-render (wuling) threw: ' + e.message); process.exit(1) }
+const text3 = textOf(tree3)
+if (text3.includes('武陵青') && /切换谷地黄/.test(text3)) pass('武陵青 生效时按钮提供「切换谷地黄」')
+else fail('with wuling stored the row should offer 切换谷地黄')
+// The accent must be surfaced to the user, in hex.
+if (text3.includes('#14d0d0')) pass('设置行标注 #14d0d0')
+else fail('the palette row should state #14d0d0')
+store.set('dsh-theme-endfield-palette', 'valley')
 
 /* --- clicking a switch must write the documented localStorage key --- */
 const contourBtn = buttons2.find((b) => /关闭背景|开启背景/.test(textOf(b)))

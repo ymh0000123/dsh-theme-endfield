@@ -56,6 +56,37 @@ function apply(ctx) {
       else document.body.classList.remove('theme-endfield-round')
     }
 
+    /* ---------- accent palette: 谷地黄 (default) / 武陵青 ----------
+       The palette is ONE class on <body>; the stylesheet defines both variable
+       sets, so switching is a class flip with no restyling work here. Because the
+       app applies its theme tokens as inline body styles and this theme's token
+       overrides are var(--edge-accent) references, those tokens re-resolve on the
+       same flip — no JS repaint, no theme.overrideTokens() re-registration.
+
+       'valley' (谷地黄, signal yellow) is the DEFAULT, so an unset key and any
+       unrecognised value both mean yellow. Only the exact string 'wuling' selects
+       武陵青, which keeps a corrupt localStorage value from silently changing the
+       shipped look.
+
+       The one surface a class cannot reach is the contour canvas, which is painted
+       by JS — hence syncPalette() redraws it, and the observer below catches a flip
+       made in another tab or by the browser restoring state. */
+    const PALETTE_KEY = 'dsh-theme-endfield-palette'
+    const PALETTE_CLASS = 'theme-endfield-wuling'
+    const readPalette = () => ((typeof localStorage !== 'undefined' && localStorage.getItem(PALETTE_KEY)) === 'wuling' ? 'wuling' : 'valley')
+    /* Read from the DOM, not from storage: the canvas must match what is actually
+       on screen. While the theme is switched off the class is absent, so the sheet
+       keeps its default palette instead of following an ignored preference. */
+    const isWulingPalette = () => typeof document !== 'undefined'
+      && document.body !== null
+      && document.body.classList.contains(PALETTE_CLASS)
+    const syncPaletteClass = () => {
+      if (typeof document === 'undefined' || document.body === null) return
+      // The class only applies while the theme owns the page; unmount() drops it.
+      if (isEnabled() && readPalette() === 'wuling') document.body.classList.add(PALETTE_CLASS)
+      else document.body.classList.remove(PALETTE_CLASS)
+    }
+
     /* ---------- background ENDFIELD watermark (settings-toggleable) ----------
        Two independent switches:
          WATERMARK_KEY  — the watermark itself (default ON), shown on the hero page.
@@ -840,10 +871,44 @@ function apply(ctx) {
        light mode uses a darkened olive-yellow at higher alpha, while dark mode can
        use the signal yellow itself at low alpha. Both were checked by sampling a
        render: the pattern reads as texture and body text keeps full contrast
-       because the sheet sits BEHIND it. */
-    const contourStroke = () => (isDarkScheme()
-      ? 'rgba(255, 245, 0, 0.20)'
-      : 'rgba(190, 175, 0, 0.42)')
+       because the sheet sits BEHIND it.
+
+       A canvas stroke cannot be a CSS variable — this is the ONE accent surface the
+       palette switch cannot reach declaratively, so the palette is read here and
+       the sheet is redrawn when it changes (see the palette MutationObserver).
+
+       Written as 8-DIGIT HEX (#RRGGBBAA) so every accent value in this package is
+       expressed the same way. Verified in a real browser rather than assumed:
+       canvas normalises '#14d0d045' to exactly the rgba() it would have parsed
+       (measured fillStyle 'rgba(20, 208, 208, 0.267)', painted pixel alpha 68/255).
+
+       The cyan alphas are NOT copied from the yellow ones. Equal alpha does not
+       mean equal presence: cyan composited at yellow's 0.20 over #101110 measured
+       1.332:1 against the yellow's 1.734:1 — a 23% drop, which reads as the
+       feature having quietly weakened on switch. Each palette is therefore tuned
+       to the same composited contrast rather than the same number, and
+       test/palette-contrast.test.js fails if the two drift more than 20% apart:
+         谷地黄 dark  #fff50033  (0.20)  1.734:1
+         谷地黄 light #beaf006b  (0.42)  1.291:1
+         武陵青 dark  #14d0d045  (0.27)  1.755:1  (+1.2%)
+         武陵青 light #14d0d07a  (0.48)  1.289:1  (-0.2%)
+       Both cyan alphas came DOWN from the first version (0.32 / 0.30 at the old
+       darker accent): a brighter stroke composites stronger, so holding the same
+       on-screen strength means less of it. Light-mode cyan still needs no darkened
+       variant the way yellow does, because it is not close to paper-white. The tags
+       below are what the test greps for, so renaming them breaks the check loudly
+       instead of silently. */
+    const contourStroke = () => {
+      const cyan = isWulingPalette()
+      if (isDarkScheme()) {
+        // EDGE_STROKE_DARK_CYAN: #14d0d045
+        // EDGE_STROKE_DARK_YELLOW: #fff50033
+        return cyan ? '#14d0d045' : '#fff50033'
+      }
+      // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
+      // EDGE_STROKE_LIGHT_YELLOW: #beaf006b
+      return cyan ? '#14d0d07a' : '#beaf006b'
+    }
 
     const contourDrawLines = () => {
       if (contourLineCv === null || contourGeom === null) return
@@ -946,7 +1011,23 @@ function apply(ctx) {
         ? performance.now() : Date.now()
       // Field pass, throttled: this is the expensive part (~4.4 ms measured).
       if (contourLastField < 0 || now - contourLastField >= 1000 / CONTOUR_FIELD_FPS) {
-        const dt = contourLastField < 0 ? 0 : (now - contourLastField) / 1000
+        /* First pass after a (re)start. contourLastField is -1 there, and the
+           elapsed time is genuinely unknown — the switch may have been off for
+           minutes, and feeding that gap in as dt would teleport the sheet instead
+           of drifting it. It used to use dt = 0, which avoids the teleport but
+           makes the frame a guaranteed NO-OP: the field is re-extracted and
+           redrawn at the phase it already had, costing ~4.4 ms to produce
+           byte-identical pixels.
+           That is not merely wasteful, it is a visible defect when frames are
+           scarce. Measured with an instrumented build: after re-enabling the
+           switch, the animation produced ZERO changed pixels across a 700 ms
+           window (the renderer delivered exactly one rAF callback in that time,
+           and the no-op consumed it), then resumed normally once a later callback
+           arrived. Advancing by ONE NOMINAL FRAME instead keeps the anti-teleport
+           clamp while making every frame do real work. */
+        const dt = contourLastField < 0
+          ? 1 / CONTOUR_FIELD_FPS
+          : (now - contourLastField) / 1000
         contourLastField = now
         contourPhase += dt * 0.16      // slow drift: the sheet breathes, never churns
         contourExtract(contourPhase)
@@ -1064,14 +1145,19 @@ function apply(ctx) {
     }
 
     /* Colour scheme changes are a token flip on <body>, not a resize, so the
-       stroke colour has to be re-derived when the attribute changes. */
+       stroke colour has to be re-derived when the attribute changes.
+       The palette is a CLASS on the same element and has exactly the same
+       consequence for the canvas, so one observer watches both: 'class' is added to
+       the filter rather than building a second observer. This is also what makes a
+       palette change in ANOTHER tab (or a browser restoring the class) repaint the
+       sheet, not just a click in this tab's settings panel. */
     let contourSchemeObserver = null
     if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
       contourSchemeObserver = new MutationObserver(() => {
         if (contourWrap === null) return
         contourDrawLines()
       })
-      contourSchemeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+      contourSchemeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'class'] })
     }
 
     // Let the page observer declared above re-attach the layer as the app renders.
@@ -1363,7 +1449,14 @@ function apply(ctx) {
       },
       '--dsw-alias-brand-primary': {
         light: '#101110',
-        dark: '#fff500',
+        /* The one ACCENT-carrying token in this layer, so it is the one that must
+           not be a literal. A token value may itself be a var() reference: the app
+           writes these as inline properties on <body>, the palette variables are
+           declared on <body> too, so the reference resolves on the same element and
+           re-resolves when the palette class flips — no re-registration of this
+           layer, no JS repaint. Verified by test/palette-switch.test.js, which
+           caught exactly this token still reading #fff500 after a flip. */
+        dark: 'var(--edge-accent)',
       },
       '--dsw-alias-label-primary': {
         light: '#101110',
@@ -1395,8 +1488,132 @@ function apply(ctx) {
       :root {
         --dsw-font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
         --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
-        --edge-signal: #fff500;
-        --edge-signal-dim: rgba(255, 245, 0, 0.7);
+      }
+      /* ================= accent palette =================================
+         Every accent value in this stylesheet reads from the variables below
+         instead of a literal, so the whole theme repaints from ONE declaration
+         block. Two palettes ship:
+
+           谷地黄 (default)  signal yellow  #fff500 — the Endfield site accent
+           武陵青            teal-cyan      #14d0d0
+
+         WHY THIS BLOCK IS ON body AND NOT :root. The app applies its theme
+         tokens as INLINE STYLES ON <body> (dsh-client-ui-layout does
+         body.style.setProperty(name, value) for every token in the snapshot).
+         A custom property declared at :root that substitutes one of those
+         tokens is resolved AT THE html ELEMENT, where the token does not
+         exist, so it becomes guaranteed-invalid and computes to nothing.
+         That was not theory: the shipped --edge-line / --edge-paper /
+         --edge-soft were declared at :root and measured EMPTY in a real
+         browser, which silently disabled the themed scrollbar
+         (scrollbar-color computed to 'auto') and left the table/hairline
+         rules falling back. Moving them onto body is what makes them resolve
+         (see test/probe-edge-line.js).
+
+         The same fact is what makes the palette switch free: the theme's
+         token overrides are values like var(--edge-accent), body carries the
+         palette class, so flipping the class re-resolves every token and
+         every rule below with NO JavaScript repaint at all — verified in a
+         real browser (test/probe-css.js), not assumed.
+
+         --edge-accent-rgb is the same colour as a bare comma list, because
+         rgba() needs channels rather than a hex; substituting a comma-list
+         custom property inside rgba() is legal and was verified in the same
+         probe. Keeping both in one place is why the ~30 translucent washes
+         did not have to become 60 declarations.
+
+         Values are MEASURED, not chosen — see test/palette-contrast.test.js,
+         which fails the build if any of them stops clearing its bar:
+           ink #101110 on 谷地黄 16.50:1 · on 武陵青 6.62:1   (AA, solid chips)
+           accent as dark-mode icon ink   15.26:1  ·  6.12:1  (>=3 icon floor) */
+      body {
+        --edge-accent: #fff500;
+        --edge-accent-rgb: 255, 245, 0;
+        /* Hover/pressed step of the accent, still carrying ink-coloured text:
+           谷地黄 13.60:1 · 武陵青 5.31:1. */
+        --edge-accent-deep: #e8e000;
+        /* The one place the accent must survive on CREAM as a fill (the light
+           deepseek-450 slot): pure signal yellow is nearly paper-white there,
+           so light mode uses a darkened step of the same hue. */
+        --edge-accent-onpaper: #d9c700;
+        /* Turn-status gradient text stops — see the long note on that rule.
+           Gradient text paints glyphs with EVERY stop, and reduced-motion pins
+           the mid band permanently inside the letters, so all four clear AA
+           against both surfaces of their mode:
+             谷地黄 light #6b5d00 5.35 / mid #3f3600 9.82
+                    dark  #fff500 15.26 / mid #a08a00 5.11
+             武陵青 light #006a6a 5.22 / mid #003f3f 9.58
+                    dark  #14d0d0 9.14 / mid #7ee7e7 12.06 */
+        --edge-status-light: #6b5d00;
+        --edge-status-light-mid: #3f3600;
+        --edge-status-dark: #fff500;
+        --edge-status-dark-mid: #a08a00;
+        /* Hero backdrop glow alpha, per scheme. These are the measured values
+           from the note on that rule: the replacement must not change how deep
+           the hero reads compared with the app's own #6187D8 at 8%. */
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.05;
+      }
+      /* ---------- 武陵青 (teal-cyan, #14d0d0) ----------
+         Only the palette changes here; paper, ink, borders and the semantic
+         state colours (error red, success green, warn amber) are shared, so
+         this block is exactly the set of values that carry the accent hue.
+
+         BRIGHTNESS. The first version shipped #0daaaa (the literal
+         rgb(13, 170, 170) that was asked for) and read as too dark next to the
+         signal yellow it alternates with — measured, that is not a matter of
+         taste: relative luminance was 31.7% against the yellow's 86.6%, so on a
+         near-black page the cyan chip carried barely a third of the presence.
+         #14d0d0 keeps the same hue axis (R low, G == B, so it is still the same
+         teal rather than drifting toward grey-cyan) and lifts luminance to
+         49.8% — 57% brighter — while every measured invariant still holds:
+           ink #101110 on the chip   6.62 -> 9.88:1   (AA, and now better)
+           chip as dark-mode ink     6.62 -> 9.88:1   (icon floor is 3)
+         It is deliberately NOT taken to the yellow's luminance: past ~#16dcdc
+         the light-mode chip stops separating from cream (1.39:1 at #16dcdc
+         versus 1.56:1 here), and a cyan that pale reads white-ish rather than
+         teal. This is the brightest step that still looks like 武陵青 in both
+         schemes. */
+      body.theme-endfield-wuling {
+        --edge-accent: #14d0d0;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. Derived from
+           the hex above and kept beside it so the two cannot drift. */
+        --edge-accent-rgb: 20, 208, 208;
+        /* Hover step. Chosen to match the PERCEPTUAL drop the yellow palette uses
+           (#fff500 -> #e8e000 is ΔY 19.9) rather than a copied percentage, so
+           hover feels equally strong in both palettes: ΔY 19.7 here, 7.72:1 under
+           ink text. */
+        --edge-accent-deep: #10b8b8;
+        /* Cyan is still far darker than yellow under ink (9.88 vs 16.50), so it
+           needs no separate on-cream step — the accent itself reads on paper. */
+        --edge-accent-onpaper: #14d0d0;
+        /* Light mode dips deep, exactly as the yellow palette does: on cream no
+           tint above #007070 clears AA on both surfaces, and that is a property of
+           the paper, not of how bright the accent is — so these two are unchanged
+           by the brightening. */
+        --edge-status-light: #006a6a;
+        --edge-status-light-mid: #003f3f;
+        --edge-status-dark: #14d0d0;
+        /* Dark mode LIFTS for its mid band instead of dipping like yellow's
+           #a08a00: a darker cyan mid stop measured 3.54:1 and failed, because cyan
+           at this lightness has less headroom below it than yellow does. Raised
+           with the accent so the shimmer keeps a visible band: #7ee7e7 is 12.06:1
+           and ΔY 40.6 from the accent (the old #4fd6d6 would now sit only ΔY 27.8
+           away and read flatter). */
+        --edge-status-dark-mid: #7ee7e7;
+        /* Cyan carries real luminance where yellow is nearly neutral on cream, so
+           the glow alphas are measured rather than inherited. Both stay inside the
+           depth of the #6187D8 glow they replace (budget: light 9.90, dark 11.28).
+           Dark comes down from 0.05 to 0.04 because the brighter accent lifts a
+           near-black page faster: 0.05 now measures |ΔY| 7.6 where the old cyan
+           measured 6.0. */
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.04;
+      }
+      /* Token-derived aliases. These MUST be on body, not :root — see above. */
+      body {
+        --edge-signal: var(--edge-accent);
+        --edge-signal-dim: rgba(var(--edge-accent-rgb), 0.7);
         --edge-paper: var(--dsw-alias-bg-base);
         --edge-panel: var(--dsw-alias-bg-layer-1);
         --edge-line: var(--dsw-alias-border-l1);
@@ -1518,7 +1735,7 @@ function apply(ctx) {
       }
       ::selection {
         color: #000;
-        background: var(--edge-signal, #fff500);
+        background: var(--edge-signal, var(--edge-accent));
       }
       /* Square corners (default): zero EVERY classed element, then restore circles/pills below.
          body.theme-endfield-round disables all of this and restores app-native rounding. */
@@ -1568,7 +1785,7 @@ function apply(ctx) {
         --dsw-static-deepseek-200: #d8d9d5;
         --dsw-static-deepseek-300: #c8cac5;
         --dsw-static-deepseek-400: #757874;
-        --dsw-static-deepseek-450: #d9c700;
+        --dsw-static-deepseek-450: var(--edge-accent-onpaper);
         --dsw-static-deepseek-500: #101110;
         --dsw-static-deepseek-600: #101110;
         --dsw-static-deepseek-800: #3a3c38;
@@ -1577,13 +1794,13 @@ function apply(ctx) {
         --dsw-alias-button-info-fill: #101110;
         --dsw-alias-button-info-hover: #2a2b28;
         --dsw-alias-state-business-primary: #101110;
-        --dsw-alias-state-business-tertiary: rgba(255, 245, 0, 0.14);
+        --dsw-alias-state-business-tertiary: rgba(var(--edge-accent-rgb), 0.14);
         --dsw-alias-brand-primary-new-colorprimary-new-color: #101110;
         --dsw-alias-label-primary-bluish: #101110;
         --dsw-specific-bubble: #f2f2ec;
         --dsw-specific-bubble-highlight: #dcddd6;
         --dsw-specific-sidebar-nav-item-active-accent: #101110;
-        --dsw-alias-interactive-bg-hover-accent: rgba(255, 245, 0, 0.14);
+        --dsw-alias-interactive-bg-hover-accent: rgba(var(--edge-accent-rgb), 0.14);
         --dsw-alias-border-l3: #b6b8b3;
         --dsw-alias-border-l4: #9a9d98;
       }
@@ -1593,80 +1810,80 @@ function apply(ctx) {
         --dsw-static-deepseek-200: #2f312e;
         --dsw-static-deepseek-300: #3a3c38;
         --dsw-static-deepseek-400: #898d89;
-        --dsw-static-deepseek-450: #fff500;
+        --dsw-static-deepseek-450: var(--edge-accent);
         --dsw-static-deepseek-500: #f5f5f0;
         --dsw-static-deepseek-600: #d8d9d5;
         --dsw-static-deepseek-800: #343633;
         --dsw-static-deepseek-900: #242624;
         --dsw-static-blue-900: #f5f5f0;
-        --dsw-alias-button-info-fill: #fff500;
-        --dsw-alias-button-info-hover: #fff500;
-        --dsw-alias-state-business-primary: #fff500;
-        --dsw-alias-state-business-tertiary: rgba(255, 245, 0, 0.22);
-        --dsw-alias-brand-primary-new-colorprimary-new-color: #fff500;
+        --dsw-alias-button-info-fill: var(--edge-accent);
+        --dsw-alias-button-info-hover: var(--edge-accent);
+        --dsw-alias-state-business-primary: var(--edge-accent);
+        --dsw-alias-state-business-tertiary: rgba(var(--edge-accent-rgb), 0.22);
+        --dsw-alias-brand-primary-new-colorprimary-new-color: var(--edge-accent);
         --dsw-alias-label-primary-bluish: #f5f5f0;
         --dsw-specific-bubble: #181a18;
         --dsw-specific-bubble-highlight: #242624;
-        --dsw-specific-sidebar-nav-item-active-accent: #fff500;
-        --dsw-alias-interactive-bg-hover-accent: rgba(255, 245, 0, 0.22);
+        --dsw-specific-sidebar-nav-item-active-accent: var(--edge-accent);
+        --dsw-alias-interactive-bg-hover-accent: rgba(var(--edge-accent-rgb), 0.22);
         --dsw-alias-border-l3: #4f534f;
         --dsw-alias-border-l4: #5f6460;
         --edge-btn-muted: #3a3c38;
       }
       /* ---------- Signal yellow everywhere (light: visible but soft) ---------- */
       body {
-        --dsw-alias-interactive-bg-hover: rgba(255, 245, 0, 0.16);
-        --dsw-alias-interactive-bg-active: rgba(255, 245, 0, 0.26);
-        --dsw-alias-interactive-bg-hover-solid: #fff500;
-        --dsw-alias-bg-multi-select: rgba(255, 245, 0, 0.16);
-        --dsw-alias-bg-skeleton: rgba(255, 245, 0, 0.12);
-        --dsw-alias-markdown-citation: rgba(255, 245, 0, 0.16);
-        --dsw-alias-markdown-code-block-banner: rgba(255, 245, 0, 0.10);
-        --dsw-alias-markdown-code-segment-selected: rgba(255, 245, 0, 0.22);
-        --dsw-alias-markdown-code-segment-unselected: rgba(255, 245, 0, 0.06);
-        --dsw-alias-markdown-inline-code: rgba(255, 245, 0, 0.14);
-        --dsw-alias-markdown-tag: rgba(255, 245, 0, 0.18);
+        --dsw-alias-interactive-bg-hover: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-alias-interactive-bg-active: rgba(var(--edge-accent-rgb), 0.26);
+        --dsw-alias-interactive-bg-hover-solid: var(--edge-accent);
+        --dsw-alias-bg-multi-select: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-alias-bg-skeleton: rgba(var(--edge-accent-rgb), 0.12);
+        --dsw-alias-markdown-citation: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-alias-markdown-code-block-banner: rgba(var(--edge-accent-rgb), 0.10);
+        --dsw-alias-markdown-code-segment-selected: rgba(var(--edge-accent-rgb), 0.22);
+        --dsw-alias-markdown-code-segment-unselected: rgba(var(--edge-accent-rgb), 0.06);
+        --dsw-alias-markdown-inline-code: rgba(var(--edge-accent-rgb), 0.14);
+        --dsw-alias-markdown-tag: rgba(var(--edge-accent-rgb), 0.18);
         --dsw-alias-scrollbar-bg-l1: transparent;
         --dsw-alias-scrollbar-bg-l2: transparent;
-        --dsw-alias-scrollbar-hover-l1: #fff500;
-        --dsw-alias-scrollbar-hover-l2: #fff500;
-        --dsw-specific-sidebar-nav-item-active: rgba(255, 245, 0, 0.16);
-        --dsw-specific-sidebar-nav-item-hover: rgba(255, 245, 0, 0.12);
+        --dsw-alias-scrollbar-hover-l1: var(--edge-accent);
+        --dsw-alias-scrollbar-hover-l2: var(--edge-accent);
+        --dsw-specific-sidebar-nav-item-active: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-specific-sidebar-nav-item-hover: rgba(var(--edge-accent-rgb), 0.12);
       }
       body[data-ds-dark-theme] {
-        --dsw-alias-interactive-bg-hover: rgba(255, 245, 0, 0.18);
-        --dsw-alias-interactive-bg-active: rgba(255, 245, 0, 0.28);
-        --dsw-alias-interactive-bg-hover-solid: #fff500;
-        --dsw-alias-bg-multi-select: rgba(255, 245, 0, 0.18);
-        --dsw-alias-bg-skeleton: rgba(255, 245, 0, 0.14);
-        --dsw-alias-markdown-citation: rgba(255, 245, 0, 0.20);
-        --dsw-alias-markdown-code-block-banner: rgba(255, 245, 0, 0.12);
-        --dsw-alias-markdown-code-segment-selected: rgba(255, 245, 0, 0.26);
-        --dsw-alias-markdown-code-segment-unselected: rgba(255, 245, 0, 0.08);
-        --dsw-alias-markdown-inline-code: rgba(255, 245, 0, 0.18);
-        --dsw-alias-markdown-tag: rgba(255, 245, 0, 0.22);
+        --dsw-alias-interactive-bg-hover: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-interactive-bg-active: rgba(var(--edge-accent-rgb), 0.28);
+        --dsw-alias-interactive-bg-hover-solid: var(--edge-accent);
+        --dsw-alias-bg-multi-select: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-bg-skeleton: rgba(var(--edge-accent-rgb), 0.14);
+        --dsw-alias-markdown-citation: rgba(var(--edge-accent-rgb), 0.20);
+        --dsw-alias-markdown-code-block-banner: rgba(var(--edge-accent-rgb), 0.12);
+        --dsw-alias-markdown-code-segment-selected: rgba(var(--edge-accent-rgb), 0.26);
+        --dsw-alias-markdown-code-segment-unselected: rgba(var(--edge-accent-rgb), 0.08);
+        --dsw-alias-markdown-inline-code: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-markdown-tag: rgba(var(--edge-accent-rgb), 0.22);
         --dsw-alias-scrollbar-bg-l1: transparent;
         --dsw-alias-scrollbar-bg-l2: transparent;
-        --dsw-alias-scrollbar-hover-l1: #fff500;
-        --dsw-alias-scrollbar-hover-l2: #fff500;
-        --dsw-specific-sidebar-nav-item-active: rgba(255, 245, 0, 0.20);
-        --dsw-specific-sidebar-nav-item-hover: rgba(255, 245, 0, 0.16);
+        --dsw-alias-scrollbar-hover-l1: var(--edge-accent);
+        --dsw-alias-scrollbar-hover-l2: var(--edge-accent);
+        --dsw-specific-sidebar-nav-item-active: rgba(var(--edge-accent-rgb), 0.20);
+        --dsw-specific-sidebar-nav-item-hover: rgba(var(--edge-accent-rgb), 0.16);
       }
       input, textarea, [contenteditable='true'] {
-        caret-color: #fff500;
+        caret-color: var(--edge-accent);
       }
       :focus-visible {
-        outline: 2px solid #fff500 !important;
+        outline: 2px solid var(--edge-accent) !important;
         outline-offset: 1px;
       }
       a {
         text-decoration-thickness: 1px;
       }
       a:hover {
-        text-decoration-color: #fff500;
+        text-decoration-color: var(--edge-accent);
       }
       body[data-ds-dark-theme] a:hover {
-        color: #fff500;
+        color: var(--edge-accent);
       }
       ::-webkit-scrollbar {
         width: 10px;
@@ -1677,7 +1894,7 @@ function apply(ctx) {
         background: var(--edge-line);
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       ::-webkit-scrollbar-track {
         background: transparent;
@@ -1697,7 +1914,7 @@ function apply(ctx) {
       .YDXeBa_sessionRow.YDXeBa_selected,
       .YDXeBa_searchResultRow:hover,
       .YDXeBa_searchResultRow.YDXeBa_selected {
-        background: rgba(255, 245, 0, 0.22) !important;
+        background: rgba(var(--edge-accent-rgb), 0.22) !important;
       }
       .YDXeBa_projectRow:hover *,
       .YDXeBa_sessionRow:hover *,
@@ -1723,11 +1940,11 @@ function apply(ctx) {
       body[data-ds-dark-theme] .YDXeBa_sessionRow.YDXeBa_selected,
       body[data-ds-dark-theme] .YDXeBa_searchResultRow:hover,
       body[data-ds-dark-theme] .YDXeBa_searchResultRow.YDXeBa_selected {
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       body[data-ds-dark-theme] [class*='badge' i]:hover,
       body[data-ds-dark-theme] [class*='badge' i][data-active] {
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       /* ---------- Dark mode: icon buttons (plus / ellipsis / stop / actions) ---------- */
       /* The cordis approval trio is EXCLUDED here. Those three buttons carry their own
@@ -1739,13 +1956,13 @@ function apply(ctx) {
       body[data-ds-dark-theme] [class$='_iconButton'],
       body[data-ds-dark-theme] [data-cordis-switch],
       body[data-ds-dark-theme] [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]) {
-        color: #fff500 !important;
+        color: var(--edge-accent) !important;
       }
       body[data-ds-dark-theme] [class$='_iconButton']:hover:not(:disabled),
       body[data-ds-dark-theme] [data-cordis-switch]:hover:not(:disabled),
       body[data-ds-dark-theme] [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]):hover:not(:disabled) {
         color: #000 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       /* ---------- Cordis approval buttons (allow once / allow plugin / decline) ---------- */
       /* Each button is a solid chip, so its glyph must contrast with its OWN fill:
@@ -1764,7 +1981,7 @@ function apply(ctx) {
       }
       [data-cordis-approve],
       [data-cordis-approve-plugin] {
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       [data-cordis-decline],
       [data-cordis-decline] svg,
@@ -1782,7 +1999,7 @@ function apply(ctx) {
       }
       [data-cordis-approve]:hover:not(:disabled),
       [data-cordis-approve-plugin]:hover:not(:disabled) {
-        background: #e8e000 !important;
+        background: var(--edge-accent-deep) !important;
       }
       [data-cordis-decline]:hover:not(:disabled) {
         background: #d6281d !important;
@@ -1804,13 +2021,13 @@ function apply(ctx) {
       [class*='tableScroll' i] tbody tr:hover,
       [class*='tableScroll' i] tbody tr:hover * {
         color: #000 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       /* ---------- New session button (sidebar) ---------- */
       [class$='_newSession'] {
         color: #000 !important;
-        background: #fff500 !important;
-        border-color: #fff500 !important;
+        background: var(--edge-accent) !important;
+        border-color: var(--edge-accent) !important;
       }
       body:not(.theme-endfield-round) [class$='_newSession'] {
         border-radius: 0 !important;
@@ -1818,8 +2035,8 @@ function apply(ctx) {
       [class$='_newSession']:hover,
       [class$='_newSession']:focus-visible {
         color: #000 !important;
-        background: #e8e000 !important;
-        border-color: #e8e000 !important;
+        background: var(--edge-accent-deep) !important;
+        border-color: var(--edge-accent-deep) !important;
       }
       [class$='_newSession'] svg {
         color: #000 !important;
@@ -1840,7 +2057,7 @@ function apply(ctx) {
       [data-cordis-switch]:hover:not(:disabled),
       [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]):hover:not(:disabled) {
         color: #000 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       body:not(.theme-endfield-round) [data-cordis-switch],
       body:not(.theme-endfield-round) [class*='actionButton' i] {
@@ -1851,13 +2068,13 @@ function apply(ctx) {
       [class$='_trigger'][aria-expanded='true'],
       [class$='_trigger']:focus-visible {
         color: #000 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       /* ---------- Agent-preset header chip: signal yellow, stretches to fill the action row ---------- */
       /* (scoped: the old broad [class$='_label'] rule yellowed plain text labels like 产物/settings/jobs names) */
       .SVAs4q_label {
         color: #000 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
         flex: 1 1 auto !important;
         max-width: none !important;
         justify-content: center !important;
@@ -1902,7 +2119,7 @@ function apply(ctx) {
         --dsw-specific-selector: #e8e8e2;
         --dsw-specific-tip: #e8e8e2;
         --dsw-static-blue-400: #757874;
-        --dsw-static-blue-450: #fff500;
+        --dsw-static-blue-450: var(--edge-accent);
         --dsw-static-blue-500: #101110;
         --dsw-alias-label-quaternary: #6a6d68;
         --dsw-alias-label-error: #ff3b30;
@@ -1911,7 +2128,7 @@ function apply(ctx) {
         --dsw-alias-separator-primary: #9a9d98;
         --dsw-alias-border-secondary: #b6b8b3;
         --dsw-alias-bg-primary: #f2f2ec;
-        --dsw-alias-interactive-bg-primary: #fff500;
+        --dsw-alias-interactive-bg-primary: var(--edge-accent);
         --dsw-alias-fill-l2: #dcddd6;
         --dsw-alias-fill-tsp-secondary: #dcddd6;
       }
@@ -1926,14 +2143,14 @@ function apply(ctx) {
         --dsw-alias-button-ghost-active-fill: #343633;
         --dsw-alias-button-ghost-active-hover: #3f413d;
         --dsw-alias-button-ghost-active-border: #5f6460;
-        --dsw-alias-button-primary-hover: #e8e000;
+        --dsw-alias-button-primary-hover: var(--edge-accent-deep);
         --dsw-alias-button-contrast-fill: #f5f5f0;
         --dsw-alias-tooltip-bg: #2a2b28;
         --dsw-specific-input-major: #202220;
         --dsw-specific-selector: #2c2e2a;
         --dsw-specific-tip: #2c2e2a;
         --dsw-static-blue-400: #9a9d98;
-        --dsw-static-blue-450: #fff500;
+        --dsw-static-blue-450: var(--edge-accent);
         --dsw-static-blue-500: #f5f5f0;
         --dsw-alias-label-quaternary: #9a9d98;
         --dsw-alias-label-error: #ff6b61;
@@ -1942,13 +2159,13 @@ function apply(ctx) {
         --dsw-alias-separator-primary: #70736f;
         --dsw-alias-border-secondary: #4a4d49;
         --dsw-alias-bg-primary: #181a18;
-        --dsw-alias-interactive-bg-primary: #fff500;
+        --dsw-alias-interactive-bg-primary: var(--edge-accent);
         --dsw-alias-fill-l2: #242624;
         --dsw-alias-fill-tsp-secondary: #242624;
       }
       /* Token meter: messages segment signal yellow, system warm gray (tools keeps purple) */
       .JObwrW_colorMessages {
-        --meter-tint: #fff500 !important;
+        --meter-tint: var(--edge-accent) !important;
       }
       .JObwrW_colorSystem {
         --meter-tint: #9a9d98 !important;
@@ -1960,8 +2177,8 @@ function apply(ctx) {
       /* Hero preview badge: solid signal-yellow + black (reference accent chip) */
       .pXSMma_previewBadge {
         color: #101110 !important;
-        background: #fff500 !important;
-        border-color: #fff500 !important;
+        background: var(--edge-accent) !important;
+        border-color: var(--edge-accent) !important;
       }
       /* ---------- Hero backdrop glow: brand blue -> signal yellow ----------
          The empty-conversation hero paints one large blurred ellipse behind the
@@ -1995,11 +2212,11 @@ function apply(ctx) {
          'wSkVaW' hash, so an app rebuild that rehashes the module cannot silently
          bring the blue back. */
       [class*='_heroGlow'] ellipse {
-        fill: var(--edge-signal, #fff500) !important;
-        fill-opacity: 0.08 !important;
+        fill: var(--edge-signal, var(--edge-accent)) !important;
+        fill-opacity: var(--edge-glow-light) !important;
       }
       body[data-ds-dark-theme] [class*='_heroGlow'] ellipse {
-        fill-opacity: 0.05 !important;
+        fill-opacity: var(--edge-glow-dark) !important;
       }
       /* Brand wordmark HARNESS chip: signal-yellow box + black letters (both modes) */
       body {
@@ -2007,16 +2224,16 @@ function apply(ctx) {
       }
       [class*='brand'] svg rect,
       [class$='_newSession'] svg rect {
-        fill: #fff500 !important;
+        fill: var(--edge-accent) !important;
       }
       /* Compaction notice row: soft yellow wash + accent in dark, hover = solid inversion */
       body[data-ds-dark-theme] [class$='_compactionRow'] {
-        background: rgba(255, 245, 0, 0.08) !important;
-        border-left: 2px solid rgba(255, 245, 0, 0.55) !important;
+        background: rgba(var(--edge-accent-rgb), 0.08) !important;
+        border-left: 2px solid rgba(var(--edge-accent-rgb), 0.55) !important;
       }
       body[data-ds-dark-theme] [class$='_compactionButton']:hover:not(:disabled),
       body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible {
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       body[data-ds-dark-theme] [class$='_compactionButton']:hover *,
       body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible * {
@@ -2029,12 +2246,12 @@ function apply(ctx) {
       /* ================= composer add (+) button hover inversion ================= */
       /* Dark: + icon signal yellow at rest; on hover solid yellow bg + black icon */
       body[data-ds-dark-theme] .uV2eYG_add {
-        color: #fff500 !important;
+        color: var(--edge-accent) !important;
       }
       body[data-ds-dark-theme] .uV2eYG_add:hover:not(:disabled),
       body[data-ds-dark-theme] .uV2eYG_add:focus-visible {
         color: #000 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       /* ================= composer primary send/stop button ================= */
       /* Dark: hardcoded #fff icon on yellow info-fill -> black icon; hover deeper yellow */
@@ -2043,7 +2260,7 @@ function apply(ctx) {
       }
       body[data-ds-dark-theme] .uV2eYG_primary:hover:not(:disabled) {
         color: #101110 !important;
-        background: #e8e000 !important;
+        background: var(--edge-accent-deep) !important;
       }
       /* ================= light-mode white-on-dark buttons keep white icon ================= */
       /* Generic hover inversion would make the white send icon black on the dark fill */
@@ -2051,13 +2268,88 @@ function apply(ctx) {
       body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton):hover:not(:disabled) {
         color: #fff !important;
       }
+      /* ================= buttons the theme fills with the SOLID accent =================
+         Settings > 模型 draws its row actions with .zGbnIq_secondaryButton, whose
+         upstream rule is:
+             color:      var(--dsw-alias-label-primary)
+             background: var(--dsw-alias-interactive-bg-hover-solid)   (on :hover)
+         This theme maps that background token to the solid accent but upstream keeps
+         owning the foreground — so in dark mode the label stayed label-primary
+         (#f5f5f0) on signal yellow. Measured from a real screenshot of the 编辑
+         button: 63 px of #f5f5f0 sitting on #fff500 = 1.05:1, i.e. the word was
+         invisible. On 武陵青 the same pairing is 2.61:1 — still failing, just less
+         obviously, which is how it stayed hidden.
+
+         Why the existing hover-inversion rule did not already cover it: that
+         selector deliberately EXCLUDES plain buttons, because a button's own fill
+         and text must survive hover (the yellow toggle keeps black text, the
+         white-on-dark send button keeps white). This button is the case where the
+         fill comes from the THEME and the text from the APP, so it has to be named.
+
+         Scoped to the accent-filled states only, so the resting transparent button
+         keeps label-primary and stays correct in both schemes (measured 16.00:1
+         dark / 16.84:1 light). Guarded by test/settings-buttons.test.js.
+
+         .HOVERPROBE is included deliberately: a screenshot/computed-style test
+         cannot trigger :hover, so the test swaps in that class, which has the same
+         0,1,0 specificity as the pseudo-class and therefore the same cascade
+         outcome. Naming it here keeps the rule the test verifies identical to the
+         rule that ships, instead of testing a near-copy. It never matches in the
+         real app, since nothing renders that class.
+
+         The class list is not just the reported button. Auditing the installed
+         bundles for elements whose hover background is that token found SIX, and
+         three of them additionally re-assert color:label-primary in the same rule
+         (so they would fight a token-level fix):
+           .zGbnIq_secondaryButton   settings > 模型 row actions   <- reported
+           .gNWCoW_inspectButton     inspect panels (cordis)
+           .iWrAna_inspectButton     inspect panels (skill)
+           .o3BgMG_inspectButton     inspect panels (tool)
+           .JVDQca_arrow             attachment carousel arrow
+           .uV2eYG_add               composer + (already handled above)
+         All are the same defect on different screens, so they are fixed together
+         rather than one bug report at a time.
+
+         '_inspectButton' is matched on the CLASS TOKEN, not with [class$=...], and
+         that distinction is load-bearing: an attribute-suffix match requires the
+         WHOLE class attribute to end with the string, so it silently misses any
+         element that carries a second class after it (measured: it failed on
+         class="gNWCoW_inspectButton HOVERPROBE"). Upstream composes class lists
+         freely, so [class$=] is the wrong tool here. [class~='...'] matches a
+         whitespace-separated token in any position, but the token includes the
+         build hash, so each of the three is listed explicitly — they are stable
+         names in installed bundles, and the audit above is what keeps the list
+         honest. '_arrow' is NOT matched by suffix either: two other components
+         (trajectory, workspace) also end in _arrow and take NO hover fill, so a
+         suffix match there would force ink onto elements that keep their normal
+         background — inventing a new contrast bug while fixing this one. */
+      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow):hover:not(:disabled),
+      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow):hover:not(:disabled) svg,
+      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow):hover:not(:disabled) svg path,
+      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow).HOVERPROBE:not(:disabled),
+      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow).HOVERPROBE:not(:disabled) svg,
+      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow).HOVERPROBE:not(:disabled) svg path {
+        /* Ink on accent: 16.50:1 on 谷地黄, 6.62:1 on 武陵青 — both AA. */
+        color: #101110 !important;
+        fill: currentColor !important;
+      }
+      /* ---------- light mode: the danger (移除) button needs a darker red ----------
+         Not part of the accent work, but measured by the same test and failing:
+         --dsw-alias-state-error-primary is #ff3b30, which on the settings panel
+         (#f2f2ec) is only 3.16:1 — below AA for the 12px label it paints. iOS-style
+         reds are tuned for white-on-red fills, not red-on-paper text. Darkening the
+         TEXT colour alone (the token keeps its value for fills/dots elsewhere)
+         brings it to 5.12:1 while staying unmistakably red. */
+      body:not([data-ds-dark-theme]) .zGbnIq_dangerButton {
+        color: #c62016 !important;
+      }
       /* ================= dark mode: selected rows = solid signal-yellow + black text ================= */
       /* The translucent yellow wash makes white text look muddy olive; the reference
          inverts to black-on-signal-yellow, so selected rows get the full inversion. */
       body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) {
         color: #000 !important;
-        background: #fff500 !important;
-        border-color: #fff500 !important;
+        background: var(--edge-accent) !important;
+        border-color: var(--edge-accent) !important;
       }
       body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) *:not(svg):not(path) {
         color: #000 !important;
@@ -2077,12 +2369,12 @@ function apply(ctx) {
             both are consumed as real background fills elsewhere. */
       :is([role='radio'], [role='checkbox']) [class*='badge' i] {
         color: #101110 !important;
-        background: #fff500 !important;
+        background: var(--edge-accent) !important;
       }
       /* On a selected row the row itself is already solid signal yellow, so the chip
          inverts to keep its edge instead of dissolving into the row. */
       body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) [class*='badge' i] {
-        color: #fff500 !important;
+        color: var(--edge-accent) !important;
         background: #101110 !important;
       }
       /* 2) The option number ("1", "2", ...). The blanket dark inversion above
@@ -2139,11 +2431,11 @@ function apply(ctx) {
          an erasure. */
       body [class*='turnStatus']:not([class*='turnStatusClock']) {
         background-image: linear-gradient(90deg,
-          #6b5d00 0%, #6b5d00 40%, #3f3600 50%, #6b5d00 60%, #6b5d00 100%) !important;
+          var(--edge-status-light) 0%, var(--edge-status-light) 40%, var(--edge-status-light-mid) 50%, var(--edge-status-light) 60%, var(--edge-status-light) 100%) !important;
       }
       body[data-ds-dark-theme] [class*='turnStatus']:not([class*='turnStatusClock']) {
         background-image: linear-gradient(90deg,
-          #fff500 0%, #fff500 40%, #a08a00 50%, #fff500 60%, #fff500 100%) !important;
+          var(--edge-status-dark) 0%, var(--edge-status-dark) 40%, var(--edge-status-dark-mid) 50%, var(--edge-status-dark) 60%, var(--edge-status-dark) 100%) !important;
       }
       /* ================= boot loading screen ================= */
       /* Fixed plate above everything, including the shell overlay layer. It exists
@@ -2189,7 +2481,7 @@ function apply(ctx) {
         top: 0;
         bottom: 0;
         width: 10px;
-        background: rgba(255, 245, 0, 0.10);
+        background: rgba(var(--edge-accent-rgb), 0.10);
       }
       [data-endfield-loader-fill] {
         position: absolute;
@@ -2197,7 +2489,7 @@ function apply(ctx) {
         top: 0;
         width: 10px;
         height: 0%;
-        background: #fff500;
+        background: var(--edge-accent);
       }
       /* Meter RIDES THE FILL END: its top offset is set per frame from the same eased
          progress value that drives the fill height (see step()), so the readout
@@ -2228,19 +2520,19 @@ function apply(ctx) {
         top: 0;
         bottom: 0;
         width: 10px;
-        background: #fff500;
+        background: var(--edge-accent);
         opacity: 0;
       }
       [data-endfield-loader-tick] {
         display: block;
         width: 4px;
         height: 15px;
-        background: #fff500;
+        background: var(--edge-accent);
       }
       [data-endfield-loader-pct] {
         display: block;
         margin-top: 7px;
-        color: #fff500;
+        color: var(--edge-accent);
         font-size: 39px;
         font-weight: 700;
         line-height: 29px;
@@ -2373,8 +2665,8 @@ function apply(ctx) {
         left: 0;
         width: 0.10em;
         height: 0.10em;
-        border-left: 0.028em solid #fff500;
-        border-bottom: 0.028em solid #fff500;
+        border-left: 0.028em solid var(--edge-accent);
+        border-bottom: 0.028em solid var(--edge-accent);
         transform: rotate(-45deg);
       }
       [data-endfield-loader-chev]::before { top: 0; }
@@ -2412,7 +2704,7 @@ function apply(ctx) {
         background: #2e302d;
       }
       [data-endfield-loader-squares] i[data-on] {
-        background: #fff500;
+        background: var(--edge-accent);
       }
       /* Tagline closes the block on the same rhythm line.
          Reference: cap 11px across 232px, i.e. cap/width 0.38 — unreachable in
@@ -2452,6 +2744,7 @@ function apply(ctx) {
          since the plate no longer declares one. */
     `)
       syncRadiusMode()
+      syncPaletteClass()
     }
     const unmount = () => {
       if (!mounted) return
@@ -2461,6 +2754,11 @@ function apply(ctx) {
       disposeToken = () => {}
       disposeStyles = () => {}
       document.body.classList.remove('theme-endfield-round')
+      /* The palette class must go with the stylesheet that gives it meaning:
+         left behind it would be a class nothing defines, and it would make
+         isWulingPalette() report a palette the page is no longer using. The
+         stored preference is untouched, so re-enabling restores it. */
+      document.body.classList.remove(PALETTE_CLASS)
       // The plate is styled by the theme stylesheet just torn down — an orphaned
       // plate would sit there as an unstyled black-less div, so drop it too.
       destroyLoader()
@@ -2499,6 +2797,7 @@ function apply(ctx) {
           const [loaderOn, setLoaderOn] = R.useState(isLoaderOn())
           const [contourOn, setContourOn] = R.useState(isContourOn())
           const [contourAnim, setContourAnim] = R.useState(isContourAnimOn())
+          const [palette, setPalette] = R.useState(readPalette())
           const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
@@ -2506,7 +2805,11 @@ function apply(ctx) {
           const hintStyle = { display: 'block', color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', fontWeight: 400, lineHeight: '1.5', marginTop: '2px' }
           const btnStyleFor = (on, disabled) => ({
             color: on ? '#000' : 'var(--dsw-alias-label-primary)',
-            background: on ? '#fff500' : 'var(--edge-btn-muted)',
+            /* The switches are themed BY the theme they configure, so the "on"
+               fill reads from the palette variable rather than a literal — an
+               inline #fff500 here would keep every enabled button yellow while
+               the rest of the UI turned cyan. */
+            background: on ? 'var(--edge-accent)' : 'var(--edge-btn-muted)',
             border: '1px solid var(--dsw-alias-border-l2)',
             borderRadius: mode === 'round' ? '999px' : '0',
             padding: '4px 14px',
@@ -2528,6 +2831,18 @@ function apply(ctx) {
             if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_KEY, next ? '1' : '0')
             setContourOn(next)
             syncContour()
+          }
+          /* Palette switch. Everything visual is carried by the class flip inside
+             syncPaletteClass(); the only thing that needs explicit work is the
+             contour canvas, because a canvas stroke cannot read a CSS variable.
+             The redraw is called directly rather than left to the MutationObserver
+             so the sheet changes in the same frame as the rest of the UI. */
+          const togglePalette = () => {
+            const next = palette === 'wuling' ? 'valley' : 'wuling'
+            if (typeof localStorage !== 'undefined') localStorage.setItem(PALETTE_KEY, next)
+            setPalette(next)
+            syncPaletteClass()
+            if (contourWrap !== null) contourDrawLines()
           }
           const toggleContourAnim = () => {
             const next = !contourAnim
@@ -2572,11 +2887,43 @@ function apply(ctx) {
           // These rows are passed as an ARRAY, so each one needs a stable key or
           // React logs a key warning for the whole list on every render.
           return R.createElement('div', { style: pageStyle }, [
+            /* Palette first: it repaints the whole UI, so it is the row a user
+               looks for, and every switch below is rendered in its colour. */
+            R.createElement('div', { key: 'palette', style: rowStyle },
+              R.createElement('span', { style: labelStyle },
+                '主题配色：' + (palette === 'wuling' ? '武陵青' : '谷地黄'),
+                R.createElement('span', { style: hintStyle },
+                  palette === 'wuling'
+                    ? '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线'
+                    : '默认信号黄 #fff500（终末地官网强调色）'
+                )
+              ),
+              // A colour switch should show the colour it offers, not only name it.
+              R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', alignItems: 'center' } },
+                R.createElement('span', {
+                  'aria-hidden': 'true',
+                  style: {
+                    width: '14px',
+                    height: '14px',
+                    flex: '0 0 auto',
+                    background: 'var(--edge-accent)',
+                    border: '1px solid var(--dsw-alias-border-l2)',
+                    borderRadius: mode === 'round' ? '999px' : '0',
+                  },
+                }),
+                R.createElement('button', {
+                  type: 'button',
+                  onClick: togglePalette,
+                  style: btnStyleFor(true),
+                }, palette === 'wuling' ? '切换谷地黄' : '切换武陵青')
+              )
+            ),
             R.createElement('div', { key: 'contour', style: rowStyle },
               R.createElement('span', { style: labelStyle },
                 '等高线背景：' + (contourOn ? '开启' : '关闭'),
                 R.createElement('span', { style: hintStyle },
-                  contourOn ? '信号黄地形等高线铺满界面底层（置于所有内容之下）' : '默认关闭；开启后在界面底层绘制等高线地形纹理'
+                  // The sheet follows the palette, so the hint must not name one colour.
+                  contourOn ? '当前配色的地形等高线铺满界面底层（置于所有内容之下）' : '默认关闭；开启后在界面底层绘制等高线地形纹理'
                 )
               ),
               R.createElement('button', { type: 'button', onClick: toggleContour, style: btnStyleFor(contourOn) }, contourOn ? '关闭背景' : '开启背景')
@@ -2625,7 +2972,7 @@ function apply(ctx) {
               R.createElement('span', { style: labelStyle },
                 '启动加载动画：' + (loaderOn ? '开启' : '关闭'),
                 R.createElement('span', { style: hintStyle },
-                  loaderOn ? '刷新页面时播放 ENDFIELD 启动加载屏（左侧黄色进度轨 + 百分比）' : '默认关闭；开启后每次刷新页面播放一次'
+                  loaderOn ? '刷新页面时播放 ENDFIELD 启动加载屏（左侧进度轨 + 百分比，跟随当前配色）' : '默认关闭；开启后每次刷新页面播放一次'
                 )
               ),
               R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },

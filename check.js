@@ -180,6 +180,58 @@ if (openIdx < 0) {
         fail(`${v} is used by the loader but never DEFINED in live CSS`)
       }
     }
+
+    /* --- 6. both accent palettes must be DEFINED, and on body rather than :root ---
+       Every accent in this stylesheet reads from these variables, so a missing one
+       does not degrade gracefully: each rule that references it computes to nothing
+       and that entire declaration is dropped.
+
+       The :root check is the important half, and it is not hypothetical. The app
+       applies its theme tokens as INLINE STYLES ON body, so a custom property
+       declared at :root that substitutes a --dsw-* token is resolved at the html
+       element, where the token does not exist -> guaranteed-invalid, computing to
+       empty. The shipped --edge-line / --edge-paper / --edge-soft were declared
+       that way and measured EMPTY in a real browser, silently disabling the themed
+       scrollbar. Anything reading a token must therefore be declared on body. */
+    const paletteVars = [
+      '--edge-accent', '--edge-accent-rgb', '--edge-accent-deep', '--edge-accent-onpaper',
+      '--edge-status-light', '--edge-status-light-mid', '--edge-status-dark',
+      '--edge-status-dark-mid', '--edge-glow-light', '--edge-glow-dark',
+    ]
+    const missing = paletteVars.filter((v) => !new RegExp('^\\s*' + v + '\\s*:', 'm').test(stripped))
+    if (missing.length === 0) pass(`all ${paletteVars.length} palette variables are defined in live CSS`)
+    else fail(`palette variable(s) never DEFINED in live CSS: ${missing.join(', ')}`)
+
+    // The 武陵青 palette must exist as an override block, or the switch is inert.
+    if (/body\.theme-endfield-wuling\s*\{/.test(stripped)) {
+      pass('武陵青 palette block (body.theme-endfield-wuling) is present')
+    } else {
+      fail('no body.theme-endfield-wuling block — the palette switch would do nothing')
+    }
+
+    /* Any --edge-* variable that substitutes a --dsw-* token must NOT be declared
+       inside a :root block. Checked structurally: walk each top-level rule and look
+       at :root blocks only. */
+    const rootBlocks = []
+    {
+      const re = /(^|\})\s*([^{}]*?):root([^{}]*?)\{([^}]*)\}/g
+      let m2
+      while ((m2 = re.exec(stripped)) !== null) rootBlocks.push({ body: m2[4], at: m2.index })
+    }
+    const offenders = []
+    for (const b of rootBlocks) {
+      const re2 = /^\s*(--edge-[\w-]+)\s*:\s*([^;]*var\(\s*--dsw-[^;]*)\;/gm
+      let m3
+      while ((m3 = re2.exec(b.body)) !== null) offenders.push(m3[1])
+    }
+    if (offenders.length === 0) {
+      pass('no --edge-* variable reads a --dsw-* token from :root (tokens live on body)')
+    } else {
+      fail(`--edge-* variable(s) declared at :root while substituting a body-level token: `
+        + `${offenders.join(', ')}\n      `
+        + `-> the app sets --dsw-* tokens inline ON BODY, so a :root declaration is `
+        + `guaranteed-invalid and computes to EMPTY; move it into a body { } block`)
+    }
   }
 }
 

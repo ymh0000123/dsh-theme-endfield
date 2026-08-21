@@ -68,10 +68,17 @@ const CASES = [
   },
   {
     name: 'turn-status recoloured with an ineffective color: instead of a gradient',
-    // \s* spans CRLF as well as LF, so these stay valid on either checkout.
+    /* The gradient stops are palette VARIABLES now, not literals, so this injection
+       matches var(--edge-status-*) rather than a hex. It previously named #6b5d00 /
+       #fff500 directly and went vacuous the moment the palette refactor landed —
+       which the "INJECTION DID NOT APPLY" guard below caught, and is precisely why
+       that guard exists. \s* spans CRLF as well as LF, so these stay valid on
+       either checkout. */
     mutate: (s) => s
-      .replace(/background-image:\s*linear-gradient\(90deg,\s*#6b5d00[^;]*;/, 'color: #6b5d00 !important;')
-      .replace(/background-image:\s*linear-gradient\(90deg,\s*#fff500[^;]*;/, 'color: #fff500 !important;'),
+      .replace(/background-image:\s*linear-gradient\(90deg,\s*var\(--edge-status-light\)[^;]*;/,
+        'color: var(--edge-status-light) !important;')
+      .replace(/background-image:\s*linear-gradient\(90deg,\s*var\(--edge-status-dark\)[^;]*;/,
+        'color: var(--edge-status-dark) !important;'),
     expect: /no background-image gradient|cannot recolour/,
   },
   {
@@ -91,6 +98,37 @@ const CASES = [
       /(\[data-endfield-loader-brand\]\s*\{)/,
       '$1\n      {'),
     expect: /braces unbalanced/,
+  },
+  /* --- palette guards. Each of the three below is a failure mode the palette
+     refactor introduced the possibility of, so each is proved to be caught. --- */
+  {
+    name: 'a palette variable is deleted (every rule reading it silently dies)',
+    /* Both palettes define it, so BOTH declarations have to go — deleting only the
+       default one leaves the variable defined and the guard rightly stays quiet.
+       (That is what this case measured on the first attempt.) */
+    mutate: (s) => s.replace(/^\s*--edge-accent-deep:\s*#[0-9a-f]{6};/gim, '        /* removed */'),
+    expect: /palette variable\(s\) never DEFINED/,
+  },
+  {
+    name: 'the 武陵青 palette block is removed (switch becomes inert)',
+    mutate: (s) => s.replace('body.theme-endfield-wuling {', 'body.theme-endfield-wuling-DISABLED {'),
+    expect: /no body\.theme-endfield-wuling block/,
+  },
+  {
+    name: 'a token-reading --edge-* variable is moved back to :root (computes EMPTY)',
+    /* Reproduces the real shipped bug: --edge-line at :root substituting a
+       --dsw-* token that the app sets inline on body. Measured empty in a browser,
+       which silently disabled the themed scrollbar.
+
+       Two traps this pattern has to avoid, both hit for real while writing it:
+       the stylesheet is indented inside a template literal (so no column-0
+       anchor), and this checkout is CRLF (so a literal \n never matches — the
+       same footgun already recorded on the brace case below). Hence \r?\n and a
+       captured indent that is reused verbatim. */
+    mutate: (s) => s.replace(
+      /:root \{(\r?\n)([ \t]*)--dsw-font-family:/,
+      ':root {$1$2--edge-line: var(--dsw-alias-border-l1);$1$2--dsw-font-family:'),
+    expect: /declared at :root while substituting a body-level token/,
   },
 ]
 

@@ -200,8 +200,28 @@ async function main() {
     LS.setItem('dsh-theme-endfield-contour-anim','1')
     document.body.appendChild(document.createElement('span'))
     await sleep(300)
-    const c1=snap().slice(0); await sleep(700); const c2=snap()
-    let diff3=0; for(let i=3;i<c1.length;i+=4) if(c1[i]!==c2[i]) diff3++
+    /* Wait for PIXELS to move rather than for a fixed wall-clock window.
+
+       Measured reason: this assertion was flaky at 2 failures in 6 runs, always
+       with changedAlpha === 0, because the page sleeps on wall-clock timers while
+       the browser runs under --virtual-time-budget. The field pass is throttled to
+       24fps AND gated on rAF, and headless delivers rAF callbacks irregularly, so
+       a 700 ms sleep sometimes spans ZERO callbacks — the sheet is animating
+       correctly and the sample still sees no change. (The same rAF unreliability is
+       already documented in contour-perf.test.js, which is why that test does not
+       use rAF at all.)
+
+       Polling for the first real change removes the race without weakening the
+       assertion: it still fails if the animation genuinely does not resume, it just
+       fails after the budget instead of on an unlucky sample. */
+    const e1=snap().slice(0)
+    let diff3=0
+    for(let i=0;i<40 && diff3<=500;i++){
+      await sleep(120)
+      const e2=snap()
+      diff3=0
+      for(let k=3;k<e1.length;k+=4) if(e1[k]!==e2[k]) diff3++
+    }
     R('anim re-enabled: pixels change again', diff3>500, 'changedAlpha='+diff3)
 
     // ---------- 6. dark scheme restroke ----------
@@ -225,7 +245,9 @@ async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contour-'))
   const args = [
     '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',
-    '--virtual-time-budget=9000',
+    // Budget covers the poll loop added in step 5 (up to ~4.8 s of sleeps) with
+    // room to spare; too small a budget shows up as "page did not report results".
+    '--virtual-time-budget=20000',
     '--window-size=1400,900',
     '--user-data-dir=' + tmp,
     '--dump-dom',
