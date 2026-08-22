@@ -1417,6 +1417,256 @@ function apply(ctx) {
       }
     }
 
+    /* ---------- 雷霆大字 (娱乐模式, default OFF) ----------
+       A task-boundary announcement: when a turn starts, 「任务开始」 slams into the
+       middle of the screen in heavy white type; when it ends, 「任务完成」 does the
+       same. Each stays for exactly 3s and removes itself.
+
+       WHERE THE SIGNAL COMES FROM. This is turn-level state, not tool-level, so it
+       reads the ONE authoritative bit: ConversationSnapshot.running on the current
+       session (@deepseek-ai/dsh-client-runtime — the same field the app's own
+       turn-status label and stop button switch on). No DOM sniffing: the class
+       hashes those surfaces carry are not a contract, and a spinner appearing is
+       not the same event as a turn starting.
+
+       Reached through ctx.get('sessions'), NOT inject: the theme must still mount
+       when the sessions service is absent (the in-process settings tests supply a
+       ctx with only theme/slots), and a missing service means "no announcements",
+       not "no theme".
+
+       EDGES, NOT LEVELS. Only a false->true / true->false transition announces. The
+       first readable value of a session is recorded as a BASELINE and stays silent,
+       which is what stops 「任务开始」 from firing merely because the user switched
+       into a session that was already running. */
+    const THUNDER_KEY = 'dsh-theme-endfield-thunder'
+    /* The slam-in animation is its OWN switch, default OFF — same shape as
+       等高线背景 → 动态等高线: the layer is one decision, animating it is another.
+       With it off the word still appears instantly, holds 3s and leaves; only the
+       scale punch and the fade are dropped. */
+    const THUNDER_ANIM_KEY = 'dsh-theme-endfield-thunder-anim'
+    const THUNDER_START = '任务开始'
+    const THUNDER_DONE = '任务完成'
+    // Hold time, per the request: visible for 3s, then gone.
+    const THUNDER_MS = 3000
+    // Default OFF (=== '1' rather than !== '0'): opt-in, like the boot animation.
+    const isThunderOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(THUNDER_KEY)) === '1'
+    // Default OFF for the same reason, and read independently of the parent switch.
+    const isThunderAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(THUNDER_ANIM_KEY)) === '1'
+    /* The OS preference still wins over an enabled animation switch, exactly as
+       contourWantsAnim() does for the contour sheet. Checked live rather than
+       cached, so changing the OS setting takes effect on the next announcement. */
+    const thunderWantsAnim = () => isThunderAnimOn() && !prefersReducedMotion()
+    let thunderEl = null
+    let thunderTimer = null
+    // Detaches the click-to-dismiss listener; null when none is armed.
+    let thunderDismiss = () => {}
+    /** Remove the plate and release its timer and listener. Idempotent. */
+    const destroyThunder = () => {
+      if (thunderTimer !== null && typeof clearTimeout === 'function') clearTimeout(thunderTimer)
+      thunderTimer = null
+      /* Detach BEFORE removing the node, and reset the handle first so the listener
+         calling back into here cannot re-enter this line. */
+      const detach = thunderDismiss
+      thunderDismiss = () => {}
+      detach()
+      if (thunderEl && thunderEl.parentNode) thunderEl.parentNode.removeChild(thunderEl)
+      thunderEl = null
+    }
+    /* Announce one word. A second call inside the 3s window REPLACES the first
+       (turn/end immediately followed by a queued turn/start is a real sequence), so
+       the node is rebuilt rather than reused — that restarts the CSS animation,
+       which merely re-setting textContent would not. */
+    const showThunder = (text) => {
+      if (!isEnabled() || !isThunderOn()) return
+      if (typeof document === 'undefined' || !document.body) return
+      destroyThunder()
+      const el = document.createElement('div')
+      el.setAttribute('data-endfield-thunder', '')
+      // Pure decoration over content the user is already reading: never announced,
+      // never hit-tested (pointer-events:none lives in the stylesheet).
+      el.setAttribute('aria-hidden', 'true')
+      /* No animation: the word appears at full size and full opacity, holds, then is
+         removed by the timer below. Two independent reasons land on this same static
+         path — the animation switch being off (the default) and the OS asking for
+         reduced motion — so both go through thunderWantsAnim(). */
+      if (!thunderWantsAnim()) el.setAttribute('data-endfield-thunder-still', '')
+      const word = document.createElement('span')
+      word.setAttribute('data-endfield-thunder-word', '')
+      word.textContent = text
+      el.appendChild(word)
+      document.body.appendChild(el)
+      thunderEl = el
+      /* CLICK ANYWHERE TO DISMISS EARLY, without waiting out the 3s.
+
+         Listening on the DOCUMENT rather than on the plate is the whole point. The
+         plate is pointer-events:none on purpose (it is a caption laid over text the
+         user may be mid-sentence in, not a modal), and making it clickable would turn
+         it into a full-screen click-eater for 3 seconds: the dismissing click would
+         be swallowed instead of reaching whatever the user actually aimed at. With a
+         document listener the click BOTH dismisses the word and lands normally, so
+         clicking blank space costs nothing and clicking a control still works.
+
+         pointerdown, not click, for two reasons: it covers mouse/touch/pen in one
+         event, and it fires on press so the word disappears the instant the user
+         acts. It also cannot self-dismiss when 预览 triggers this from a button's
+         click handler — that interaction's pointerdown has already been dispatched
+         before this listener exists, and a later click event does not re-fire it.
+
+         Capture phase so an app handler calling stopPropagation cannot make the word
+         undismissable. */
+      if (typeof document.addEventListener === 'function' && typeof document.removeEventListener === 'function') {
+        const onPointerDown = () => { destroyThunder() }
+        document.addEventListener('pointerdown', onPointerDown, true)
+        thunderDismiss = () => { document.removeEventListener('pointerdown', onPointerDown, true) }
+      }
+      // No timer available (a stripped test host) must not leave the plate up.
+      if (typeof setTimeout === 'function') thunderTimer = setTimeout(destroyThunder, THUNDER_MS)
+      else destroyThunder()
+    }
+
+    /* Resolved LAZILY, never cached at apply() time. The web boot mounts every
+       plugin row concurrently (`Promise.all` over the manifest in dsh-web-frontend)
+       and this theme declares no `inject`, so apply() can legitimately run before
+       dsh-client-runtime has provided `sessions`. A one-shot `const sessions =
+       ctx.get('sessions')` here would capture undefined for the whole session and
+       the feature would be permanently dead depending on load order — the exact
+       kind of race that only shows up on a slow or cold page load.
+
+       Declaring inject: ['sessions'] is the other valid fix, but it would put the
+       WHOLE THEME into cordis' pending state until that service appears, which
+       would delay the token/stylesheet mount that everything else here depends on.
+       A theme must paint even if the announcement feature never gets its service,
+       so the lookup is deferred instead and re-tried on the retry timer below. */
+    const getSessions = () => {
+      const s = ctx.get('sessions')
+      return (s === undefined || s === null) ? undefined : s
+    }
+    let thunderUnsubList = null
+    let thunderUnsubSession = null
+    let thunderRebindTimer = null
+    let thunderWatchedId = null
+    // null = nothing readable observed yet, so the next value is a baseline.
+    let thunderLastRunning = null
+    /** The running bit of one session face, or null when it cannot be read. */
+    const thunderReadRunning = (face) => {
+      try {
+        const snap = face.getSnapshot()
+        if (snap === null || typeof snap !== 'object') return null
+        return snap.running === true
+      } catch (e) {
+        return null
+      }
+    }
+    const thunderDetach = () => {
+      if (thunderUnsubSession !== null) {
+        try { thunderUnsubSession() } catch (e) { /* already torn down */ }
+        thunderUnsubSession = null
+      }
+      thunderWatchedId = null
+      thunderLastRunning = null
+    }
+    /** Subscribe to selection changes once; idempotent. */
+    const thunderSubscribeList = (sessions) => {
+      if (thunderUnsubList !== null) return
+      let unsub = null
+      try { unsub = sessions.list.subscribe(() => { thunderRebind() }) } catch (e) { unsub = null }
+      thunderUnsubList = (typeof unsub === 'function') ? unsub : null
+    }
+    /* Follow the CURRENT session. `sessions.list` publishes the selection, and the
+       runtime's own list subscriber (registered at construction, so it runs first)
+       stages the session that makes binding() resolve. A miss here is therefore
+       ordinary timing rather than an error, so it retries on a short timer instead
+       of giving up — that single deferred retry is also what covers the very first
+       reconcile during boot, before any session is staged. */
+    const thunderRebind = () => {
+      const sessions = getSessions()
+      if (thunderRebindTimer !== null && typeof clearTimeout === 'function') clearTimeout(thunderRebindTimer)
+      thunderRebindTimer = null
+      /* Service not there yet: keep retrying rather than giving up for good, since
+         the only reason to be here is that the feature is switched on. */
+      if (sessions === undefined) {
+        if (typeof setTimeout === 'function') thunderRebindTimer = setTimeout(thunderRebind, 120)
+        return
+      }
+      // The list subscription may have been skipped earlier (no service then), so
+      // attach it as soon as one exists.
+      thunderSubscribeList(sessions)
+      let id
+      try {
+        const snap = sessions.list.getSnapshot()
+        id = (snap === null || typeof snap !== 'object') ? undefined : snap.current
+      } catch (e) {
+        return
+      }
+      if (id === undefined || id === null) {
+        thunderDetach()
+        return
+      }
+      /* Already watching this one: skip the detach/resubscribe churn. `sessions.list`
+         publishes for every unrelated reason (a title change, a job row, a sidebar
+         refresh), and rebinding on each one would tear down and re-add the same
+         subscription constantly.
+
+         Deliberately NOT claimed as an edge-correctness guard: the reseed would be
+         synchronous, so `running` cannot change inside the gap and the baseline
+         would land on the value it already held. Verified by removing this line —
+         the edge assertions still pass. It is a cost guard, and it is honest about
+         being one. */
+      if (id === thunderWatchedId && thunderUnsubSession !== null) return
+      thunderDetach()
+      let face = null
+      try {
+        const binding = sessions.binding(id)
+        if (binding !== undefined && binding !== null) face = binding.session
+      } catch (e) {
+        face = null
+      }
+      if (face === null || typeof face.subscribe !== 'function' || typeof face.getSnapshot !== 'function') {
+        if (typeof setTimeout === 'function') thunderRebindTimer = setTimeout(thunderRebind, 120)
+        return
+      }
+      thunderWatchedId = id
+      thunderLastRunning = thunderReadRunning(face)
+      let unsub = null
+      try {
+        unsub = face.subscribe(() => {
+          const next = thunderReadRunning(face)
+          if (next === null || next === thunderLastRunning) return
+          const prev = thunderLastRunning
+          thunderLastRunning = next
+          // First readable value is the baseline, not an edge — see the note above.
+          if (prev === null) return
+          showThunder(next ? THUNDER_START : THUNDER_DONE)
+        })
+      } catch (e) {
+        unsub = null
+      }
+      thunderUnsubSession = (typeof unsub === 'function') ? unsub : null
+      if (thunderUnsubSession === null) thunderWatchedId = null
+    }
+    const thunderStopWatch = () => {
+      if (thunderRebindTimer !== null && typeof clearTimeout === 'function') clearTimeout(thunderRebindTimer)
+      thunderRebindTimer = null
+      if (thunderUnsubList !== null) {
+        try { thunderUnsubList() } catch (e) { /* already torn down */ }
+        thunderUnsubList = null
+      }
+      thunderDetach()
+    }
+    /* Switched off costs nothing: no subscription, no timer, no plate. This mirrors
+       the contour layer's rule — an off switch must not leave a listener behind that
+       wakes on every streamed token just to return early. */
+    const syncThunder = () => {
+      if (!(isEnabled() && isThunderOn())) {
+        thunderStopWatch()
+        destroyThunder()
+        return
+      }
+      // thunderRebind() resolves the service itself and re-arms its own retry, so
+      // there is nothing to check here — being switched on is the whole condition.
+      thunderRebind()
+    }
+
     let disposeToken = () => {}
     let disposeStyles = () => {}
     let mounted = false
@@ -2755,6 +3005,124 @@ function apply(ctx) {
       body[data-ds-dark-theme] .endfield-settings-group-title {
         color: var(--edge-status-dark);
       }
+      /* ================= 雷霆大字 (娱乐模式) =================
+         The task-boundary announcement. Fixed, centred, above the shell overlay
+         layer and the app's own dialogs but BELOW the boot plate (2147483000), so
+         a boot animation still wins the screen it owns.
+
+         WHITE, EXPLICITLY. The request asks for white text, and white is the one
+         thing this theme's own tokens cannot promise: --dsw-alias-label-primary is
+         INK (#101110) in light mode, so inheriting it would print the word in near
+         black on cream. The glyph colour is therefore a literal #fff in both
+         schemes, and legibility over unknown page content is bought by the plate's
+         own scrim plus a dark text shadow rather than by the page background.
+
+         THE SCRIM ALPHA IS MEASURED, NOT PICKED BY EYE — and the first value was
+         WRONG. Shipping 0.28 looked fine in dark mode (18.92:1) and was almost
+         invisible in light: white on ink-over-cream measured 2.29:1 on bg-base and
+         2.11:1 on bg-layer-1, i.e. the same "on cream, #fff500 is not a colour
+         choice, it is an erasure" failure this theme already documents for the
+         watermark and the turn-status label — except here it was pure white. Caught
+         by rendering the plate and measuring the pixels (test/thunder-shot.js), not
+         by reading the CSS.
+
+         Measured white-vs-scrimmed-surface, ink #101110 over each light surface:
+             alpha   bg-base #e8e8e2   bg-layer-1 #f2f2ec   dark #101110
+             0.28         2.29:1            2.11:1            18.92:1
+             0.40         3.13:1            2.90:1            18.92:1
+             0.50         4.17:1            3.89:1            18.92:1
+             0.55         4.85:1            4.55:1            18.92:1
+         0.55 is the first step where BOTH light surfaces clear 4.5:1 — the AA bar
+         for ordinary body text, which is deliberate headroom for a word whose own
+         bar is only the 3:1 large-text floor. Dark mode is unaffected either way
+         (ink over near-black is the same colour), so the light surfaces are what
+         set this number.
+
+         pointer-events:none on both layers keeps every click, selection and scroll
+         underneath working while the word is up — the plate is a caption, not a
+         modal. Click-to-dismiss does NOT change that: the listener lives on the
+         DOCUMENT in the capture phase (see showThunder), so a press both clears the
+         word and reaches whatever the user aimed at. Giving this layer
+         'pointer-events: auto' to catch the click itself would turn it into a
+         full-screen click-eater for 3 seconds — verified by injecting exactly that
+         and watching test/thunder-dismiss.test.js fail on hit-testing. */
+      [data-endfield-thunder] {
+        position: fixed;
+        inset: 0;
+        z-index: 2147482000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        background: rgba(16, 17, 16, 0.55);
+        animation: endfield-thunder-plate 3000ms linear 1 both;
+      }
+      [data-endfield-thunder-word] {
+        /* 大字: heavy, oversized, and scaled off the viewport so it stays a
+           screen-filling statement at any window size rather than a fixed 48px that
+           looks large on a phone and small on a 4K panel. Same clamp discipline as
+           --edge-word on the boot plate. */
+        font-family: "Arial Black", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: clamp(44px, 13vw, 176px);
+        font-weight: 900;
+        line-height: 1;
+        letter-spacing: 0.12em;
+        /* The trailing letter-spacing would otherwise push the word off-centre. */
+        text-indent: 0.12em;
+        color: #fff;
+        white-space: nowrap;
+        text-align: center;
+        /* Ink halo: what makes white type survive on cream paper, where a pure
+           white glyph would otherwise have almost no edge. */
+        text-shadow:
+          0 0 2px rgba(16, 17, 16, 0.55),
+          0 4px 18px rgba(16, 17, 16, 0.65),
+          0 0 46px rgba(var(--edge-accent-rgb), 0.45);
+        animation: endfield-thunder-word 3000ms cubic-bezier(0.16, 1, 0.3, 1) 1 both;
+      }
+      /* The slam: overshoot in, hold, then fade. Keyframe percentages are the 3s
+         hold expressed as one timeline, so a single animation covers entry, hold and
+         exit and nothing has to be re-timed in JS. */
+      @keyframes endfield-thunder-word {
+        0%   { opacity: 0; transform: scale(2.4); }
+        7%   { opacity: 1; transform: scale(0.94); }
+        12%  { transform: scale(1); }
+        80%  { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.06); }
+      }
+      @keyframes endfield-thunder-plate {
+        0%   { opacity: 0; }
+        5%   { opacity: 1; }
+        80%  { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      /* The STATIC path: the word appears at full size and opacity, holds its 3s,
+         then the JS timer removes it. Two independent reasons reach this attribute
+         (see showThunder): the 动画 sub-switch being off — which is the DEFAULT — and
+         the OS asking for reduced motion. Driving it from an attribute rather than a
+         media query alone is what makes the default state testable in a browser that
+         cannot toggle the OS preference from script.
+
+         'opacity: 1' is load-bearing, not redundant: the animated rules start at
+         'opacity: 0' and rely on the keyframes to bring the word in, so cancelling
+         only 'animation' would leave a permanently invisible plate. */
+      [data-endfield-thunder][data-endfield-thunder-still],
+      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-word] {
+        animation: none;
+        opacity: 1;
+        transform: none;
+      }
+      /* Belt-and-braces for reduced motion: the attribute above already covers it,
+         but this keeps the guarantee in CSS even if a future edit reaches the DOM
+         without going through showThunder(). */
+      @media (prefers-reduced-motion: reduce) {
+        [data-endfield-thunder],
+        [data-endfield-thunder] [data-endfield-thunder-word] {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
     `)
       syncRadiusMode()
       syncPaletteClass()
@@ -2779,6 +3147,12 @@ function apply(ctx) {
       // transparency rules it depends on both live in that stylesheet, so leaving
       // it mounted would drop two raw canvases into the app's layout flow.
       contourTeardown()
+      /* The announcement plate is styled entirely by that stylesheet too, so an
+         in-flight word would become an unstyled, un-positioned block of text in the
+         document flow. Stop watching as well: with the theme off there is nothing to
+         announce into. */
+      thunderStopWatch()
+      destroyThunder()
     }
 
     if (isEnabled()) {
@@ -2791,6 +3165,186 @@ function apply(ctx) {
       // Boot animation: only on a real page load, only when switched on, and only
       // after the stylesheet above exists (mount() inserted it).
       if (isLoaderOn()) runLoader()
+      // Task announcements: subscribes only while switched on, and the first value
+      // it reads is a baseline, so enabling mid-turn stays silent.
+      syncThunder()
+    }
+
+    /* ---------- Settings page copy: zh / en dictionaries ----------
+       The panel followed DSH's language setting for nothing before this: every
+       label was a hardcoded Chinese literal, so an English UI showed a wholly
+       Chinese settings page.
+
+       The texts go through the app's own `locale` service (@deepseek-ai/dsh-client-
+       locale) rather than a private language guess: it already owns the user's
+       preference, its own durable storage and the re-render channel, and reading
+       navigator.language here would drift from the setting the user actually chose.
+
+       zh is the source of truth for the key set (this repo's convention) and en is
+       kept complete against it — a key present in one and missing in the other would
+       silently fall back to the raw key string in the UI, which is why the test suite
+       compares the two key sets rather than trusting review.
+
+       Naming: keys are grouped by row (`theme*`, `palette*`, `thunder*`) so a row's
+       copy stays discoverable next to its switch. */
+    const ENDFIELD_NS = 'settings.theme-endfield'
+    const LOCALE_ZH = {
+      nav: '终末地主题设置',
+      /* The separator between a row label and its value. It is a DICTIONARY KEY, not
+         a literal: Chinese uses the full-width '：' with no trailing space, English
+         the ASCII ': '. Hardcoding the full-width form (as the first version did) put
+         a Chinese colon into every English row — subtle, but exactly the kind of
+         thing that makes a localized page feel machine-translated. */
+      sep: '：',
+      on: '开启',
+      off: '关闭',
+      groupTheme: '主题',
+      groupBg: '背景',
+      groupAnim: '动画',
+      groupFun: '娱乐',
+      themeRow: '终末地主题',
+      themeOn: '开启主题',
+      themeOff: '关闭主题',
+      paletteRow: '主题配色',
+      paletteValley: '谷地黄',
+      paletteWuling: '武陵青',
+      paletteToValley: '切换谷地黄',
+      paletteToWuling: '切换武陵青',
+      paletteHintValley: '默认信号黄 #fff500（终末地官网强调色）',
+      paletteHintWuling: '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线',
+      radiusRow: '主题圆角',
+      radiusRound: '圆角',
+      radiusSquare: '直角',
+      radiusToRound: '切换圆角',
+      radiusToSquare: '切换直角',
+      contourRow: '等高线背景',
+      contourOn: '开启背景',
+      contourOff: '关闭背景',
+      contourHintOn: '当前配色的地形等高线铺满界面底层（置于所有内容之下）',
+      contourHintOff: '默认关闭；开启后在界面底层绘制等高线地形纹理',
+      contourAnimRow: '动态等高线',
+      contourAnimOn: '开启动态',
+      contourAnimOff: '切为静态',
+      contourAnimHintOn: '等高线缓慢流动变形（约 24fps，关闭后为静态图案）',
+      contourAnimHintOff: '静态等高线，不做任何逐帧计算',
+      contourAnimHintReduced: '系统已开启「减少动态效果」，当前保持静态',
+      contourAnimNeedLayer: '请先开启等高线背景',
+      watermarkRow: '背景水印',
+      watermarkOn: '开启水印',
+      watermarkOff: '关闭水印',
+      wmPersistRow: '水印保持显示',
+      wmPersistOn: '保持显示',
+      wmPersistOff: '仅新建页',
+      wmPersistHintOn: '在对话等非新建会话页面也显示水印（置于正文之下）',
+      wmPersistHintOff: '仅在新建会话页显示水印',
+      wmPersistNeedWm: '请先开启背景水印',
+      loaderRow: '启动加载动画',
+      loaderOn: '开启动画',
+      loaderOff: '关闭动画',
+      loaderHintOn: '刷新页面时播放 ENDFIELD 启动加载屏（左侧进度轨 + 百分比，跟随当前配色）',
+      loaderHintOff: '默认关闭；开启后每次刷新页面播放一次',
+      loaderNeed: '请先开启启动加载动画',
+      preview: '预览',
+      thunderRow: '雷霆大字',
+      thunderOn: '开启大字',
+      thunderOff: '关闭大字',
+      thunderHintOn: '任务开始/结束时，在屏幕中央用白色粗体大字显示「任务开始」/「任务完成」，3 秒后自动隐藏；点击屏幕任意处可立即关闭',
+      thunderHintOff: '默认关闭；开启后任务开始/结束时在屏幕中央显示「任务开始」/「任务完成」白色大字，3 秒后自动隐藏，点击任意处可立即关闭',
+      thunderNeed: '请先开启雷霆大字',
+      thunderAnimRow: '大字入场动画',
+      thunderAnimOn: '开启动画',
+      thunderAnimOff: '关闭动画',
+      thunderAnimHintOn: '大字由大缩小砸入并淡出（关闭后为直接显示，仍保持 3 秒）',
+      thunderAnimHintOff: '默认关闭；大字直接出现、3 秒后消失，不做缩放与淡入淡出',
+      thunderAnimHintReduced: '系统已开启「减少动态效果」，当前直接显示',
+    }
+    const LOCALE_EN = {
+      nav: 'Endfield Theme',
+      sep: ': ',
+      /* Capitalised: these are VALUES in a "Label: Value" readout, not sentence
+         fragments, and the screenshot showed lowercase reading like a typo there. */
+      on: 'On',
+      off: 'Off',
+      groupTheme: 'THEME',
+      groupBg: 'BACKGROUND',
+      groupAnim: 'ANIMATION',
+      groupFun: 'ENTERTAINMENT',
+      themeRow: 'Endfield theme',
+      themeOn: 'Turn on',
+      themeOff: 'Turn off',
+      paletteRow: 'Accent palette',
+      paletteValley: 'Valley Yellow',
+      paletteWuling: 'Wuling Cyan',
+      paletteToValley: 'Use Valley Yellow',
+      paletteToWuling: 'Use Wuling Cyan',
+      paletteHintValley: 'Default signal yellow #fff500 (the Endfield site accent)',
+      paletteHintWuling: 'Teal-cyan accent #14d0d0 for buttons, hover, selected rows and contours',
+      radiusRow: 'Corners',
+      radiusRound: 'Rounded',
+      radiusSquare: 'Square',
+      radiusToRound: 'Use rounded',
+      radiusToSquare: 'Use square',
+      contourRow: 'Contour background',
+      contourOn: 'Turn on',
+      contourOff: 'Turn off',
+      contourHintOn: 'Topographic contour lines fill the lowest layer, beneath all content',
+      contourHintOff: 'Off by default; draws a contour terrain texture behind the interface',
+      contourAnimRow: 'Animated contours',
+      contourAnimOn: 'Animate',
+      contourAnimOff: 'Make static',
+      contourAnimHintOn: 'The field drifts slowly at about 24fps (static pattern when off)',
+      contourAnimHintOff: 'Static contours, with no per-frame work at all',
+      contourAnimHintReduced: 'Your system asks for reduced motion, so it stays static',
+      contourAnimNeedLayer: 'Turn on the contour background first',
+      watermarkRow: 'Background wordmark',
+      watermarkOn: 'Turn on',
+      watermarkOff: 'Turn off',
+      wmPersistRow: 'Keep wordmark visible',
+      wmPersistOn: 'Keep visible',
+      wmPersistOff: 'New session only',
+      wmPersistHintOn: 'Also shown on conversations and other pages, behind the text',
+      wmPersistHintOff: 'Shown only on the new-session screen',
+      wmPersistNeedWm: 'Turn on the background wordmark first',
+      loaderRow: 'Boot animation',
+      loaderOn: 'Turn on',
+      loaderOff: 'Turn off',
+      loaderHintOn: 'Plays the ENDFIELD boot screen on reload (progress rail + percentage, following the palette)',
+      loaderHintOff: 'Off by default; plays once on every page reload when enabled',
+      loaderNeed: 'Turn on the boot animation first',
+      preview: 'Preview',
+      thunderRow: 'Task announcement',
+      thunderOn: 'Turn on',
+      thunderOff: 'Turn off',
+      thunderHintOn: 'Slams 任务开始 / 任务完成 across the screen centre in heavy white type for 3s; click anywhere to dismiss',
+      thunderHintOff: 'Off by default; shows 任务开始 / 任务完成 in heavy white type at the screen centre for 3s, dismissable by clicking anywhere',
+      thunderNeed: 'Turn on the task announcement first',
+      thunderAnimRow: 'Announcement entry animation',
+      thunderAnimOn: 'Animate',
+      thunderAnimOff: 'Turn off',
+      thunderAnimHintOn: 'The word punches in from oversized and fades out (appears instantly when off, still held 3s)',
+      thunderAnimHintOff: 'Off by default; the word appears instantly and leaves after 3s, with no scaling or fading',
+      thunderAnimHintReduced: 'Your system asks for reduced motion, so it appears instantly',
+    }
+
+    /* The locale service is optional, exactly like `theme` and `sessions`: the
+       in-process settings tests mount this theme with a ctx carrying only
+       theme/slots, and a composition without the locale plugin must still get a
+       working (Chinese) settings page rather than a crash. `t` therefore falls back
+       to the zh dictionary, and only the key itself as a last resort — a visible
+       key beats a blank row. */
+    const locale = ctx.get('locale')
+    let t = (key) => (Object.prototype.hasOwnProperty.call(LOCALE_ZH, key) ? LOCALE_ZH[key] : key)
+    let localeReady = false
+    if (locale !== undefined && typeof locale.register === 'function' && typeof locale.bind === 'function') {
+      /* Registered through ctx.effect so the dictionaries retire with the run;
+         re-applying the bundle would otherwise throw on the duplicate (ns, locale)
+         the service rejects by design. */
+      ctx.effect(() => locale.register(ENDFIELD_NS, { zh: LOCALE_ZH, en: LOCALE_EN }))
+      const bound = locale.bind(ENDFIELD_NS)
+      if (typeof bound === 'function') {
+        t = bound
+        localeReady = true
+      }
     }
 
     /* ---------- Settings page: 主题 (own settings.section) ---------- */
@@ -2800,7 +3354,24 @@ function apply(ctx) {
     if (slots !== undefined) {
       slots.inject('settings.section', () => {
         const d = slots.register(
-        { name: 'settings.section', id: 'theme-endfield', order: 35, label: '终末地主题设置' },
+        /* `label` is a THUNK, not a string: the slot contract re-evaluates it per
+           read, so the nav row follows a language switch with no re-registration.
+
+           `locale` is declared ONLY when a locale service actually exists. It is not
+           what drives the re-render — ui-renderer's useLocaleRevision subscribes
+           EVERY outlet to the locale revision, so this panel re-renders on a language
+           switch either way, and the body reads `t` from the apply closure rather than
+           from the injected seat. What declaring it buys is the framework's own
+           re-derivation of that seat; what it COSTS when the service is missing is a
+           hard failure — ui-renderer throws SlotAssemblyError ("entry declares locale
+           namespace ... but no locale face is installed") for an entry declaring a
+           namespace with no installed face. Declaring it unconditionally would turn a
+           composition without the locale plugin from "settings page in Chinese" into
+           "settings page crashes", so the key is spread in only when present. */
+        Object.assign(
+          { name: 'settings.section', id: 'theme-endfield', order: 35, label: () => t('nav') },
+          localeReady ? { locale: ENDFIELD_NS } : {}
+        ),
         () => {
           const R = (typeof React !== 'undefined') ? React : ((typeof require === 'function') ? require('react') : null)
           if (!R) return null
@@ -2810,6 +3381,8 @@ function apply(ctx) {
           const [loaderOn, setLoaderOn] = R.useState(isLoaderOn())
           const [contourOn, setContourOn] = R.useState(isContourOn())
           const [contourAnim, setContourAnim] = R.useState(isContourAnimOn())
+          const [thunderOn, setThunderOn] = R.useState(isThunderOn())
+          const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [palette, setPalette] = R.useState(readPalette())
           const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
@@ -2851,6 +3424,11 @@ function apply(ctx) {
             setEnabled(next)
             if (next) { mount(); syncWatermarkVisibility(); syncContour() }
             else { unmount(); syncWatermarkVisibility() }
+            /* The announcement watcher is gated on the master switch too, so it has
+               to be reconciled here. unmount() already stops it, but turning the
+               theme back ON must restart it — otherwise the feature would stay dead
+               until the next page load. */
+            syncThunder()
           }
           const toggleContour = () => {
             const next = !contourOn
@@ -2902,6 +3480,30 @@ function apply(ctx) {
             destroyLoader()
             runLoader()
           }
+          const toggleThunder = () => {
+            const next = !thunderOn
+            if (typeof localStorage !== 'undefined') localStorage.setItem(THUNDER_KEY, next ? '1' : '0')
+            setThunderOn(next)
+            /* syncThunder() reads storage, so the write above is what it acts on.
+               Turning it ON also shows the word once: a switch whose effect only
+               appears at some unpredictable later moment gives the user no way to
+               tell whether it worked. The preview runs BEFORE the watcher attaches,
+               so it cannot be mistaken for a real edge. */
+            if (next) showThunder(THUNDER_START)
+            else destroyThunder()
+            syncThunder()
+          }
+          const previewThunder = () => { showThunder(THUNDER_DONE) }
+          const toggleThunderAnim = () => {
+            const next = !thunderAnim
+            if (typeof localStorage !== 'undefined') localStorage.setItem(THUNDER_ANIM_KEY, next ? '1' : '0')
+            setThunderAnim(next)
+            /* Nothing to reconcile: the next showThunder() reads the switch and marks
+               the plate accordingly. Replaying now is what makes the change legible —
+               the difference between the two modes is only visible during the entry,
+               so a silent toggle would look like it did nothing. */
+            showThunder(THUNDER_START)
+          }
           const toggleMode = () => {
             const next = mode === 'round' ? 'square' : 'round'
             if (typeof localStorage !== 'undefined') localStorage.setItem(RADIUS_KEY, next)
@@ -2910,41 +3512,54 @@ function apply(ctx) {
             else document.body.classList.remove('theme-endfield-round')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
-          /* The eight switches are grouped into three concerns so the page can be
+          /* The ten switches are grouped into four concerns so the page can be
              scanned instead of read as a flat list: 主题 (master switch +
-             appearance), 背景 (contour sheet + watermark), 动画 (boot loader).
+             appearance), 背景 (contour sheet + watermark), 动画 (boot loader),
+             娱乐 (雷霆大字 announcements + their entry animation).
              Each group is an editorial numbered header; rows keep their stable
              React keys. The last row of each group drops its divider so the next
-             group header's own rule is the only line between groups. */
-          const groupTitle = (no, cn, en, first) => R.createElement('div', {
-            key: 'group-title-' + no,
-            className: 'endfield-settings-group-title',
-            style: {
-              display: 'flex', alignItems: 'center', gap: '8px',
-              marginTop: first ? '0' : '26px', paddingBottom: '8px',
-              borderBottom: '1px solid var(--dsw-alias-border-l1)',
-            },
-          }, [
-            R.createElement('span', { key: 'mark', 'aria-hidden': 'true', style: { width: '4px', height: '14px', flex: '0 0 auto', background: 'currentColor' } }),
-            R.createElement('span', { key: 'cn', style: { fontSize: '12px', fontWeight: 600, letterSpacing: '0.14em', lineHeight: '1.5' } }, no + ' ' + cn),
-            R.createElement('span', { key: 'en', style: { fontSize: '10px', fontWeight: 500, letterSpacing: '0.2em', opacity: 0.72, lineHeight: '1.5' } }, en),
-          ])
+             group header's own rule is the only line between groups.
+
+             The header shows the group name in the ACTIVE language plus a latin
+             all-caps line. Under English both would collapse to the same word, so
+             the second line is dropped there rather than printed twice — the latin
+             line is editorial styling for the Chinese name, not a translation. */
+          const groupTitle = (no, key, first) => {
+            const name = t(key)
+            const latin = LOCALE_EN[key]
+            const parts = [
+              R.createElement('span', { key: 'mark', 'aria-hidden': 'true', style: { width: '4px', height: '14px', flex: '0 0 auto', background: 'currentColor' } }),
+              R.createElement('span', { key: 'cn', style: { fontSize: '12px', fontWeight: 600, letterSpacing: '0.14em', lineHeight: '1.5' } }, no + ' ' + name),
+            ]
+            if (latin !== undefined && latin !== name) {
+              parts.push(R.createElement('span', { key: 'en', style: { fontSize: '10px', fontWeight: 500, letterSpacing: '0.2em', opacity: 0.72, lineHeight: '1.5' } }, latin))
+            }
+            return R.createElement('div', {
+              key: 'group-title-' + no,
+              className: 'endfield-settings-group-title',
+              style: {
+                display: 'flex', alignItems: 'center', gap: '8px',
+                marginTop: first ? '0' : '26px', paddingBottom: '8px',
+                borderBottom: '1px solid var(--dsw-alias-border-l1)',
+              },
+            }, parts)
+          }
+          /** "<row label>: <on|off>" — one spelling for every status row. */
+          const stateOf = (on) => t(on ? 'on' : 'off')
           const row = (key, last, children) => R.createElement('div', { key, style: last ? { ...rowStyle, borderBottom: 'none' } : rowStyle }, children)
           return R.createElement('div', { style: pageStyle }, [
             /* --- 01 主题：总开关在最前，随后是配色与圆角 --- */
             R.createElement('div', { key: 'group-theme' }, [
-              groupTitle('01', '主题', 'THEME', true),
+              groupTitle('01', 'groupTheme', true),
               row('theme', false, [
-                R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
-                R.createElement('button', { type: 'button', onClick: toggleTheme, style: btnStyleFor(enabled) }, enabled ? '关闭主题' : '开启主题')
+                R.createElement('span', { style: labelStyle }, t('themeRow') + t('sep') + stateOf(enabled)),
+                R.createElement('button', { type: 'button', onClick: toggleTheme, style: btnStyleFor(enabled) }, t(enabled ? 'themeOff' : 'themeOn'))
               ]),
               row('palette', false, [
                 R.createElement('span', { style: labelStyle },
-                  '主题配色：' + (palette === 'wuling' ? '武陵青' : '谷地黄'),
+                  t('paletteRow') + t('sep') + t(palette === 'wuling' ? 'paletteWuling' : 'paletteValley'),
                   R.createElement('span', { style: hintStyle },
-                    palette === 'wuling'
-                      ? '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线'
-                      : '默认信号黄 #fff500（终末地官网强调色）'
+                    t(palette === 'wuling' ? 'paletteHintWuling' : 'paletteHintValley')
                   )
                 ),
                 // A colour switch should show the colour it offers, not only name it.
@@ -2967,36 +3582,36 @@ function apply(ctx) {
                     type: 'button',
                     onClick: togglePalette,
                     style: btnStyleFor(true),
-                  }, palette === 'wuling' ? '切换谷地黄' : '切换武陵青')
+                  }, t(palette === 'wuling' ? 'paletteToValley' : 'paletteToWuling'))
                 )
               ]),
               row('radius', true, [
-                R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
-                R.createElement('button', { type: 'button', onClick: toggleMode, style: btnStyleFor(mode === 'round') }, mode === 'round' ? '切换直角' : '切换圆角')
+                R.createElement('span', { style: labelStyle }, t('radiusRow') + t('sep') + t(mode === 'round' ? 'radiusRound' : 'radiusSquare')),
+                R.createElement('button', { type: 'button', onClick: toggleMode, style: btnStyleFor(mode === 'round') }, t(mode === 'round' ? 'radiusToSquare' : 'radiusToRound'))
               ]),
             ]),
             /* --- 02 背景：等高线 + 水印，各自的主开关在前、附属开关在后 --- */
             R.createElement('div', { key: 'group-bg' }, [
-              groupTitle('02', '背景', 'BACKGROUND', false),
+              groupTitle('02', 'groupBg', false),
               row('contour', false, [
                 R.createElement('span', { style: labelStyle },
-                  '等高线背景：' + (contourOn ? '开启' : '关闭'),
+                  t('contourRow') + t('sep') + stateOf(contourOn),
                   R.createElement('span', { style: hintStyle },
                     // The sheet follows the palette, so the hint must not name one colour.
-                    contourOn ? '当前配色的地形等高线铺满界面底层（置于所有内容之下）' : '默认关闭；开启后在界面底层绘制等高线地形纹理'
+                    t(contourOn ? 'contourHintOn' : 'contourHintOff')
                   )
                 ),
-                R.createElement('button', { type: 'button', onClick: toggleContour, style: btnStyleFor(contourOn) }, contourOn ? '关闭背景' : '开启背景')
+                R.createElement('button', { type: 'button', onClick: toggleContour, style: btnStyleFor(contourOn) }, t(contourOn ? 'contourOff' : 'contourOn'))
               ]),
               row('contour-anim', false, [
                 R.createElement('span', { style: labelStyle },
-                  '动态等高线：' + (contourAnim ? '开启' : '关闭'),
+                  t('contourAnimRow') + t('sep') + stateOf(contourAnim),
                   R.createElement('span', { style: hintStyle },
                     // Say so when the OS preference is overriding the switch, rather
                     // than letting it look like the toggle is broken.
                     (contourAnim && prefersReducedMotion())
-                      ? '系统已开启「减少动态效果」，当前保持静态'
-                      : (contourAnim ? '等高线缓慢流动变形（约 24fps，关闭后为静态图案）' : '静态等高线，不做任何逐帧计算')
+                      ? t('contourAnimHintReduced')
+                      : t(contourAnim ? 'contourAnimHintOn' : 'contourAnimHintOff')
                   )
                 ),
                 R.createElement('button', {
@@ -3005,18 +3620,18 @@ function apply(ctx) {
                   style: btnStyleFor(contourAnim, !contourOn),
                   // Only meaningful while the layer itself is on.
                   disabled: !contourOn,
-                  title: contourOn ? '' : '请先开启等高线背景',
-                }, contourAnim ? '切为静态' : '开启动态')
+                  title: contourOn ? '' : t('contourAnimNeedLayer'),
+                }, t(contourAnim ? 'contourAnimOff' : 'contourAnimOn'))
               ]),
               row('watermark', false, [
-                R.createElement('span', { style: labelStyle }, '背景水印：' + (wmOn ? '开启' : '关闭')),
-                R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, wmOn ? '关闭水印' : '开启水印')
+                R.createElement('span', { style: labelStyle }, t('watermarkRow') + t('sep') + stateOf(wmOn)),
+                R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, t(wmOn ? 'watermarkOff' : 'watermarkOn'))
               ]),
               row('watermark-persist', true, [
                 R.createElement('span', { style: labelStyle },
-                  '水印保持显示：' + (wmPersist ? '开启' : '关闭'),
+                  t('wmPersistRow') + t('sep') + stateOf(wmPersist),
                   R.createElement('span', { style: hintStyle },
-                    wmPersist ? '在对话等非新建会话页面也显示水印（置于正文之下）' : '仅在新建会话页显示水印'
+                    t(wmPersist ? 'wmPersistHintOn' : 'wmPersistHintOff')
                   )
                 ),
                 R.createElement('button', {
@@ -3025,18 +3640,18 @@ function apply(ctx) {
                   style: btnStyleFor(wmPersist, !wmOn),
                   // The switch only has meaning while the watermark itself is on.
                   disabled: !wmOn,
-                  title: wmOn ? '' : '请先开启背景水印',
-                }, wmPersist ? '仅新建页' : '保持显示')
+                  title: wmOn ? '' : t('wmPersistNeedWm'),
+                }, t(wmPersist ? 'wmPersistOff' : 'wmPersistOn'))
               ]),
             ]),
             /* --- 03 动画：启动加载动画 --- */
             R.createElement('div', { key: 'group-anim' }, [
-              groupTitle('03', '动画', 'ANIMATION', false),
+              groupTitle('03', 'groupAnim', false),
               row('loader', true, [
                 R.createElement('span', { style: labelStyle },
-                  '启动加载动画：' + (loaderOn ? '开启' : '关闭'),
+                  t('loaderRow') + t('sep') + stateOf(loaderOn),
                   R.createElement('span', { style: hintStyle },
-                    loaderOn ? '刷新页面时播放 ENDFIELD 启动加载屏（左侧进度轨 + 百分比，跟随当前配色）' : '默认关闭；开启后每次刷新页面播放一次'
+                    t(loaderOn ? 'loaderHintOn' : 'loaderHintOff')
                   )
                 ),
                 R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
@@ -3047,10 +3662,54 @@ function apply(ctx) {
                     onClick: replayLoader,
                     style: btnStyleFor(false, !loaderOn),
                     disabled: !loaderOn,
-                    title: loaderOn ? '' : '请先开启启动加载动画',
-                  }, '预览'),
-                  R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, loaderOn ? '关闭动画' : '开启动画')
+                    title: loaderOn ? '' : t('loaderNeed'),
+                  }, t('preview')),
+                  R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, t(loaderOn ? 'loaderOff' : 'loaderOn'))
                 )
+              ]),
+            ]),
+            /* --- 04 娱乐：雷霆大字（主开关 + 入场动画子开关） --- */
+            R.createElement('div', { key: 'group-fun' }, [
+              groupTitle('04', 'groupFun', false),
+              row('thunder', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('thunderRow') + t('sep') + stateOf(thunderOn),
+                  R.createElement('span', { style: hintStyle },
+                    t(thunderOn ? 'thunderHintOn' : 'thunderHintOff')
+                  )
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  // Same affordance as the boot animation: let the user see the
+                  // effect now instead of waiting for the next task boundary.
+                  R.createElement('button', {
+                    type: 'button',
+                    onClick: previewThunder,
+                    style: btnStyleFor(false, !thunderOn),
+                    disabled: !thunderOn,
+                    title: thunderOn ? '' : t('thunderNeed'),
+                  }, t('preview')),
+                  R.createElement('button', { type: 'button', onClick: toggleThunder, style: btnStyleFor(thunderOn) }, t(thunderOn ? 'thunderOff' : 'thunderOn'))
+                )
+              ]),
+              row('thunder-anim', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('thunderAnimRow') + t('sep') + stateOf(thunderAnim),
+                  R.createElement('span', { style: hintStyle },
+                    // Say so when the OS preference is overriding the switch, rather
+                    // than letting it look like the toggle is broken.
+                    (thunderAnim && prefersReducedMotion())
+                      ? t('thunderAnimHintReduced')
+                      : t(thunderAnim ? 'thunderAnimHintOn' : 'thunderAnimHintOff')
+                  )
+                ),
+                R.createElement('button', {
+                  type: 'button',
+                  onClick: toggleThunderAnim,
+                  style: btnStyleFor(thunderAnim, !thunderOn),
+                  // Only meaningful while the announcement itself is on.
+                  disabled: !thunderOn,
+                  title: thunderOn ? '' : t('thunderNeed'),
+                }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
               ]),
             ]),
           ])
@@ -3073,6 +3732,12 @@ function apply(ctx) {
       // and two canvases — every one of them has to go with the run.
       contourTeardown()
       if (contourSchemeObserver) contourSchemeObserver.disconnect()
+      /* The announcement feature owns two store subscriptions, a retry timeout and
+         a hide timeout, all of which outlive the DOM node — unmount() covers the
+         switched-off path, but a fiber unload while the theme is ON must release
+         them here too, or the callbacks keep firing against a dead run. */
+      thunderStopWatch()
+      destroyThunder()
       disposeSettings()
     })
   }

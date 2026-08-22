@@ -18,7 +18,8 @@
     "check": "node check.js",
     "selftest": "node selftest.js",
     "test:contour": "node test/contour-render.test.js",
-    "test:settings": "node test/settings-rows.test.js && node test/settings-off.test.js",
+    "test:settings": "node test/settings-rows.test.js && node test/settings-off.test.js && node test/settings-locale.test.js",
+    "test:thunder": "node test/thunder-edges.test.js && node test/thunder-shot.js && node test/thunder-dismiss.test.js",
     "test:palette": "node test/palette-contrast.test.js && node test/palette-switch.test.js",
     "test:buttons": "node test/settings-buttons.test.js && node test/hover-check.js",
     "test:live": "node test/live-check.js",
@@ -28,7 +29,7 @@
     "test:a11y": "node test/contour-a11y.test.js",
     "test:coverage": "node test/contour-coverage.test.js",
     "test:perf": "node test/contour-perf.test.js",
-    "test": "node check.js && node selftest.js && node test/palette-contrast.test.js && node test/palette-switch.test.js && node test/settings-buttons.test.js && node test/hover-check.js && node test/settings-rows.test.js && node test/settings-off.test.js && node test/contour-render.test.js && node test/contour-specks.test.js && node test/watermark-stacking.test.js && node test/contour-smoothness.test.js && node test/contour-a11y.test.js && node test/contour-coverage.test.js && node test/contour-perf.test.js",
+    "test": "node check.js && node selftest.js && node test/palette-contrast.test.js && node test/palette-switch.test.js && node test/settings-buttons.test.js && node test/hover-check.js && node test/settings-rows.test.js && node test/settings-off.test.js && node test/settings-locale.test.js && node test/thunder-edges.test.js && node test/thunder-shot.js && node test/thunder-dismiss.test.js && node test/contour-render.test.js && node test/contour-specks.test.js && node test/watermark-stacking.test.js && node test/contour-smoothness.test.js && node test/contour-a11y.test.js && node test/contour-coverage.test.js && node test/contour-perf.test.js",
     "shots": "node test/shoot.js",
     "shots:verify": "node test/shoot.js && node test/verify-shots.js"
   },
