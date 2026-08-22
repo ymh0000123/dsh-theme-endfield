@@ -7,8 +7,9 @@
  *   1) theme.overrideTokens —— 覆盖主题令牌（亮/暗双色），映射终末地官网色板；
  *   2) insertCss —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
  *      （动态插件环境走 styles.insert；安装为独立 bundle 时直接注入 <style> 到 head。）
- *   3) 设置页「主题圆角」开关 —— 直角（默认）/ 圆角（恢复应用原生圆角）切换，
- *      localStorage 持久化（key: dsh-theme-endfield-radius）。
+ *   3) 设置页「终末地主题设置」—— 八个开关按三组分类（主题 / 背景 / 动画），
+ *      均由 localStorage 持久化（总开关、主题配色、圆角模式、等高线背景、
+ *      动态等高线、背景水印、水印保持显示、启动加载动画）。
  *
  * 由 dsh-client-modules 以 /plugins/theme-endfield/client.js 形式加载；
  * 通过 `dsh plugin --profile web add github:ymh0000123/dsh-theme-endfield` 安装挂载。
@@ -2742,6 +2743,18 @@ function apply(ctx) {
       /* Reduced motion is handled in finish(), which skips the sweep/fade entirely
          and removes the plate outright; nothing here needs to disable a transition,
          since the plate no longer declares one. */
+      /* Settings page group headers (rendered by the settings.section slot).
+         The label is accent ink that stays AA on both surfaces: light mode uses
+         the darkened accent stops (--edge-status-light: #6b5d00 / #006a6a),
+         dark mode the bright ones (--edge-status-dark: #fff500 / #14d0d0) — the
+         same measured pairs the turn-status shimmer uses. The palette class
+         flips both variables, so the header follows the palette for free. */
+      .endfield-settings-group-title {
+        color: var(--edge-status-light);
+      }
+      body[data-ds-dark-theme] .endfield-settings-group-title {
+        color: var(--edge-status-dark);
+      }
     `)
       syncRadiusMode()
       syncPaletteClass()
@@ -2884,118 +2897,146 @@ function apply(ctx) {
             else document.body.classList.remove('theme-endfield-round')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
-          // These rows are passed as an ARRAY, so each one needs a stable key or
-          // React logs a key warning for the whole list on every render.
+          /* The eight switches are grouped into three concerns so the page can be
+             scanned instead of read as a flat list: 主题 (master switch +
+             appearance), 背景 (contour sheet + watermark), 动画 (boot loader).
+             Each group is an editorial numbered header; rows keep their stable
+             React keys. The last row of each group drops its divider so the next
+             group header's own rule is the only line between groups. */
+          const groupTitle = (no, cn, en, first) => R.createElement('div', {
+            key: 'group-title-' + no,
+            className: 'endfield-settings-group-title',
+            style: {
+              display: 'flex', alignItems: 'center', gap: '8px',
+              marginTop: first ? '0' : '26px', paddingBottom: '8px',
+              borderBottom: '1px solid var(--dsw-alias-border-l1)',
+            },
+          }, [
+            R.createElement('span', { key: 'mark', 'aria-hidden': 'true', style: { width: '4px', height: '14px', flex: '0 0 auto', background: 'currentColor' } }),
+            R.createElement('span', { key: 'cn', style: { fontSize: '12px', fontWeight: 600, letterSpacing: '0.14em', lineHeight: '1.5' } }, no + ' ' + cn),
+            R.createElement('span', { key: 'en', style: { fontSize: '10px', fontWeight: 500, letterSpacing: '0.2em', opacity: 0.72, lineHeight: '1.5' } }, en),
+          ])
+          const row = (key, last, children) => R.createElement('div', { key, style: last ? { ...rowStyle, borderBottom: 'none' } : rowStyle }, children)
           return R.createElement('div', { style: pageStyle }, [
-            /* Palette first: it repaints the whole UI, so it is the row a user
-               looks for, and every switch below is rendered in its colour. */
-            R.createElement('div', { key: 'palette', style: rowStyle },
-              R.createElement('span', { style: labelStyle },
-                '主题配色：' + (palette === 'wuling' ? '武陵青' : '谷地黄'),
-                R.createElement('span', { style: hintStyle },
-                  palette === 'wuling'
-                    ? '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线'
-                    : '默认信号黄 #fff500（终末地官网强调色）'
+            /* --- 01 主题：总开关在最前，随后是配色与圆角 --- */
+            R.createElement('div', { key: 'group-theme' }, [
+              groupTitle('01', '主题', 'THEME', true),
+              row('theme', false, [
+                R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
+                R.createElement('button', { type: 'button', onClick: toggleTheme, style: btnStyleFor(enabled) }, enabled ? '关闭主题' : '开启主题')
+              ]),
+              row('palette', false, [
+                R.createElement('span', { style: labelStyle },
+                  '主题配色：' + (palette === 'wuling' ? '武陵青' : '谷地黄'),
+                  R.createElement('span', { style: hintStyle },
+                    palette === 'wuling'
+                      ? '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线'
+                      : '默认信号黄 #fff500（终末地官网强调色）'
+                  )
+                ),
+                // A colour switch should show the colour it offers, not only name it.
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', alignItems: 'center' } },
+                  R.createElement('span', {
+                    'aria-hidden': 'true',
+                    style: {
+                      width: '14px',
+                      height: '14px',
+                      flex: '0 0 auto',
+                      background: 'var(--edge-accent)',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: mode === 'round' ? '999px' : '0',
+                    },
+                  }),
+                  R.createElement('button', {
+                    type: 'button',
+                    onClick: togglePalette,
+                    style: btnStyleFor(true),
+                  }, palette === 'wuling' ? '切换谷地黄' : '切换武陵青')
                 )
-              ),
-              // A colour switch should show the colour it offers, not only name it.
-              R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', alignItems: 'center' } },
-                R.createElement('span', {
-                  'aria-hidden': 'true',
-                  style: {
-                    width: '14px',
-                    height: '14px',
-                    flex: '0 0 auto',
-                    background: 'var(--edge-accent)',
-                    border: '1px solid var(--dsw-alias-border-l2)',
-                    borderRadius: mode === 'round' ? '999px' : '0',
-                  },
-                }),
+              ]),
+              row('radius', true, [
+                R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
+                R.createElement('button', { type: 'button', onClick: toggleMode, style: btnStyleFor(mode === 'round') }, mode === 'round' ? '切换直角' : '切换圆角')
+              ]),
+            ]),
+            /* --- 02 背景：等高线 + 水印，各自的主开关在前、附属开关在后 --- */
+            R.createElement('div', { key: 'group-bg' }, [
+              groupTitle('02', '背景', 'BACKGROUND', false),
+              row('contour', false, [
+                R.createElement('span', { style: labelStyle },
+                  '等高线背景：' + (contourOn ? '开启' : '关闭'),
+                  R.createElement('span', { style: hintStyle },
+                    // The sheet follows the palette, so the hint must not name one colour.
+                    contourOn ? '当前配色的地形等高线铺满界面底层（置于所有内容之下）' : '默认关闭；开启后在界面底层绘制等高线地形纹理'
+                  )
+                ),
+                R.createElement('button', { type: 'button', onClick: toggleContour, style: btnStyleFor(contourOn) }, contourOn ? '关闭背景' : '开启背景')
+              ]),
+              row('contour-anim', false, [
+                R.createElement('span', { style: labelStyle },
+                  '动态等高线：' + (contourAnim ? '开启' : '关闭'),
+                  R.createElement('span', { style: hintStyle },
+                    // Say so when the OS preference is overriding the switch, rather
+                    // than letting it look like the toggle is broken.
+                    (contourAnim && prefersReducedMotion())
+                      ? '系统已开启「减少动态效果」，当前保持静态'
+                      : (contourAnim ? '等高线缓慢流动变形（约 24fps，关闭后为静态图案）' : '静态等高线，不做任何逐帧计算')
+                  )
+                ),
                 R.createElement('button', {
                   type: 'button',
-                  onClick: togglePalette,
-                  style: btnStyleFor(true),
-                }, palette === 'wuling' ? '切换谷地黄' : '切换武陵青')
-              )
-            ),
-            R.createElement('div', { key: 'contour', style: rowStyle },
-              R.createElement('span', { style: labelStyle },
-                '等高线背景：' + (contourOn ? '开启' : '关闭'),
-                R.createElement('span', { style: hintStyle },
-                  // The sheet follows the palette, so the hint must not name one colour.
-                  contourOn ? '当前配色的地形等高线铺满界面底层（置于所有内容之下）' : '默认关闭；开启后在界面底层绘制等高线地形纹理'
-                )
-              ),
-              R.createElement('button', { type: 'button', onClick: toggleContour, style: btnStyleFor(contourOn) }, contourOn ? '关闭背景' : '开启背景')
-            ),
-            R.createElement('div', { key: 'contour-anim', style: rowStyle },
-              R.createElement('span', { style: labelStyle },
-                '动态等高线：' + (contourAnim ? '开启' : '关闭'),
-                R.createElement('span', { style: hintStyle },
-                  // Say so when the OS preference is overriding the switch, rather
-                  // than letting it look like the toggle is broken.
-                  (contourAnim && prefersReducedMotion())
-                    ? '系统已开启「减少动态效果」，当前保持静态'
-                    : (contourAnim ? '等高线缓慢流动变形（约 24fps，关闭后为静态图案）' : '静态等高线，不做任何逐帧计算')
-                )
-              ),
-              R.createElement('button', {
-                type: 'button',
-                onClick: toggleContourAnim,
-                style: btnStyleFor(contourAnim, !contourOn),
-                // Only meaningful while the layer itself is on.
-                disabled: !contourOn,
-                title: contourOn ? '' : '请先开启等高线背景',
-              }, contourAnim ? '切为静态' : '开启动态')
-            ),
-            R.createElement('div', { key: 'watermark', style: rowStyle },
-              R.createElement('span', { style: labelStyle }, '背景水印：' + (wmOn ? '开启' : '关闭')),
-              R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, wmOn ? '关闭水印' : '开启水印')
-            ),
-            R.createElement('div', { key: 'watermark-persist', style: rowStyle },
-              R.createElement('span', { style: labelStyle },
-                '水印保持显示：' + (wmPersist ? '开启' : '关闭'),
-                R.createElement('span', { style: hintStyle },
-                  wmPersist ? '在对话等非新建会话页面也显示水印（置于正文之下）' : '仅在新建会话页显示水印'
-                )
-              ),
-              R.createElement('button', {
-                type: 'button',
-                onClick: toggleWmPersist,
-                style: btnStyleFor(wmPersist, !wmOn),
-                // The switch only has meaning while the watermark itself is on.
-                disabled: !wmOn,
-                title: wmOn ? '' : '请先开启背景水印',
-              }, wmPersist ? '仅新建页' : '保持显示')
-            ),
-            R.createElement('div', { key: 'loader', style: rowStyle },
-              R.createElement('span', { style: labelStyle },
-                '启动加载动画：' + (loaderOn ? '开启' : '关闭'),
-                R.createElement('span', { style: hintStyle },
-                  loaderOn ? '刷新页面时播放 ENDFIELD 启动加载屏（左侧进度轨 + 百分比，跟随当前配色）' : '默认关闭；开启后每次刷新页面播放一次'
-                )
-              ),
-              R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                // Replay only makes sense while the feature is on; it lets the user
-                // re-watch the animation without reloading the page.
+                  onClick: toggleContourAnim,
+                  style: btnStyleFor(contourAnim, !contourOn),
+                  // Only meaningful while the layer itself is on.
+                  disabled: !contourOn,
+                  title: contourOn ? '' : '请先开启等高线背景',
+                }, contourAnim ? '切为静态' : '开启动态')
+              ]),
+              row('watermark', false, [
+                R.createElement('span', { style: labelStyle }, '背景水印：' + (wmOn ? '开启' : '关闭')),
+                R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, wmOn ? '关闭水印' : '开启水印')
+              ]),
+              row('watermark-persist', true, [
+                R.createElement('span', { style: labelStyle },
+                  '水印保持显示：' + (wmPersist ? '开启' : '关闭'),
+                  R.createElement('span', { style: hintStyle },
+                    wmPersist ? '在对话等非新建会话页面也显示水印（置于正文之下）' : '仅在新建会话页显示水印'
+                  )
+                ),
                 R.createElement('button', {
                   type: 'button',
-                  onClick: replayLoader,
-                  style: btnStyleFor(false, !loaderOn),
-                  disabled: !loaderOn,
-                  title: loaderOn ? '' : '请先开启启动加载动画',
-                }, '预览'),
-                R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, loaderOn ? '关闭动画' : '开启动画')
-              )
-            ),
-            R.createElement('div', { key: 'theme', style: rowStyle },
-              R.createElement('span', { style: labelStyle }, '终末地主题：' + (enabled ? '开启' : '关闭')),
-              R.createElement('button', { type: 'button', onClick: toggleTheme, style: btnStyleFor(enabled) }, enabled ? '关闭主题' : '开启主题')
-            ),
-            R.createElement('div', { key: 'radius', style: rowStyle },
-              R.createElement('span', { style: labelStyle }, '主题圆角：' + (mode === 'round' ? '圆角' : '直角')),
-              R.createElement('button', { type: 'button', onClick: toggleMode, style: btnStyleFor(mode === 'round') }, mode === 'round' ? '切换直角' : '切换圆角')
-            ),
+                  onClick: toggleWmPersist,
+                  style: btnStyleFor(wmPersist, !wmOn),
+                  // The switch only has meaning while the watermark itself is on.
+                  disabled: !wmOn,
+                  title: wmOn ? '' : '请先开启背景水印',
+                }, wmPersist ? '仅新建页' : '保持显示')
+              ]),
+            ]),
+            /* --- 03 动画：启动加载动画 --- */
+            R.createElement('div', { key: 'group-anim' }, [
+              groupTitle('03', '动画', 'ANIMATION', false),
+              row('loader', true, [
+                R.createElement('span', { style: labelStyle },
+                  '启动加载动画：' + (loaderOn ? '开启' : '关闭'),
+                  R.createElement('span', { style: hintStyle },
+                    loaderOn ? '刷新页面时播放 ENDFIELD 启动加载屏（左侧进度轨 + 百分比，跟随当前配色）' : '默认关闭；开启后每次刷新页面播放一次'
+                  )
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  // Replay only makes sense while the feature is on; it lets the user
+                  // re-watch the animation without reloading the page.
+                  R.createElement('button', {
+                    type: 'button',
+                    onClick: replayLoader,
+                    style: btnStyleFor(false, !loaderOn),
+                    disabled: !loaderOn,
+                    title: loaderOn ? '' : '请先开启启动加载动画',
+                  }, '预览'),
+                  R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, loaderOn ? '关闭动画' : '开启动画')
+                )
+              ]),
+            ]),
           ])
         }
       )

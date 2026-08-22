@@ -142,10 +142,18 @@ pass('settings panel rendered without throwing')
 
 const nodes = walk(tree)
 const buttons = nodes.filter((n) => n.type === 'button')
-const rows = (tree.children || []).filter((c) => c && c.type === 'div')
+/* The rows live inside three group containers (主题 / 背景 / 动画), so "all
+   rows" means every div whose key is one of the eight switch rows, wherever
+   it sits in the tree. */
+const ROW_KEYS = ['theme', 'palette', 'radius', 'contour', 'contour-anim', 'watermark', 'watermark-persist', 'loader']
+const rows = nodes.filter((n) => n.type === 'div' && n.props && ROW_KEYS.includes(n.props.key))
+const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.props && /^group-/.test(c.props.key))
 
 if (rows.length === 8) pass('panel has all 8 setting rows')
 else fail('expected 8 rows, found ' + rows.length)
+
+if (groups.length === 3) pass('rows are grouped into 3 sections (主题/背景/动画)')
+else fail('expected 3 group containers, found ' + groups.length)
 
 const unkeyed = rows.filter((r) => !r.props || r.props.key === undefined)
 if (unkeyed.length === 0) pass('every row carries a React key')
@@ -155,7 +163,15 @@ const keys = rows.map((r) => r.props.key)
 if (new Set(keys).size === keys.length) pass('row keys are unique: ' + keys.join(', '))
 else fail('duplicate row keys: ' + keys.join(', '))
 
+/* The group headers must be numbered editorial labels in the documented order,
+   and the scheme-aware ink rule for them must exist in the stylesheet source. */
 const all = textOf(tree)
+for (const [label, title] of [['01 主题', 'THEME'], ['02 背景', 'BACKGROUND'], ['03 动画', 'ANIMATION']]) {
+  if (all.includes(label) && all.includes(title)) pass('group header present: ' + label + ' / ' + title)
+  else fail('group header missing: ' + label + ' / ' + title)
+}
+if (src.includes('.endfield-settings-group-title')) pass('group-title stylesheet rule is defined')
+else fail('client.js never defines .endfield-settings-group-title — headers will use default text colour')
 /* Rows that must exist. 光点移动 is deliberately NOT in this list: it is described
    in the README and was asserted here, but it has never existed in client.js (git
    log -S finds no commit adding it), so the assertion tested the test rather than
