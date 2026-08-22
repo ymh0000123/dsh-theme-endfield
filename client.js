@@ -2816,22 +2816,35 @@ function apply(ctx) {
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
           // Sub-label explaining what a switch does, so the row is self-describing.
           const hintStyle = { display: 'block', color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', fontWeight: 400, lineHeight: '1.5', marginTop: '2px' }
-          const btnStyleFor = (on, disabled) => ({
-            color: on ? '#000' : 'var(--dsw-alias-label-primary)',
-            /* The switches are themed BY the theme they configure, so the "on"
-               fill reads from the palette variable rather than a literal — an
-               inline #fff500 here would keep every enabled button yellow while
-               the rest of the UI turned cyan. */
-            background: on ? 'var(--edge-accent)' : 'var(--edge-btn-muted)',
-            border: '1px solid var(--dsw-alias-border-l2)',
-            borderRadius: mode === 'round' ? '999px' : '0',
-            padding: '4px 14px',
-            fontSize: '12px',
-            // A disabled control has to look disabled, not merely ignore clicks.
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            opacity: disabled ? 0.45 : 1,
-            whiteSpace: 'nowrap',
-          })
+          const btnStyleFor = (on, disabled) => {
+            /* The switches are themed BY the theme they configure, so while the
+               theme is ON the "on" fill reads from the palette variable rather
+               than a literal — an inline #fff500 here would keep every enabled
+               button yellow while the rest of the UI turned cyan.
+
+               But --edge-accent / --edge-btn-muted live in the theme's own
+               stylesheet, which unmount() removes when the theme is switched
+               OFF. The hardcoded ink (#000) would then sit on a transparent
+               button — invisible in dark mode, where the app panel is dark.
+               So when the theme is OFF these buttons fall back to app-native
+               tokens (filled chip for "on", outline for "off"), which are the
+               same surfaces the rest of the settings page uses. */
+            const themed = enabled
+            return {
+              color: !themed ? 'var(--dsw-alias-label-primary)' : (on ? '#000' : 'var(--dsw-alias-label-primary)'),
+              background: !themed
+                ? (on ? 'var(--dsw-alias-interactive-bg-hover-solid)' : 'transparent')
+                : (on ? 'var(--edge-accent)' : 'var(--edge-btn-muted)'),
+              border: '1px solid var(--dsw-alias-border-l2)',
+              borderRadius: mode === 'round' ? '999px' : '0',
+              padding: '4px 14px',
+              fontSize: '12px',
+              // A disabled control has to look disabled, not merely ignore clicks.
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.45 : 1,
+              whiteSpace: 'nowrap',
+            }
+          }
           const toggleTheme = () => {
             const next = !enabled
             if (typeof localStorage !== 'undefined') localStorage.setItem(ENABLED_KEY, next ? '1' : '0')
@@ -2942,7 +2955,10 @@ function apply(ctx) {
                       width: '14px',
                       height: '14px',
                       flex: '0 0 auto',
-                      background: 'var(--edge-accent)',
+                      // --edge-accent only exists while the theme stylesheet is
+                      // mounted; with the theme off the chip falls back to the
+                      // app's own filled surface so it stays visible.
+                      background: enabled ? 'var(--edge-accent)' : 'var(--dsw-alias-interactive-bg-hover-solid)',
                       border: '1px solid var(--dsw-alias-border-l2)',
                       borderRadius: mode === 'round' ? '999px' : '0',
                     },
