@@ -5,11 +5,13 @@
  *
  * Client 半部：
  *   1) theme.overrideTokens —— 覆盖主题令牌（亮/暗双色），映射终末地官网色板；
- *   2) insertCss —— 注入字体栈、信号黄强调、直角化、去蓝、hover 反色等全局样式。
+ *   2) insertCss —— 注入字体栈、强调色、直角化、去蓝、hover 反色等全局样式。
  *      （动态插件环境走 styles.insert；安装为独立 bundle 时直接注入 <style> 到 head。）
- *   3) 设置页「终末地主题设置」—— 八个开关按三组分类（主题 / 背景 / 动画），
- *      均由 localStorage 持久化（总开关、主题配色、圆角模式、等高线背景、
- *      动态等高线、背景水印、水印保持显示、启动加载动画）。
+ *   3) 设置页「终末地主题设置」—— 十个开关按四组分类（主题 / 背景 / 动画 / 娱乐），
+ *      均由 localStorage 持久化，文案跟随 DSH 的语言设置。
+ *
+ * 文档：README.md 为索引；设计语言见 docs/design-language.md，
+ * 各开关行为见 docs/features.md，实现决策与实测数据见 docs/engineering-notes.md。
  *
  * 由 dsh-client-modules 以 /plugins/theme-endfield/client.js 形式加载；
  * 通过 `dsh plugin --profile web add github:ymh0000123/dsh-theme-endfield` 安装挂载。

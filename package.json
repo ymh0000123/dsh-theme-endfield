@@ -58,6 +58,7 @@
     "client.js",
     "cordis.patch.yml",
     "README.md",
+    "docs",
     "LICENSE"
   ],
   "engines": {
