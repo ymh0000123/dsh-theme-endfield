@@ -109,6 +109,7 @@ node test/thunder-dismiss.test.js   # 点击关闭：真实指针事件 + 命中
 node test/contour-render.test.js      # 21 项行为断言
 node test/contour-specks.test.js      # 残渣过滤 + 随机种子 + 空白格
 node test/contour-smoothness.test.js  # 曲线平滑（对比直线段渲染）
+node test/contour-cusps.test.js       # 逐帧尖点 / 锐角（issue #3）
 node test/contour-a11y.test.js        # prefers-reduced-motion 行为
 node test/contour-coverage.test.js    # 8×5 分区墨迹覆盖率
 node test/contour-perf.test.js        # 稳态帧成本（n=80）
@@ -122,6 +123,12 @@ node test/shoot.js                    # 输出亮/暗 × 两配色共四张截�
 **`contour-specks.test.js`** 守四件事，并逐一做了反向对照：改回写死种子 → 报「5 次加载地形完全相同」；关掉过滤器 → 报 9 条全画布外、15 条短描边、7 个小环；空白格门槛调回 1 → 空白格重现。
 
 **`contour-smoothness.test.js`** 把**真实的绘制函数原样切出**来跑，而不是重写一份等价逻辑。它拿同一批几何分别用曲线和直线段各画一遍，比较像素：曲线版必须**显著不同**（证明平滑真的生效）、**总墨迹量基本不变**（证明形状没被扭曲）、且抗锯齿覆盖更多。
+
+**`contour-cusps.test.js`** 补的是上面那条留下的**盲区**：`smoothness` 只比较**单帧**里「曲线画」与「直线画」的像素差，因此看不见两种画法**共有**的缺陷，也从不推进动画。issue #3 的锐角正是如此——每帧都在，只是随场漂移不断换位置，所以整套测试全绿而屏幕上每帧约有 127 个尖刺。
+
+这个脚本改为**量真正画出来的曲线本身**：桩掉一个 2d context，让**原样切出的** `contourDrawLines()` 自己录下 `moveTo/lineTo/quadraticCurveTo/closePath` 调用流，再密集采样这条流、逐点测转角（闭合子路径**连接缝一起按循环测**）。样条的分段布局不在测试里重算，所以测试不会悄悄偏离它要检查的渲染器。
+
+跑 12 帧真实动画序列，断言：**任一帧都没有尖点（>150°）**、**没有锐角（>90°）**、中段仍平滑（p99 < 12°，兜住「又退化成折线」）、且闭合环**确实是按环画的**（守机制而非只守症状）。三个方向对照都做了：还原末段 `quadraticCurveTo` → 报 146 个尖点；把 `closePath()` 变成空操作 → 报「0 个闭合子路径」；只删发夹尖端不删整根 → 最大转角从 65° 回升到 127°。
 
 **`contour-a11y.test.js`** 用 `--force-prefers-reduced-motion` 在**整个浏览器**层面施加该偏好（页面脚本无法切换它），然后在动效开关为「开」的前提下断言：图案仍渲染、场**零变化**。
 

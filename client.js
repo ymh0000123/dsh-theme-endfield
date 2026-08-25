@@ -840,19 +840,106 @@ function apply(ctx) {
           && (maxy - miny) < CONTOUR_KEEP_RING) return false
         return true
       }
+      /* TANGENCY NEEDLES. Where a level runs nearly TANGENT to the field, the true
+         isoline has a smooth, very high curvature tip. Marching squares interpolates
+         linearly on a 10px grid, so it cannot represent that tip: it emits a hairpin
+         that goes out and comes straight back, with a BASE (the gap between the
+         apex's two neighbours) far narrower than the 1px stroke. Measured on the real
+         output, worst case: apex 6.26px out from a base of 0.831px.
+
+         At that width the outbound and return strokes paint the SAME pixels, so the
+         pair does not read as a narrow valley — only the protruding whisker shows,
+         which is precisely the "irregular sharp angle" in issue #3. Smoothing cannot
+         help: the midpoint spline faithfully reproduces a feature that is genuinely
+         in the geometry, so it has to be removed here, at the source.
+
+         The whole hairpin is collapsed (see the note on the merge below). Both tests
+         are required and were measured over 24 frames (152.6k vertices, 1.18Mpx of
+         ink):
+           base < 2px   the stroke cannot resolve it (a 1px line is ~1px wide)
+           turn > 90    it doubles back rather than merely turning a corner
+         That is 0.7 vertices per frame and 0.0037% of total ink -- artifact removal,
+         not thinning. Real narrow features are untouched: turns over 90 degrees have
+         a median base of 4.03px, well clear of the cutoff, and the whole 8-12px base
+         band (29562 vertices) has a p99 turn of only 21.7 degrees. */
+      const deneedle = (p) => {
+        const n = p.length / 2
+        if (n < 4) return p
+        /* Scan first and return the ORIGINAL array when there is nothing to do, so
+           the overwhelmingly common path allocates nothing at 24fps. */
+        let found = false
+        for (let k = 1; k < n - 1; k++) {
+          const bx = p[(k + 1) * 2] - p[(k - 1) * 2]
+          const by = p[(k + 1) * 2 + 1] - p[(k - 1) * 2 + 1]
+          if (bx * bx + by * by >= 4) continue          // base >= 2px: keep
+          const ax = p[k * 2] - p[(k - 1) * 2]
+          const ay = p[k * 2 + 1] - p[(k - 1) * 2 + 1]
+          const cx = p[(k + 1) * 2] - p[k * 2]
+          const cy = p[(k + 1) * 2 + 1] - p[k * 2 + 1]
+          // turn > 90 degrees <=> the two segment vectors point against each other.
+          if (ax * cx + ay * cy < 0) { found = true; break }
+        }
+        if (!found) return p
+        const gx = p[0] - p[(n - 1) * 2]
+        const gy = p[1] - p[(n - 1) * 2 + 1]
+        const closed = (gx * gx + gy * gy) < 4
+        /* COLLAPSE THE WHOLE NEEDLE, not just its tip. Dropping the apex alone leaves
+           the base itself as a real segment, and that was measured to be worse than
+           the disease: a 0.831px stub inherits the reversal as TWO ~78-degree turns
+           (10.20 -> 0.83 -> 10.25px). The apex AND its far neighbour are therefore
+           both consumed, and the surviving previous vertex is pulled onto the base
+           midpoint -- a sub-pixel move (half of at most 2px) that no 1px stroke can
+           show, leaving one smooth vertex where the hairpin was.
+           Each test uses the SURVIVING previous vertex, so a run of needles collapses
+           progressively instead of each test being fooled by a neighbour that is
+           itself about to be consumed. */
+        const q = [p[0], p[1]]
+        let k = 1
+        while (k < n - 1) {
+          const px = q[q.length - 2], py = q[q.length - 1]
+          const bx = p[(k + 1) * 2] - px, by = p[(k + 1) * 2 + 1] - py
+          if (bx * bx + by * by < 4) {
+            const ax = p[k * 2] - px, ay = p[k * 2 + 1] - py
+            const cx = p[(k + 1) * 2] - p[k * 2], cy = p[(k + 1) * 2 + 1] - p[k * 2 + 1]
+            if (ax * cx + ay * cy < 0) {
+              if (k + 1 < n - 1) {
+                q[q.length - 2] = (px + p[(k + 1) * 2]) / 2
+                q[q.length - 1] = (py + p[(k + 1) * 2 + 1]) / 2
+                k += 2
+                continue
+              }
+              // The far neighbour is the final vertex, which must survive to keep an
+              // endpoint (or a ring's closure) intact: consume only the apex.
+              k += 1
+              continue
+            }
+          }
+          q.push(p[k * 2], p[k * 2 + 1])
+          k += 1
+        }
+        q.push(p[(n - 1) * 2], p[(n - 1) * 2 + 1])
+        /* A ring is closed by REPEATING its start vertex, and the merge above may have
+           nudged that start. Re-anchor the repeat so the ring stays exactly closed and
+           both keep() and the cyclic draw path still classify it as one. */
+        if (closed) {
+          q[q.length - 2] = q[0]
+          q[q.length - 1] = q[1]
+        }
+        return q
+      }
       // Open chains first (they have a free end), then whatever remains is a loop.
       // Doing it in this order stops a ring being entered mid-way and split in two.
       for (let k = 0; k < tn; k++) {
         const id = touched[k]
         if (seen[id] !== st && n2[id] < 0) {
-          const p = walk(id)
+          const p = deneedle(walk(id))
           if (keep(p)) out.push(p)
         }
       }
       for (let k = 0; k < tn; k++) {
         const id = touched[k]
         if (seen[id] !== st) {
-          const p = walk(id)
+          const p = deneedle(walk(id))
           if (keep(p)) out.push(p)
         }
       }
@@ -938,7 +1025,19 @@ function apply(ctx) {
            chaikin x2   p99 41.7 -> 12.0 deg, 22.2k verts, +1.45 ms
            this         no polyline corners left at all, 5.5k verts, +0.38 ms
          It changed 22.1% of stroke pixels, i.e. it is doing real work, at the lowest
-         cost of the three and without inflating memory every frame. */
+         cost of the three and without inflating memory every frame.
+
+         THE MIDPOINT SPLINE IS ONLY KINK-FREE IN ITS INTERIOR, which is what the two
+         cases below exist for. Reported as issue #3 ("大量不规则锐角锯齿", visible
+         while the sheet animates) and measured on the real output:
+           - the old final quadratic was degenerate and put an exact 180-degree cusp
+             on 95 of 95 multi-vertex paths (a ~1.4px backward whisker);
+           - closed rings were drawn as OPEN curves, so 32 of those 95 met themselves
+             at a seam corner of up to 26.5 degrees.
+         Interior turn angles were already fine (p99 30.5 -> 5.6 deg), which is why
+         this read as scattered sharp specks rather than uniformly faceted lines, and
+         why it survived a static screenshot: with ~100 paths on screen the defect is
+         ~127 spikes per frame, each landing somewhere new as the field drifts. */
       ctx.beginPath()
       for (let i = 0; i < contourPaths.length; i++) {
         const p = contourPaths[i]
@@ -949,15 +1048,57 @@ function apply(ctx) {
           for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1])
           continue
         }
+        /* CLOSED RINGS ARE DRAWN AS RINGS, not as an open curve that happens to end
+           where it started. walk() closes a loop by repeating the start point as the
+           final vertex, and feeding that to the open midpoint spline below left the
+           outgoing tangent at p0 unrelated to the incoming one — a corner at the
+           seam on every ring. Measured on the real output: 32 of 95 paths are rings
+           and their seam tangents disagreed by a median of 10.0 and up to 26.5
+           degrees, which is exactly the "irregular sharp angle" being reported.
+
+           The cyclic form has no seam to get wrong. Over the m UNIQUE vertices
+           (u_0..u_m-1, cyclic) it starts on mid(u_m-1, u_0) and makes every vertex a
+           control point, ending each span on the next midpoint. The seam then falls
+           in the MIDDLE of a span instead of at its ends, so the ring is C1
+           continuous the whole way round with m spans and no added vertices. */
+        const gx = p[0] - p[(vc - 1) * 2]
+        const gy = p[1] - p[(vc - 1) * 2 + 1]
+        // Same 2px test keep() uses to classify a ring, so both agree on every path.
+        if ((gx * gx + gy * gy) < 4) {
+          const m = vc - 1            // drop the repeated start point
+          if (m >= 3) {
+            ctx.moveTo((p[(m - 1) * 2] + p[0]) / 2, (p[(m - 1) * 2 + 1] + p[1]) / 2)
+            for (let k = 0; k < m; k++) {
+              const nx = (k + 1) % m
+              ctx.quadraticCurveTo(p[k * 2], p[k * 2 + 1],
+                (p[k * 2] + p[nx * 2]) / 2, (p[k * 2 + 1] + p[nx * 2 + 1]) / 2)
+            }
+            ctx.closePath()
+            continue
+          }
+          // A 2-vertex "ring" is a degenerate sliver; straight is the honest form.
+          ctx.moveTo(p[0], p[1])
+          for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1])
+          continue
+        }
         ctx.moveTo(p[0], p[1])
         for (let k = 1; k < vc - 1; k++) {
           const mx = (p[k * 2] + p[(k + 1) * 2]) / 2
           const my = (p[k * 2 + 1] + p[(k + 1) * 2 + 1]) / 2
           ctx.quadraticCurveTo(p[k * 2], p[k * 2 + 1], mx, my)
         }
-        // Final span: control at the penultimate vertex, ending exactly on the last
-        // one so a closed ring still meets its own start point.
-        ctx.quadraticCurveTo(p[(vc - 2) * 2], p[(vc - 2) * 2 + 1], p[(vc - 1) * 2], p[(vc - 1) * 2 + 1])
+        /* Final half-segment: a STRAIGHT line, not another quadratic.
+           The old code spent one more quadraticCurveTo here with the control at
+           p[vc-2] and the end at p[vc-1]. That span is degenerate: the loop above
+           already ended at mid(p[vc-2], p[vc-1]), so control and end are COLLINEAR
+           with the start and the control sits BEHIND it. The curve therefore left
+           the midpoint, ran backwards to 1/3 of the segment and reversed — an exact
+           180-degree cusp with a visible backward whisker on EVERY path. Measured
+           before this fix: 95 of 95 multi-vertex paths, whisker mean 1.39px and up
+           to 1.95px, matching the closed form (a segment's 1/6 at a 7.8px mean).
+           The incoming curve already arrives at that midpoint travelling straight
+           down p[vc-2] -> p[vc-1], so a lineTo continues it without a kink. */
+        ctx.lineTo(p[(vc - 1) * 2], p[(vc - 1) * 2 + 1])
       }
       ctx.stroke()
     }
