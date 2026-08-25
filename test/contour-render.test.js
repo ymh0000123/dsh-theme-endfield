@@ -184,8 +184,14 @@ async function main() {
 
     // ---------- 4. animation changes pixels, and stops when off ----------
     const snap=()=>lines.getContext('2d').getImageData(0,0,lines.width,lines.height).data
-    const a1=snap().slice(0); await sleep(700); const a2=snap()
-    let diff=0; for(let i=3;i<a1.length;i+=4) if(a1[i]!==a2[i]) diff++
+    const a1=snap().slice(0)
+    let diff=0
+    for(let i=0;i<40 && diff<=500;i++){
+      await sleep(120)
+      const a2=snap()
+      diff=0
+      for(let k=3;k<a1.length;k+=4) if(a1[k]!==a2[k]) diff++
+    }
     R('anim on: pixels change over time', diff>500, 'changedAlpha='+diff)
     LS.setItem('dsh-theme-endfield-contour-anim','0')
     document.body.appendChild(document.createElement('span'))

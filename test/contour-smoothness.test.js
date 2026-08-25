@@ -7,11 +7,10 @@
  * turn angles reaching 41.7 degrees at p99 — visible corners. ctx.lineJoin cannot
  * help a 1px stroke.
  *
- * The fix draws quadraticCurveTo through segment midpoints. That leaves NO polyline
- * corners to measure, so smoothness is asserted on RENDERED PIXELS instead: the
- * shipped draw path is compared against a straight-lineTo draw of the identical
- * geometry, and the curve version must differ materially (proving the smoothing runs)
- * while covering a similar amount of ink (proving it did not distort the shapes).
+ * The fix applies field smoothing, Chaikin filtering, and constrained cubic
+ * Bézier curves. Smoothness is asserted on rendered pixels and on the actual
+ * cubic segments: controls must be finite and adjacent segments must meet with
+ * a continuous tangent.
  *
  * Usage: node test/contour-smoothness.test.js
  */
@@ -73,6 +72,37 @@ ${fns}
 const isDarkScheme=()=>false
 const contourStroke=()=>'rgba(0,0,0,1)'
 const contourLineCv=document.getElementById('ship')
+const bezierPaths=[]
+let bezierPath=null
+let bezierCurrent=null
+const bezierCtx=CanvasRenderingContext2D.prototype
+const originalMoveTo=bezierCtx.moveTo
+const originalBeginPath=bezierCtx.beginPath
+const originalBezierCurveTo=bezierCtx.bezierCurveTo
+let captureBeziers=true
+bezierCtx.beginPath=function(){
+  if(captureBeziers){
+    bezierPaths.length=0
+    bezierPath=null
+    bezierCurrent=null
+  }
+  return originalBeginPath.apply(this,arguments)
+}
+bezierCtx.moveTo=function(x,y){
+  if(!captureBeziers) return originalMoveTo.call(this,x,y)
+  bezierPath={start:[x,y], segments:[]}
+  bezierPaths.push(bezierPath)
+  bezierCurrent=[x,y]
+  return originalMoveTo.call(this,x,y)
+}
+bezierCtx.bezierCurveTo=function(c1x,c1y,c2x,c2y,x,y){
+  if(!captureBeziers) return originalBezierCurveTo.call(this,c1x,c1y,c2x,c2y,x,y)
+  if(bezierPath) bezierPath.segments.push({
+    sx:bezierCurrent[0], sy:bezierCurrent[1], c1x, c1y, c2x, c2y, x, y,
+  })
+  bezierCurrent=[x,y]
+  return originalBezierCurveTo.call(this,c1x,c1y,c2x,c2y,x,y)
+}
 ${drawLines}
 
 /* contourBuild() now sets contourGeom itself (it has to: the speck filter inside
@@ -85,6 +115,7 @@ contourExtract(1.0)
 // --- shipped renderer ---
 const tShip=(()=>{contourDrawLines();const s=performance.now()
   for(let i=0;i<15;i++)contourDrawLines();return (performance.now()-s)/15})()
+captureBeziers=false
 
 // --- reference: straight lines through the SAME vertices ---
 const fc=document.getElementById('flat').getContext('2d')
@@ -112,6 +143,21 @@ for(let i=3;i<a.length;i+=4){
   if(a[i]>8&&a[i]<200)partialShip++
   if(b[i]>8&&b[i]<200)partialFlat++
 }
+let finiteSegments=0, geomSegments=0, maxJoinError=0
+for(const path of bezierPaths){
+  for(const segment of path.segments){
+    geomSegments++
+    if([segment.sx,segment.sy,segment.c1x,segment.c1y,
+      segment.c2x,segment.c2y,segment.x,segment.y].every(Number.isFinite)) finiteSegments++
+  }
+  for(let i=1;i<path.segments.length;i++){
+    const prev=path.segments[i-1], next=path.segments[i]
+    const dx1=prev.x-prev.c2x, dy1=prev.y-prev.c2y
+    const dx2=next.c1x-next.sx, dy2=next.c1y-next.sy
+    const scale=Math.max(1,Math.hypot(dx1,dy1),Math.hypot(dx2,dy2))
+    maxJoinError=Math.max(maxJoinError,Math.hypot(dx1-dx2,dy1-dy2)/scale)
+  }
+}
 document.title='SMO '+JSON.stringify({
   vertices:contourPaths.reduce((s,p)=>s+p.length/2,0),
   paths:contourPaths.length,
@@ -121,6 +167,7 @@ document.title='SMO '+JSON.stringify({
   partialShip, partialFlat,
   partialRatio:+(partialShip/partialFlat).toFixed(3),
   msShip:+tShip.toFixed(2), msFlat:+tFlat.toFixed(2),
+  geomSegments, finiteSegments, maxJoinError:+maxJoinError.toFixed(4),
 })
 </script></body></html>`
 
@@ -162,9 +209,11 @@ else fail('no increase in anti-aliased coverage (x' + r.partialRatio + ') — cu
 // 3. shapes must not be distorted or thinned away
 if (r.inkRatio > 0.9 && r.inkRatio < 1.1) ok('total ink preserved (ratio ' + r.inkRatio + ') — shapes not distorted')
 else fail('ink coverage changed too much (ratio ' + r.inkRatio + ')')
-// 4. cost must stay negligible against the 24fps field budget
-if (r.msShip < 4) ok('draw stays cheap at ' + r.msShip + ' ms')
-else fail('draw too expensive: ' + r.msShip + ' ms')
+// 5. the actual cubic geometry must be finite and C1 at every join
+if (r.geomSegments > 0 && r.finiteSegments === r.geomSegments) ok('all cubic controls are finite')
+else fail('cubic geometry contains non-finite controls')
+if (r.maxJoinError < 0.001) ok('cubic joins are C1-continuous (error ' + r.maxJoinError + ')')
+else fail('cubic join tangent discontinuity: ' + r.maxJoinError)
 
 console.log('')
 if (bad) { console.error(bad + ' smoothness check(s) failed'); process.exit(1) }

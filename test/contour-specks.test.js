@@ -76,16 +76,18 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   LS.setItem('dsh-theme-endfield-contour','1')
   LS.setItem('dsh-theme-endfield-contour-anim','0')
   /* Capture the stitched polylines as the plugin draws them. contourDrawLines()
-     emits beginPath, then moveTo + quadraticCurveTo (or lineTo) per path, so this
-     reconstructs each path's on-screen vertices exactly. */
+   emits beginPath, then moveTo + bezierCurveTo (or lineTo) per path, so this
+     reconstructs each path's rendered endpoints. */
   const C=CanvasRenderingContext2D.prototype
-  const om=C.moveTo, oq=C.quadraticCurveTo, ol=C.lineTo, ob=C.beginPath
+  const om=C.moveTo, ob=C.beginPath, ol=C.lineTo, oz=C.bezierCurveTo
   window.__PATHS__=[]
   let cur=null
   C.beginPath=function(){ window.__PATHS__=[]; cur=null; return ob.apply(this,arguments) }
   C.moveTo=function(x,y){ cur=[x,y]; window.__PATHS__.push(cur); return om.apply(this,arguments) }
   C.lineTo=function(x,y){ if(cur){cur.push(x,y)} return ol.apply(this,arguments) }
-  C.quadraticCurveTo=function(cx,cy,x,y){ if(cur){cur.push(x,y)} return oq.apply(this,arguments) }
+  C.bezierCurveTo=function(_c1x,_c1y,_c2x,_c2y,x,y){
+    if(cur){cur.push(x,y)} return oz.apply(this,arguments)
+  }
   const mod=window.__MOD__.factory(()=>null)
   mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:undefined,effect:(f)=>f()})
   document.body.appendChild(document.createElement('span'))
