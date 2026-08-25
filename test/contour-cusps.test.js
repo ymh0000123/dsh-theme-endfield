@@ -78,6 +78,7 @@ const contourLineCv={ getContext:()=>({
   moveTo(x,y){ REC.push(['M',x,y]) },
   lineTo(x,y){ REC.push(['L',x,y]) },
   quadraticCurveTo(cx,cy,x,y){ REC.push(['Q',cx,cy,x,y]) },
+  bezierCurveTo(c1x,c1y,c2x,c2y,x,y){ REC.push(['C',c1x,c1y,c2x,c2y,x,y]) },
   closePath(){ REC.push(['Z']) },
   set strokeStyle(v){}, get strokeStyle(){return ''},
   set lineWidth(v){}, get lineWidth(){return 1},
@@ -118,6 +119,15 @@ function sampleStream(rec) {
           u * u * ay + 2 * u * t * op[2] + t * t * op[4])
       }
       cx = op[3]; cy = op[4]
+    } else if (op[0] === 'C') {
+      const ax = cx, ay = cy
+      for (let i = 1; i <= SAMPLES; i++) {
+        const t = i / SAMPLES, u = 1 - t
+        const a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t
+        cur.push(a * ax + b * op[1] + c * op[3] + d * op[5],
+          a * ay + b * op[2] + c * op[4] + d * op[6])
+      }
+      cx = op[5]; cy = op[6]
     } else if (op[0] === 'Z') {
       subs[subs.length - 1].closed = true
       if (Math.hypot(cx - sx, cy - sy) > 1e-9) {

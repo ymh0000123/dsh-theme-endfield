@@ -425,7 +425,7 @@ function apply(ctx) {
        zone at that point and throw a ReferenceError. */
     let contourSwitchSig = ''
 
-    const CONTOUR_STEP = 10     // grid pitch in px; 10 measured as the cost/detail knee
+    const CONTOUR_STEP = 6      // balanced sampling/detail point for 1px contour strokes
     const CONTOUR_LEVELS = 20
     const CONTOUR_SPAN = 1.45   // levels span [-SPAN, +SPAN]
     const CONTOUR_FIELD_FPS = 24 // the field is the expensive half; 24 reads as fluid
@@ -484,6 +484,22 @@ function apply(ctx) {
       && typeof window.matchMedia === 'function'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const contourWantsAnim = () => isContourAnimOn() && !prefersReducedMotion()
+      && !contourLoaderActive
+    let contourLoaderActive = false
+    const contourPauseForLoader = () => {
+      contourLoaderActive = true
+      if (contourWrap !== null && contourRaf !== null) {
+        contourSwitchSig = ''
+        contourStopLoop()
+      }
+    }
+    const contourResumeAfterLoader = () => {
+      contourLoaderActive = false
+      if (contourWrap !== null) {
+        contourSwitchSig = ''
+        contourApplySwitches()
+      }
+    }
 
     /** Allocate the field + marching-squares scratch buffers for a viewport size. */
     const contourBuild = (w, h) => {
@@ -511,7 +527,7 @@ function apply(ctx) {
          (one run in four still rendered a blank cell). Stratification is what makes
          an acceptable layout the common case: mean 2.5 candidates, max 6, never at
          the cap. Validation is what makes it a guarantee. */
-      const attempts = 12
+      const attempts = 32
       let best = null
       for (let attempt = 0; attempt < attempts; attempt++) {
         const cand = contourBuildCandidate(w, h, attempt)
@@ -592,6 +608,7 @@ function apply(ctx) {
       const field = {
         cols, rows, step, K, bx, by, ba, bs, dx, dy, hCount, W2,
         F: new Float32Array(cols * rows),
+        smooth: new Float32Array(cols * rows),
         ex: new Float32Array(eCount),
         ey: new Float32Array(eCount),
         es: new Int32Array(eCount).fill(-1),
@@ -705,7 +722,35 @@ function apply(ctx) {
           for (let i = i0; i <= i1; i++) {
             const ddx = i * step - cx
             const q = (ddx * ddx + dy2) * inv
-            if (q < 6.76) F[row + i] += a * Math.exp(-q)
+            if (q < 6.76) {
+              let weight = Math.exp(-q)
+              if (q > 4.8) {
+                const t = (q - 4.8) / (6.76 - 4.8)
+                const fade = 1 - t * t * (3 - 2 * t)
+                weight *= fade
+              }
+              F[row + i] += a * weight
+            }
+          }
+        }
+      }
+      const smooth = f.smooth
+      for (let pass = 0; pass < 5; pass++) {
+        for (let j = 0; j < rows; j++) {
+          const row = j * cols
+          for (let i = 0; i < cols; i++) {
+            const left = F[row + Math.max(0, i - 1)]
+            const center = F[row + i]
+            const right = F[row + Math.min(cols - 1, i + 1)]
+            smooth[row + i] = (left + 2 * center + right) * 0.25
+          }
+        }
+        for (let j = 0; j < rows; j++) {
+          const row = j * cols
+          const up = Math.max(0, j - 1) * cols
+          const down = Math.min(rows - 1, j + 1) * cols
+          for (let i = 0; i < cols; i++) {
+            F[row + i] = (smooth[up + i] + 2 * smooth[row + i] + smooth[down + i]) * 0.25
           }
         }
       }
@@ -767,9 +812,24 @@ function apply(ctx) {
             case 4: case 11: link(Ri(), B()); break
             case 6: case 9: link(T(), B()); break
             case 7: case 8: link(Le(), B()); break
-            // Saddles: two independent crossings in one cell.
-            case 5: link(T(), Ri()); link(Le(), B()); break
-            case 10: link(T(), Le()); link(Ri(), B()); break
+            // Ambiguous saddles use the bilinear asymptotic decider. The sign of
+            // a*c-b*d selects whether the diagonal high/low regions are connected;
+            // using the cell average alone is wrong when opposite corners differ in
+            // magnitude and produces the long V-shaped joins seen in the render.
+            case 5: {
+              const a = v0 - L, b = v1 - L, c = v2 - L, d = v3 - L
+              const saddle = a * c - b * d
+              if (saddle > 0) { link(T(), Ri()); link(Le(), B()) }
+              else { link(T(), Le()); link(Ri(), B()) }
+              break
+            }
+            case 10: {
+              const a = v0 - L, b = v1 - L, c = v2 - L, d = v3 - L
+              const saddle = a * c - b * d
+              if (saddle < 0) { link(T(), Le()); link(Ri(), B()) }
+              else { link(T(), Ri()); link(Le(), B()) }
+              break
+            }
           }
         }
       }
@@ -1009,97 +1069,115 @@ function apply(ctx) {
       ctx.strokeStyle = contourStroke()
       ctx.lineWidth = 1
       ctx.lineJoin = 'round'
-      /* Draw QUADRATIC CURVES through segment midpoints rather than straight lines
-         between vertices.
-
-         Why: marching squares emits at most one vertex per grid-cell edge, so with a
-         10px grid the polylines are genuinely faceted. Measured on the real output,
-         segments average 7.8 px and the turn angle at interior vertices reaches
-         41.7 degrees at p99 — visible corners on what should be a smooth contour.
-         ctx.lineJoin cannot help: a 1px stroke has no join area to round off.
-
-         Each original vertex becomes a Bezier CONTROL point while the curve passes
-         through the midpoints, which is C1-continuous — mathematically kink-free —
-         and, unlike subdivision, adds NO vertices. Measured against the alternatives:
-           chaikin x1   p99 41.7 -> 22.4 deg, 11.1k verts, +0.81 ms
-           chaikin x2   p99 41.7 -> 12.0 deg, 22.2k verts, +1.45 ms
-           this         no polyline corners left at all, 5.5k verts, +0.38 ms
-         It changed 22.1% of stroke pixels, i.e. it is doing real work, at the lowest
-         cost of the three and without inflating memory every frame.
-
-         THE MIDPOINT SPLINE IS ONLY KINK-FREE IN ITS INTERIOR, which is what the two
-         cases below exist for. Reported as issue #3 ("大量不规则锐角锯齿", visible
-         while the sheet animates) and measured on the real output:
-           - the old final quadratic was degenerate and put an exact 180-degree cusp
-             on 95 of 95 multi-vertex paths (a ~1.4px backward whisker);
-           - closed rings were drawn as OPEN curves, so 32 of those 95 met themselves
-             at a seam corner of up to 26.5 degrees.
-         Interior turn angles were already fine (p99 30.5 -> 5.6 deg), which is why
-         this read as scattered sharp specks rather than uniformly faceted lines, and
-         why it survived a static screenshot: with ~100 paths on screen the defect is
-         ~127 spikes per frame, each landing somewhere new as the field drifts. */
-      ctx.beginPath()
-      for (let i = 0; i < contourPaths.length; i++) {
-        const p = contourPaths[i]
-        const vc = p.length / 2
-        if (vc < 3) {
-          // Too short to curve; draw it straight.
-          ctx.moveTo(p[0], p[1])
-          for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1])
-          continue
-        }
-        /* CLOSED RINGS ARE DRAWN AS RINGS, not as an open curve that happens to end
-           where it started. walk() closes a loop by repeating the start point as the
-           final vertex, and feeding that to the open midpoint spline below left the
-           outgoing tangent at p0 unrelated to the incoming one — a corner at the
-           seam on every ring. Measured on the real output: 32 of 95 paths are rings
-           and their seam tangents disagreed by a median of 10.0 and up to 26.5
-           degrees, which is exactly the "irregular sharp angle" being reported.
-
-           The cyclic form has no seam to get wrong. Over the m UNIQUE vertices
-           (u_0..u_m-1, cyclic) it starts on mid(u_m-1, u_0) and makes every vertex a
-           control point, ending each span on the next midpoint. The seam then falls
-           in the MIDDLE of a span instead of at its ends, so the ring is C1
-           continuous the whole way round with m spans and no added vertices. */
-        const gx = p[0] - p[(vc - 1) * 2]
-        const gy = p[1] - p[(vc - 1) * 2 + 1]
-        // Same 2px test keep() uses to classify a ring, so both agree on every path.
-        if ((gx * gx + gy * gy) < 4) {
-          const m = vc - 1            // drop the repeated start point
-          if (m >= 3) {
-            ctx.moveTo((p[(m - 1) * 2] + p[0]) / 2, (p[(m - 1) * 2 + 1] + p[1]) / 2)
-            for (let k = 0; k < m; k++) {
-              const nx = (k + 1) % m
-              ctx.quadraticCurveTo(p[k * 2], p[k * 2 + 1],
-                (p[k * 2] + p[nx * 2]) / 2, (p[k * 2 + 1] + p[nx * 2 + 1]) / 2)
-            }
-            ctx.closePath()
-            continue
+      /* Marching squares emits one vertex per grid-cell edge. Two Chaikin passes
+         cut local corners before the clamped cubic B-spline rounds broad bends.
+         This reduces angularity without changing the field or adding another
+         extraction pass. Open endpoints remain fixed; closed rings wrap cyclically. */
+      const smoothPath = (source) => {
+        const count = source.length / 2
+        if (count < 3) return source
+        let points = []
+        for (let k = 0; k < source.length; k += 2) points.push([source[k], source[k + 1]])
+        const closed = (points[0][0] - points[points.length - 1][0]) ** 2
+          + (points[0][1] - points[points.length - 1][1]) ** 2 < 4
+        if (closed) points.pop()
+        for (let pass = 0; pass < 3; pass++) {
+          const next = []
+          const limit = closed ? points.length : points.length - 1
+          if (!closed) next.push(points[0])
+          for (let k = 0; k < limit; k++) {
+            const a = points[k]
+            const b = points[(k + 1) % points.length]
+            next.push([
+              a[0] * 0.75 + b[0] * 0.25,
+              a[1] * 0.75 + b[1] * 0.25,
+            ], [
+              a[0] * 0.25 + b[0] * 0.75,
+              a[1] * 0.25 + b[1] * 0.75,
+            ])
           }
-          // A 2-vertex "ring" is a degenerate sliver; straight is the honest form.
-          ctx.moveTo(p[0], p[1])
-          for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1])
-          continue
+          if (!closed) next.push(points[points.length - 1])
+          points = next
         }
-        ctx.moveTo(p[0], p[1])
-        for (let k = 1; k < vc - 1; k++) {
-          const mx = (p[k * 2] + p[(k + 1) * 2]) / 2
-          const my = (p[k * 2 + 1] + p[(k + 1) * 2 + 1]) / 2
-          ctx.quadraticCurveTo(p[k * 2], p[k * 2 + 1], mx, my)
-        }
-        /* Final half-segment: a STRAIGHT line, not another quadratic.
-           The old code spent one more quadraticCurveTo here with the control at
-           p[vc-2] and the end at p[vc-1]. That span is degenerate: the loop above
-           already ended at mid(p[vc-2], p[vc-1]), so control and end are COLLINEAR
-           with the start and the control sits BEHIND it. The curve therefore left
-           the midpoint, ran backwards to 1/3 of the segment and reversed — an exact
-           180-degree cusp with a visible backward whisker on EVERY path. Measured
-           before this fix: 95 of 95 multi-vertex paths, whisker mean 1.39px and up
-           to 1.95px, matching the closed form (a segment's 1/6 at a 7.8px mean).
-           The incoming curve already arrives at that midpoint travelling straight
-           down p[vc-2] -> p[vc-1], so a lineTo continues it without a kink. */
-        ctx.lineTo(p[(vc - 1) * 2], p[(vc - 1) * 2 + 1])
+        const result = []
+        for (const point of points) result.push(point[0], point[1])
+        if (closed) result.push(result[0], result[1])
+        return result
       }
+      /* Chaikin removes local grid noise. A constrained Catmull-Rom cubic then
+         gives each join one shared tangent. The handle cap prevents overshoot at
+         narrow saddles while the larger tangent factor removes long rounded-polygon
+         bends that remain visible with midpoint quadratics. */
+      const drawSmoothPath = (source) => {
+        const count = source.length / 2
+        if (count < 3) {
+          ctx.moveTo(source[0], source[1])
+          for (let k = 2; k < source.length; k += 2) ctx.lineTo(source[k], source[k + 1])
+          return
+        }
+        const closed = (source[0] - source[source.length - 2]) ** 2
+          + (source[1] - source[source.length - 1]) ** 2 < 4
+        const limit = closed ? count - 1 : count
+        const point = (index) => {
+          const k = closed
+            ? (index + limit) % limit
+            : Math.max(0, Math.min(limit - 1, index))
+          return [source[k * 2], source[k * 2 + 1]]
+        }
+        const tangent = (index) => {
+          const current = point(index)
+          const previous = point(index - 1)
+          const next = point(index + 1)
+          let tx, ty, cap
+          const incomingX = current[0] - previous[0]
+          const incomingY = current[1] - previous[1]
+          const outgoingX = next[0] - current[0]
+          const outgoingY = next[1] - current[1]
+          if (!closed && index === 0) {
+            tx = outgoingX * 0.4
+            ty = outgoingY * 0.4
+            cap = Math.hypot(outgoingX, outgoingY) * 0.55
+          } else if (!closed && index === limit - 1) {
+            tx = incomingX * 0.4
+            ty = incomingY * 0.4
+            cap = Math.hypot(incomingX, incomingY) * 0.55
+          } else {
+            tx = (next[0] - previous[0]) * 0.32
+            ty = (next[1] - previous[1]) * 0.32
+            cap = Math.min(
+              Math.hypot(incomingX, incomingY),
+              Math.hypot(outgoingX, outgoingY),
+            ) * 0.62
+          }
+          const length = Math.hypot(tx, ty)
+          if (length > cap && length > 0) {
+            tx *= cap / length
+            ty *= cap / length
+          }
+          return [tx, ty]
+        }
+        ctx.moveTo(source[0], source[1])
+        const segments = closed ? limit : limit - 1
+        for (let k = 0; k < segments; k++) {
+          const start = point(k)
+          const end = point(k + 1)
+          const startTangent = tangent(k)
+          const endTangent = tangent(k + 1)
+          ctx.bezierCurveTo(
+            start[0] + startTangent[0], start[1] + startTangent[1],
+            end[0] - endTangent[0], end[1] - endTangent[1],
+            end[0], end[1],
+          )
+        }
+        /* Mark a ring as a RING. The cyclic tangents above already make the seam C1
+           and the final span already lands exactly on the start point, so this adds
+           no geometry — but without it the canvas treats the path as open and butts
+           two caps together at the seam instead of joining them, which is defect (2)
+           of issue #3. contour-cusps.test.js guards this. */
+        if (closed) ctx.closePath()
+      }
+      ctx.beginPath()
+      for (let i = 0; i < contourPaths.length; i++) drawSmoothPath(smoothPath(contourPaths[i]))
       ctx.stroke()
     }
 
@@ -1330,6 +1408,8 @@ function apply(ctx) {
     let loaderTick = null
     let loaderFuse = null
     let loaderExitTimer = null
+    let loaderPlateH = 0
+    let loaderMeterH = 0
     // Last-resort hard kill. Deliberately NOT cleared by clearLoaderTimers(): the
     // completion flourish calls that to stop the progress clocks, and this timer has
     // to outlive it so a stalled flourish can still never leave the app covered.
@@ -1352,6 +1432,9 @@ function apply(ctx) {
       loaderKill = null
       if (loaderEl && loaderEl.parentNode) loaderEl.parentNode.removeChild(loaderEl)
       loaderEl = null
+      loaderPlateH = 0
+      loaderMeterH = 0
+      contourResumeAfterLoader()
     }
     /* One boot animation. The progress value is derived from elapsed WALL-CLOCK time,
        never accumulated per frame, so it cannot drift.
@@ -1382,6 +1465,7 @@ function apply(ctx) {
         return
       }
       loaderDone = true
+      contourPauseForLoader()
 
       const el = document.createElement('div')
       el.setAttribute('data-endfield-loader', '')
@@ -1441,6 +1525,8 @@ function apply(ctx) {
       const start = (typeof performance !== 'undefined' && typeof performance.now === 'function')
         ? performance.now()
         : Date.now()
+      loaderPlateH = el.clientHeight || Math.ceil(el.getBoundingClientRect().height) || 0
+      loaderMeterH = meter ? Math.ceil(meter.getBoundingClientRect().height) : 0
       const now = () => ((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now())
       /* Completion sequence, in order:
            WIPE_MS  the rail expands rightward into a full-screen yellow sweep;
@@ -1517,25 +1603,51 @@ function apply(ctx) {
         const value = Math.round(eased * 100)
         const shown = value + '%'
         if (fill) fill.style.height = (eased * 100).toFixed(2) + '%'
-        /* Meter follows the fill's leading edge, driven by the SAME eased value so
-           the bar and its readout can never disagree. Positioned in px and clamped:
-           the group is ~90px tall, so a raw percentage would push it off the bottom
-           of the screen as the fill nears 100%. GAP keeps the tick just below the
-           leading edge (per the reference, the readout trails the edge). */
-        if (meter) {
-          const plateH = loaderEl.clientHeight || 0
-          const meterH = meter.offsetHeight || 0
-          const GAP = 10
-          const raw = eased * plateH + GAP
-          const maxTop = Math.max(0, plateH - meterH - 12)
-          meter.style.top = Math.min(raw, maxTop).toFixed(1) + 'px'
-        }
         if (pct && pct.textContent !== shown) pct.textContent = shown
         if (status) {
           const label = value < 45 ? 'Connecting...' : (value < 99 ? 'Updating...' : 'Ready')
           if (status.textContent !== label) status.textContent = label
         }
+        /* Meter follows the fill's leading edge, driven by the SAME eased value so
+           the bar and its readout can never disagree. Positioned in px and clamped:
+           the group is ~90px tall, so a raw percentage would push it off the bottom
+           of the screen as the fill nears 100%. GAP keeps the tick just below the
+           leading edge (per the reference, the readout trails the edge). Measure
+           after updating the text: the initial empty meter is much shorter than the
+           completed percentage/status group and would otherwise make 100% overflow.
+           Keep extra room below the line box because the percentage uses a compact
+           line-height and its glyphs can paint below that box. */
+        if (meter) {
+          const SAFE_BOTTOM = 64
+          if (value >= 100) {
+            /* Anchor the completed readout from the bottom. At this point the
+               percentage and status have their final font metrics, so bottom
+               anchoring is more reliable than clamping a cached top position. */
+            meter.style.setProperty('top', 'auto', 'important')
+            meter.style.setProperty('bottom', SAFE_BOTTOM + 'px', 'important')
+          } else {
+            meter.style.removeProperty('bottom')
+            meter.style.removeProperty('top')
+            const plateRect = el.getBoundingClientRect()
+            loaderMeterH = Math.ceil(meter.getBoundingClientRect().height)
+            const GAP = 10
+            const raw = eased * (plateRect.height || loaderPlateH) + GAP
+            const maxTop = Math.max(0, (plateRect.height || loaderPlateH) - loaderMeterH - SAFE_BOTTOM)
+            meter.style.top = Math.min(raw, maxTop).toFixed(1) + 'px'
+            /* Use the rendered rectangle as the final authority. Font metrics and
+               fractional viewport sizes can make the line box differ from the
+               cached height, especially in a narrow window. Correct any remaining
+               overflow instead of allowing the readout to be clipped. */
+            const meterRect = meter.getBoundingClientRect()
+            const allowedBottom = plateRect.bottom - SAFE_BOTTOM
+            if (meterRect.bottom > allowedBottom) {
+              const currentTop = parseFloat(meter.style.top) || 0
+              meter.style.top = Math.max(0, currentTop - meterRect.bottom + allowedBottom).toFixed(1) + 'px'
+            }
+          }
+        }
         if (t >= 1) {
+          el.setAttribute('data-endfield-loader-complete', '')
           // Hold the completed frame for a beat so 100% is actually readable.
           if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
             if (loaderExitTimer === null) loaderExitTimer = window.setTimeout(finish, 220)
@@ -2898,6 +3010,12 @@ function apply(ctx) {
         top: 0;
         will-change: top;
       }
+      [data-endfield-loader][data-endfield-loader-complete] [data-endfield-loader-meter] {
+        position: fixed !important;
+        left: 26px !important;
+        top: auto !important;
+        bottom: 64px !important;
+      }
       /* ---- completion flourish: yellow sweep to the right, then fade ----
          Starts as the rail itself (same 10px width, same colour, same left edge) and
          widens to cover the viewport, so the sweep reads as the finished bar flooding
@@ -2929,7 +3047,7 @@ function apply(ctx) {
         color: var(--edge-accent);
         font-size: 39px;
         font-weight: 700;
-        line-height: 29px;
+        line-height: 1;
         letter-spacing: -0.01em;
         font-variant-numeric: tabular-nums;
       }
