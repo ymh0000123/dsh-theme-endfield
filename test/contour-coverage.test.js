@@ -18,10 +18,12 @@ const ROOT = path.resolve(__dirname, '..')
 // Scratch files go to a temp dir so the package stays clean.
 const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'endfield-cov-'))
 const chrome = [
+  process.env.CHROME_PATH,
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-].find((p) => fs.existsSync(p))
+].filter(Boolean).find((p) => fs.existsSync(p))
 
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body,#root{height:100%;margin:0}
