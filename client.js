@@ -4174,8 +4174,11 @@ function apply(ctx) {
       if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
       contourScrollTimer = null
       contourScrollPaused = false
+      // Both scroll listeners went on in capture mode, so both have to come off the
+      // same way — dropping only 'scroll' leaks a scrollend listener per plugin run.
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
         window.removeEventListener('scroll', onContourScrollEvent, true)
+        window.removeEventListener('scrollend', onContourScrollEndEvent, true)
       }
       // The plate owns a rAF handle and a fixed DOM node; both must go with the run.
       destroyLoader()
