@@ -198,8 +198,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   </script></body></html>`)
 
   const port = 9333 + Math.floor(Math.random() * 400)
+  /* Font-rendering flags pin the glyph rasteriser across platforms. Without them
+     this check passes on Windows and fails on Linux: the ink sample below picks
+     "the pixel furthest in luminance from the fill that occurs >= 3 times", and
+     that needs enough SOLID stroke pixels to clear the threshold. Windows
+     (DirectWrite) leaves plenty; Linux (FreeType) with hinting + LCD subpixel AA
+     smears the same glyphs into mostly-blended pixels, so the sample lands on an
+     anti-aliased edge — a ~50% mix of ink and fill — and the measured contrast
+     collapses (3.85:1 on 谷地黄, 3.33:1 on 武陵青) even though the palette itself
+     never changed. Greyscale AA with hinting off keeps the stroke cores solid. */
   const proc = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-sandbox',
     '--hide-scrollbars', '--window-size=520,220',
+    '--font-render-hinting=none', '--disable-font-subpixel-positioning',
+    '--disable-lcd-text', '--force-color-profile=srgb',
     '--remote-debugging-port=' + port,
     '--user-data-dir=' + fs.mkdtempSync(path.join(os.tmpdir(), 'hover-prof-')),
     'file:///' + page.replace(/\\/g, '/')], { stdio: ['ignore', 'ignore', 'ignore'] })
