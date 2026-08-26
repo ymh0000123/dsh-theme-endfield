@@ -1,6 +1,6 @@
 # 设置项与功能
 
-十个开关的行为、默认值、存储键与边界情况。设计取值见 [design-language.md](design-language.md)，实现细节见 [engineering-notes.md](engineering-notes.md)。
+设置项的行为、默认值、存储键与边界情况。设计取值见 [design-language.md](design-language.md)，实现细节见 [engineering-notes.md](engineering-notes.md)。
 
 设置入口：**设置 › 终末地主题设置**。全部文案跟随 DSH 的语言设置（中/英）即时切换，无需刷新。
 
@@ -13,6 +13,8 @@
 | | 主题圆角 | 直角 | `dsh-theme-endfield-radius` |
 | 02 背景 | 等高线背景 | 关 | `dsh-theme-endfield-contour` |
 | | 动态等高线 | 开 | `dsh-theme-endfield-contour-anim` |
+| | 动态帧率 | 24 FPS | `dsh-theme-endfield-contour-fps` |
+| | 动态速度 | 标准 | `dsh-theme-endfield-contour-speed` |
 | | 背景水印 | 开 | `dsh-theme-endfield-watermark` |
 | | 水印保持显示 | 关 | `dsh-theme-endfield-watermark-persist` |
 | 03 动画 | 启动加载动画 | 关 | `dsh-theme-endfield-loader` |
@@ -63,7 +65,7 @@
 
 ### 动态等高线（默认开启，需先开启等高线背景）
 
-等高线缓慢流动变形，约 24fps。关闭则为静态图案，不做任何逐帧计算。
+等高线流动变形。动态帧率提供 `24 FPS`、`60 FPS`、`120 FPS` 三档，默认 `24 FPS`；动态速度提供 `1x`、`2x`、`4x` 三档，分别对应慢速、标准、快速，默认 `2x`。帧率写入 `dsh-theme-endfield-contour-fps`，速度写入 `dsh-theme-endfield-contour-speed`，非法值自动回退到默认值。关闭则为静态图案，不做任何逐帧计算。
 
 **尊重系统「减少动态效果」**：`prefers-reduced-motion` 下图案照常渲染（静态纹理不算动效），但场变形不启动——即使开关是开的。此时设置行会说明是系统偏好在生效，而不是让开关看起来失灵。
 

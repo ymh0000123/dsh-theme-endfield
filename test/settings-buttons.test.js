@@ -129,6 +129,9 @@ localStorage.setItem('dsh-theme-endfield-contour','0')
 localStorage.removeItem('dsh-theme-endfield-palette')
 mod.apply({get:(n)=>n==='theme'?{overrideTokens:(_s,t)=>{applyTokens(t);return ()=>{}}}:undefined,effect:()=>{}})
 
+const buttonTransition = getComputedStyle(document.getElementById('edit')).transition
+R('按钮悬停反馈无过渡延迟', buttonTransition === 'none', buttonTransition)
+
 /* --- contrast maths, on the COMPOSITED colours the browser reports --- */
 const parse=(s)=>{const m=s.match(/rgba?\\(([^)]+)\\)/); if(!m) return null
   const p=m[1].split(',').map(v=>parseFloat(v.trim())); return {r:p[0],g:p[1],b:p[2],a:p.length>3?p[3]:1}}

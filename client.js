@@ -7,7 +7,7 @@
  *   1) theme.overrideTokens —— 覆盖主题令牌（亮/暗双色），映射终末地官网色板；
  *   2) insertCss —— 注入字体栈、强调色、直角化、去蓝、hover 反色等全局样式。
  *      （动态插件环境走 styles.insert；安装为独立 bundle 时直接注入 <style> 到 head。）
- *   3) 设置页「终末地主题设置」—— 十个开关按四组分类（主题 / 背景 / 动画 / 娱乐），
+ *   3) 设置页「终末地主题设置」—— 设置项按四组分类（主题 / 背景 / 动画 / 娱乐），
  *      均由 localStorage 持久化，文案跟随 DSH 的语言设置。
  *
  * 文档：README.md 为索引；设计语言见 docs/design-language.md，
@@ -362,11 +362,26 @@ function apply(ctx) {
                   evaluated at every grid point. */
     const CONTOUR_KEY = 'dsh-theme-endfield-contour'
     const CONTOUR_ANIM_KEY = 'dsh-theme-endfield-contour-anim'
+    const CONTOUR_FPS_KEY = 'dsh-theme-endfield-contour-fps'
+    const CONTOUR_SPEED_KEY = 'dsh-theme-endfield-contour-speed'
+    const CONTOUR_FPS_OPTIONS = [24, 60, 120]
+    const CONTOUR_SPEED_OPTIONS = [1, 2, 4]
+    const CONTOUR_PHASE_STEP = 1 / 150
     // Default OFF (=== '1'): a background pattern must be opt-in.
     const isContourOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_KEY)) === '1'
     // Defaults ON, so enabling the layer shows the effect at once; it is
     // meaningless while the layer itself is off.
     const isContourAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_ANIM_KEY)) !== '0'
+    const readContourFps = () => {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_FPS_KEY) : null
+      const fps = Number(raw)
+      return CONTOUR_FPS_OPTIONS.includes(fps) ? fps : 24
+    }
+    const readContourSpeed = () => {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_SPEED_KEY) : null
+      const speed = Number(raw)
+      return CONTOUR_SPEED_OPTIONS.includes(speed) ? speed : 2
+    }
 
     /* Deterministic PRNG (mulberry32), used with a PER-PAGE-LOAD seed.
        Determinism is still required WITHIN one load: contourBuild() is re-run on
@@ -428,7 +443,7 @@ function apply(ctx) {
     const CONTOUR_STEP = 6      // balanced sampling/detail point for 1px contour strokes
     const CONTOUR_LEVELS = 20
     const CONTOUR_SPAN = 1.45   // levels span [-SPAN, +SPAN]
-    const CONTOUR_FIELD_FPS = 24 // the field is the expensive half; 24 reads as fluid
+    const contourFieldFps = () => readContourFps()
     /* Speck rejection. Marching squares legitimately produces two kinds of debris
        that read as "mysterious little dots" rather than terrain:
 
@@ -608,6 +623,8 @@ function apply(ctx) {
       const field = {
         cols, rows, step, K, bx, by, ba, bs, dx, dy, hCount, W2,
         F: new Float32Array(cols * rows),
+        previous: new Float32Array(cols * rows),
+        hasPrevious: false,
         smooth: new Float32Array(cols * rows),
         ex: new Float32Array(eCount),
         ey: new Float32Array(eCount),
@@ -754,6 +771,18 @@ function apply(ctx) {
           }
         }
       }
+      /* Track the field continuously between animation samples. Marching squares
+         can change an entire path at once when a saddle crosses a level; blending
+         the sampled field keeps that topology change from appearing as a twitch. */
+      if (f.hasPrevious && f.previous !== undefined) {
+        for (let i = 0; i < F.length; i++) {
+          f.previous[i] = f.previous[i] * 0.65 + F[i] * 0.35
+          F[i] = f.previous[i]
+        }
+      } else if (f.previous !== undefined) {
+        f.previous.set(F)
+      }
+      f.hasPrevious = true
     }
 
     /* Marching squares for one level, stitched into polylines.
@@ -1232,26 +1261,14 @@ function apply(ctx) {
       const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
         ? performance.now() : Date.now()
       // Field pass, throttled: this is the expensive part (~4.4 ms measured).
-      if (contourLastField < 0 || now - contourLastField >= 1000 / CONTOUR_FIELD_FPS) {
-        /* First pass after a (re)start. contourLastField is -1 there, and the
-           elapsed time is genuinely unknown — the switch may have been off for
-           minutes, and feeding that gap in as dt would teleport the sheet instead
-           of drifting it. It used to use dt = 0, which avoids the teleport but
-           makes the frame a guaranteed NO-OP: the field is re-extracted and
-           redrawn at the phase it already had, costing ~4.4 ms to produce
-           byte-identical pixels.
-           That is not merely wasteful, it is a visible defect when frames are
-           scarce. Measured with an instrumented build: after re-enabling the
-           switch, the animation produced ZERO changed pixels across a 700 ms
-           window (the renderer delivered exactly one rAF callback in that time,
-           and the no-op consumed it), then resumed normally once a later callback
-           arrived. Advancing by ONE NOMINAL FRAME instead keeps the anti-teleport
-           clamp while making every frame do real work. */
-        const dt = contourLastField < 0
-          ? 1 / CONTOUR_FIELD_FPS
-          : (now - contourLastField) / 1000
+      const fps = contourFieldFps()
+      if (contourLastField < 0 || now - contourLastField >= 1000 / fps) {
+        /* Always advance by ONE NOMINAL FRAME. A delayed rAF must not catch up by
+           applying its whole wall-clock gap: that makes the extracted contour jump
+           and creates a visible twitch. The animation resumes smoothly instead of
+           teleporting after a scroll, resize or busy main-thread interval. */
         contourLastField = now
-        contourPhase += dt * 0.16      // slow drift: the sheet breathes, never churns
+        contourPhase += CONTOUR_PHASE_STEP * readContourSpeed() // speed changes drift, not refresh rate
         contourExtract(contourPhase)
         contourDrawLines()
       }
@@ -1381,7 +1398,6 @@ function apply(ctx) {
       })
       contourSchemeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'class'] })
     }
-
     // Let the page observer declared above re-attach the layer as the app renders.
     contourSyncHook = syncContour
 
@@ -2268,6 +2284,12 @@ function apply(ctx) {
       body:not(.theme-endfield-round) [class*='actionButton' i],
       body:not(.theme-endfield-round) [class$='_iconButton'] {
         border-radius: 50% !important;
+      }
+      /* Hover feedback should track the pointer immediately; the app's broad
+         transition rule otherwise makes colour changes feel delayed. */
+      button,
+      [role='button'] {
+        transition: none !important;
       }
       body:not(.theme-endfield-round) [class*='scrollbar'],
       body:not(.theme-endfield-round) [class*='Scrollbar'] {
@@ -3486,9 +3508,17 @@ function apply(ctx) {
       contourAnimRow: '动态等高线',
       contourAnimOn: '开启动态',
       contourAnimOff: '切为静态',
-      contourAnimHintOn: '等高线缓慢流动变形（约 24fps，关闭后为静态图案）',
+      contourAnimHintOn: '等高线缓慢流动变形（可选 24 / 60 / 120 FPS，关闭后为静态图案）',
       contourAnimHintOff: '静态等高线，不做任何逐帧计算',
       contourAnimHintReduced: '系统已开启「减少动态效果」，当前保持静态',
+      contourFpsRow: '动态帧率',
+      contourFpsHint: '选择等高线动画的刷新档位',
+      contourFpsUnit: 'FPS',
+      contourSpeedRow: '动态速度',
+      contourSpeedHint: '选择等高线变形速度，不影响刷新率',
+      contourSpeedSlow: '慢速',
+      contourSpeedNormal: '标准',
+      contourSpeedFast: '快速',
       contourAnimNeedLayer: '请先开启等高线背景',
       watermarkRow: '背景水印',
       watermarkOn: '开启水印',
@@ -3553,9 +3583,17 @@ function apply(ctx) {
       contourAnimRow: 'Animated contours',
       contourAnimOn: 'Animate',
       contourAnimOff: 'Make static',
-      contourAnimHintOn: 'The field drifts slowly at about 24fps (static pattern when off)',
+      contourAnimHintOn: 'The field drifts at 24, 60 or 120 FPS (static pattern when off)',
       contourAnimHintOff: 'Static contours, with no per-frame work at all',
       contourAnimHintReduced: 'Your system asks for reduced motion, so it stays static',
+      contourFpsRow: 'Animation frame rate',
+      contourFpsHint: 'Choose the contour animation refresh rate',
+      contourFpsUnit: 'FPS',
+      contourSpeedRow: 'Animation speed',
+      contourSpeedHint: 'Choose contour motion speed without changing refresh rate',
+      contourSpeedSlow: 'Slow',
+      contourSpeedNormal: 'Normal',
+      contourSpeedFast: 'Fast',
       contourAnimNeedLayer: 'Turn on the contour background first',
       watermarkRow: 'Background wordmark',
       watermarkOn: 'Turn on',
@@ -3642,6 +3680,8 @@ function apply(ctx) {
           const [loaderOn, setLoaderOn] = R.useState(isLoaderOn())
           const [contourOn, setContourOn] = R.useState(isContourOn())
           const [contourAnim, setContourAnim] = R.useState(isContourAnimOn())
+          const [contourFps, setContourFps] = R.useState(readContourFps())
+          const [contourSpeed, setContourSpeed] = R.useState(readContourSpeed())
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [palette, setPalette] = R.useState(readPalette())
@@ -3714,6 +3754,18 @@ function apply(ctx) {
             if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_ANIM_KEY, next ? '1' : '0')
             setContourAnim(next)
             syncContour()
+          }
+          const setContourFpsValue = (value) => {
+            const next = Number(value)
+            if (!CONTOUR_FPS_OPTIONS.includes(next)) return
+            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_FPS_KEY, String(next))
+            setContourFps(next)
+          }
+          const setContourSpeedValue = (value) => {
+            const next = Number(value)
+            if (!CONTOUR_SPEED_OPTIONS.includes(next)) return
+            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SPEED_KEY, String(next))
+            setContourSpeed(next)
           }
           const toggleWm = () => {
             const next = !wmOn
@@ -3883,6 +3935,38 @@ function apply(ctx) {
                   disabled: !contourOn,
                   title: contourOn ? '' : t('contourAnimNeedLayer'),
                 }, t(contourAnim ? 'contourAnimOff' : 'contourAnimOn'))
+              ]),
+              row('contour-fps', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('contourFpsRow') + t('sep') + contourFps + t('contourFpsUnit'),
+                  R.createElement('span', { style: hintStyle }, t('contourFpsHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '4px', flex: '0 0 auto' } },
+                  ...CONTOUR_FPS_OPTIONS.map((fps) => R.createElement('button', {
+                    key: 'fps-' + fps,
+                    type: 'button',
+                    onClick: () => setContourFpsValue(fps),
+                    style: btnStyleFor(contourFps === fps, !contourOn),
+                    disabled: !contourOn,
+                    title: contourOn ? '' : t('contourAnimNeedLayer'),
+                  }, String(fps)))
+                )
+              ]),
+              row('contour-speed', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('contourSpeedRow') + t('sep') + t(contourSpeed === 1 ? 'contourSpeedSlow' : contourSpeed === 4 ? 'contourSpeedFast' : 'contourSpeedNormal'),
+                  R.createElement('span', { style: hintStyle }, t('contourSpeedHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '4px', flex: '0 0 auto' } },
+                  ...CONTOUR_SPEED_OPTIONS.map((speed) => R.createElement('button', {
+                    key: 'speed-' + speed,
+                    type: 'button',
+                    onClick: () => setContourSpeedValue(speed),
+                    style: btnStyleFor(contourSpeed === speed, !contourOn),
+                    disabled: !contourOn,
+                    title: contourOn ? '' : t('contourAnimNeedLayer'),
+                  }, t(speed === 1 ? 'contourSpeedSlow' : speed === 4 ? 'contourSpeedFast' : 'contourSpeedNormal')))
+                )
               ]),
               row('watermark', false, [
                 R.createElement('span', { style: labelStyle }, t('watermarkRow') + t('sep') + stateOf(wmOn)),

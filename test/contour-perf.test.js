@@ -108,8 +108,11 @@ console.log('  grid ' + r.grid + '  levels ' + r.levels + '  polylines ' + r.pol
 console.log('  one-time build       ' + r.build + ' ms')
 console.log('  field evaluate       p50 ' + r.evalP50 + '  p95 ' + r.evalP95 + ' ms')
 console.log('  evaluate + extract   p50 ' + r.fullP50 + '  p95 ' + r.fullP95 + '  max ' + r.fullMax + ' ms   (n=' + r.samples + ')')
-const budget = 1000 / 24
-console.log('  24fps budget         ' + budget.toFixed(1) + ' ms')
-if (parseFloat(r.fullP95) > budget) { console.error('\nFAIL  p95 over budget'); process.exit(1) }
-console.log('\nok  steady-state animation fits the 24fps budget with ' +
-  (100 - 100 * parseFloat(r.fullP95) / budget).toFixed(0) + '% headroom')
+const fullP95 = parseFloat(r.fullP95)
+for (const fps of [24, 60, 120]) {
+  const budget = 1000 / fps
+  console.log('  ' + fps + 'fps budget         ' + budget.toFixed(1) + ' ms')
+  if (fullP95 > budget) { console.error('\nFAIL  p95 over ' + fps + 'fps budget'); process.exit(1) }
+}
+console.log('\nok  steady-state animation fits 24/60/120fps budgets; 120fps headroom ' +
+  (100 - 100 * fullP95 / (1000 / 120)).toFixed(0) + '%')
