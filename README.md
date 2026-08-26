@@ -45,7 +45,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 
 ## 设置项
 
-设置页分四组，共 10 个开关，全部由 `localStorage` 持久化，文案跟随 DSH 的语言设置（中/英）。
+设置页分四组，共 11 个设置项，全部由 `localStorage` 持久化，文案跟随 DSH 的语言设置（中/英）。
 
 | 组 | 开关 | 默认 |
 | --- | --- | --- |
@@ -54,6 +54,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 | | 主题圆角（直角 / 圆角） | 直角 |
 | 02 背景 | 等高线背景 | 关 |
 | | 动态等高线 | 开（需先开启等高线背景） |
+| | 动态帧率 | 24 / 60 / 120 FPS（默认 24） |
 | | 背景水印 | 开 |
 | | 水印保持显示 | 关（需先开启背景水印） |
 | 03 动画 | 启动加载动画 | 关 |
@@ -67,7 +68,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 | 文档 | 内容 |
 | --- | --- |
 | [docs/design-language.md](docs/design-language.md) | 色板、令牌映射、强调色角色、对比度规则 —— **想学设计语言从这里开始** |
-| [docs/features.md](docs/features.md) | 十个开关各自的行为、默认值、存储键与边界情况 |
+| [docs/features.md](docs/features.md) | 各设置项的行为、默认值、存储键与边界情况 |
 | [docs/engineering-notes.md](docs/engineering-notes.md) | 实现决策与实测数据（等高线算法、层叠、加载屏排版、i18n） |
 | [docs/testing.md](docs/testing.md) | 校验脚本与测试套件说明 |
 

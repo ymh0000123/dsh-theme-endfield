@@ -7,7 +7,7 @@
  *   1) theme.overrideTokens —— 覆盖主题令牌（亮/暗双色），映射终末地官网色板；
  *   2) insertCss —— 注入字体栈、强调色、直角化、去蓝、hover 反色等全局样式。
  *      （动态插件环境走 styles.insert；安装为独立 bundle 时直接注入 <style> 到 head。）
- *   3) 设置页「终末地主题设置」—— 十个开关按四组分类（主题 / 背景 / 动画 / 娱乐），
+ *   3) 设置页「终末地主题设置」—— 设置项按四组分类（主题 / 背景 / 动画 / 娱乐），
  *      均由 localStorage 持久化，文案跟随 DSH 的语言设置。
  *
  * 文档：README.md 为索引；设计语言见 docs/design-language.md，
@@ -362,11 +362,18 @@ function apply(ctx) {
                   evaluated at every grid point. */
     const CONTOUR_KEY = 'dsh-theme-endfield-contour'
     const CONTOUR_ANIM_KEY = 'dsh-theme-endfield-contour-anim'
+    const CONTOUR_FPS_KEY = 'dsh-theme-endfield-contour-fps'
+    const CONTOUR_FPS_OPTIONS = [24, 60, 120]
     // Default OFF (=== '1'): a background pattern must be opt-in.
     const isContourOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_KEY)) === '1'
     // Defaults ON, so enabling the layer shows the effect at once; it is
     // meaningless while the layer itself is off.
     const isContourAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_ANIM_KEY)) !== '0'
+    const readContourFps = () => {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_FPS_KEY) : null
+      const fps = Number(raw)
+      return CONTOUR_FPS_OPTIONS.includes(fps) ? fps : 24
+    }
 
     /* Deterministic PRNG (mulberry32), used with a PER-PAGE-LOAD seed.
        Determinism is still required WITHIN one load: contourBuild() is re-run on
@@ -419,6 +426,8 @@ function apply(ctx) {
     let contourField = null     // typed-array state, rebuilt only on resize
     let contourLastField = -1   // timestamp of the last field extraction
     let contourPhase = 0
+    let contourScrollTimer = null
+    let contourScrolling = false
     /* Last applied animation state. Declared HERE, above every function that touches
        it, because contourTeardown() assigns it and is itself reachable from
        unmount() — a `let` declared further down would still be in its temporal dead
@@ -428,7 +437,7 @@ function apply(ctx) {
     const CONTOUR_STEP = 6      // balanced sampling/detail point for 1px contour strokes
     const CONTOUR_LEVELS = 20
     const CONTOUR_SPAN = 1.45   // levels span [-SPAN, +SPAN]
-    const CONTOUR_FIELD_FPS = 24 // the field is the expensive half; 24 reads as fluid
+    const contourFieldFps = () => readContourFps()
     /* Speck rejection. Marching squares legitimately produces two kinds of debris
        that read as "mysterious little dots" rather than terrain:
 
@@ -484,8 +493,28 @@ function apply(ctx) {
       && typeof window.matchMedia === 'function'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const contourWantsAnim = () => isContourAnimOn() && !prefersReducedMotion()
-      && !contourLoaderActive
+      && !contourLoaderActive && !contourScrolling
     let contourLoaderActive = false
+    const contourPauseForScroll = () => {
+      contourScrolling = true
+      if (contourWrap !== null && contourRaf !== null) {
+        contourSwitchSig = ''
+        contourStopLoop()
+      }
+      if (contourScrollTimer !== null && typeof window !== 'undefined' && typeof window.clearTimeout === 'function') {
+        window.clearTimeout(contourScrollTimer)
+      }
+      if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+        contourScrollTimer = window.setTimeout(() => {
+          contourScrollTimer = null
+          contourScrolling = false
+          if (contourWrap !== null) {
+            contourSwitchSig = ''
+            contourApplySwitches()
+          }
+        }, 120)
+      }
+    }
     const contourPauseForLoader = () => {
       contourLoaderActive = true
       if (contourWrap !== null && contourRaf !== null) {
@@ -1232,7 +1261,8 @@ function apply(ctx) {
       const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
         ? performance.now() : Date.now()
       // Field pass, throttled: this is the expensive part (~4.4 ms measured).
-      if (contourLastField < 0 || now - contourLastField >= 1000 / CONTOUR_FIELD_FPS) {
+      const fps = contourFieldFps()
+      if (contourLastField < 0 || now - contourLastField >= 1000 / fps) {
         /* First pass after a (re)start. contourLastField is -1 there, and the
            elapsed time is genuinely unknown — the switch may have been off for
            minutes, and feeding that gap in as dt would teleport the sheet instead
@@ -1248,7 +1278,7 @@ function apply(ctx) {
            arrived. Advancing by ONE NOMINAL FRAME instead keeps the anti-teleport
            clamp while making every frame do real work. */
         const dt = contourLastField < 0
-          ? 1 / CONTOUR_FIELD_FPS
+          ? 1 / fps
           : (now - contourLastField) / 1000
         contourLastField = now
         contourPhase += dt * 0.16      // slow drift: the sheet breathes, never churns
@@ -1380,6 +1410,10 @@ function apply(ctx) {
         contourDrawLines()
       })
       contourSchemeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'class'] })
+    }
+    const onContourScroll = () => contourPauseForScroll()
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('scroll', onContourScroll, { capture: true, passive: true })
     }
 
     // Let the page observer declared above re-attach the layer as the app renders.
@@ -2268,6 +2302,12 @@ function apply(ctx) {
       body:not(.theme-endfield-round) [class*='actionButton' i],
       body:not(.theme-endfield-round) [class$='_iconButton'] {
         border-radius: 50% !important;
+      }
+      /* Hover feedback should track the pointer immediately; the app's broad
+         transition rule otherwise makes colour changes feel delayed. */
+      button,
+      [role='button'] {
+        transition: none !important;
       }
       body:not(.theme-endfield-round) [class*='scrollbar'],
       body:not(.theme-endfield-round) [class*='Scrollbar'] {
@@ -3486,9 +3526,12 @@ function apply(ctx) {
       contourAnimRow: '动态等高线',
       contourAnimOn: '开启动态',
       contourAnimOff: '切为静态',
-      contourAnimHintOn: '等高线缓慢流动变形（约 24fps，关闭后为静态图案）',
+      contourAnimHintOn: '等高线缓慢流动变形（可选 24 / 60 / 120 FPS，关闭后为静态图案）',
       contourAnimHintOff: '静态等高线，不做任何逐帧计算',
       contourAnimHintReduced: '系统已开启「减少动态效果」，当前保持静态',
+      contourFpsRow: '动态帧率',
+      contourFpsHint: '选择等高线动画的刷新档位',
+      contourFpsUnit: 'FPS',
       contourAnimNeedLayer: '请先开启等高线背景',
       watermarkRow: '背景水印',
       watermarkOn: '开启水印',
@@ -3553,9 +3596,12 @@ function apply(ctx) {
       contourAnimRow: 'Animated contours',
       contourAnimOn: 'Animate',
       contourAnimOff: 'Make static',
-      contourAnimHintOn: 'The field drifts slowly at about 24fps (static pattern when off)',
+      contourAnimHintOn: 'The field drifts at 24, 60 or 120 FPS (static pattern when off)',
       contourAnimHintOff: 'Static contours, with no per-frame work at all',
       contourAnimHintReduced: 'Your system asks for reduced motion, so it stays static',
+      contourFpsRow: 'Animation frame rate',
+      contourFpsHint: 'Choose the contour animation refresh rate',
+      contourFpsUnit: 'FPS',
       contourAnimNeedLayer: 'Turn on the contour background first',
       watermarkRow: 'Background wordmark',
       watermarkOn: 'Turn on',
@@ -3642,6 +3688,7 @@ function apply(ctx) {
           const [loaderOn, setLoaderOn] = R.useState(isLoaderOn())
           const [contourOn, setContourOn] = R.useState(isContourOn())
           const [contourAnim, setContourAnim] = R.useState(isContourAnimOn())
+          const [contourFps, setContourFps] = R.useState(readContourFps())
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [palette, setPalette] = R.useState(readPalette())
@@ -3714,6 +3761,12 @@ function apply(ctx) {
             if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_ANIM_KEY, next ? '1' : '0')
             setContourAnim(next)
             syncContour()
+          }
+          const setContourFpsValue = (value) => {
+            const next = Number(value)
+            if (!CONTOUR_FPS_OPTIONS.includes(next)) return
+            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_FPS_KEY, String(next))
+            setContourFps(next)
           }
           const toggleWm = () => {
             const next = !wmOn
@@ -3884,6 +3937,22 @@ function apply(ctx) {
                   title: contourOn ? '' : t('contourAnimNeedLayer'),
                 }, t(contourAnim ? 'contourAnimOff' : 'contourAnimOn'))
               ]),
+              row('contour-fps', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('contourFpsRow') + t('sep') + contourFps + t('contourFpsUnit'),
+                  R.createElement('span', { style: hintStyle }, t('contourFpsHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '4px', flex: '0 0 auto' } },
+                  ...CONTOUR_FPS_OPTIONS.map((fps) => R.createElement('button', {
+                    key: 'fps-' + fps,
+                    type: 'button',
+                    onClick: () => setContourFpsValue(fps),
+                    style: btnStyleFor(contourFps === fps, !contourOn),
+                    disabled: !contourOn,
+                    title: contourOn ? '' : t('contourAnimNeedLayer'),
+                  }, String(fps)))
+                )
+              ]),
               row('watermark', false, [
                 R.createElement('span', { style: labelStyle }, t('watermarkRow') + t('sep') + stateOf(wmOn)),
                 R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, t(wmOn ? 'watermarkOff' : 'watermarkOn'))
@@ -3992,6 +4061,14 @@ function apply(ctx) {
       // The contour layer owns a rAF handle, a ResizeObserver, a MutationObserver
       // and two canvases — every one of them has to go with the run.
       contourTeardown()
+      if (contourScrollTimer !== null && typeof window !== 'undefined' && typeof window.clearTimeout === 'function') {
+        window.clearTimeout(contourScrollTimer)
+        contourScrollTimer = null
+      }
+      contourScrolling = false
+      if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        document.removeEventListener('scroll', onContourScroll, { capture: true })
+      }
       if (contourSchemeObserver) contourSchemeObserver.disconnect()
       /* The announcement feature owns two store subscriptions, a retry timeout and
          a hide timeout, all of which outlive the DOM node — unmount() covers the

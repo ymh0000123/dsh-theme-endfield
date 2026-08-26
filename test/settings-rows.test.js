@@ -151,12 +151,12 @@ const buttons = nodes.filter((n) => n.type === 'button')
    happened when 大字入场动画 was added (the count stayed at 9 and the assertion
    passed while a tenth row was on screen). The independent total below is what
    makes that impossible now. */
-const ROW_KEYS = ['theme', 'palette', 'radius', 'contour', 'contour-anim', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim']
+const ROW_KEYS = ['theme', 'palette', 'radius', 'contour', 'contour-anim', 'contour-fps', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim']
 const rows = nodes.filter((n) => n.type === 'div' && n.props && ROW_KEYS.includes(n.props.key))
 const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.props && /^group-/.test(c.props.key))
 
-if (rows.length === 10) pass('panel has all 10 setting rows')
-else fail('expected 10 rows, found ' + rows.length)
+if (rows.length === 11) pass('panel has all 11 setting rows')
+else fail('expected 11 rows, found ' + rows.length)
 
 /* Count the rows the way the PAGE defines them — every direct child of a group
    container — so an unlisted new row shows up as a mismatch instead of vanishing. */
@@ -223,6 +223,12 @@ const findBtn = (re) => buttons.find((b) => re.test(textOf(b)))
 const animBtn = findBtn(/切为静态|开启动态/)
 if (animBtn && animBtn.props.disabled === true) pass('动态等高线 disabled while layer off')
 else fail('动态等高线 should be disabled while the contour layer is off')
+const fpsRow = rows.find((r) => r.props.key === 'contour-fps')
+const fpsButtons = fpsRow ? walk(fpsRow).filter((b) => b.type === 'button') : []
+if (fpsButtons.length === 3 && fpsButtons.map((b) => textOf(b)).join(',') === '24,60,120') pass('动态帧率提供 24/60/120 三档')
+else fail('动态帧率 should provide exactly 24/60/120, found: ' + fpsButtons.map((b) => textOf(b)).join(','))
+if (fpsButtons.every((b) => b.props.disabled === true)) pass('动态帧率 disabled while layer off')
+else fail('动态帧率 should be disabled while the contour layer is off')
 
 /* --- 雷霆大字 (娱乐): default OFF, and its 预览 follows the same rule ---
    The row is asserted from the DEFAULT state deliberately: "默认关闭" is the part of
@@ -272,12 +278,23 @@ else {
 
 /* --- turn the layer on and re-render: the sub-switch must become usable --- */
 store.set('dsh-theme-endfield-contour', '1')
+store.set('dsh-theme-endfield-contour-fps', '120')
 let tree2
 try { tree2 = rendered() } catch (e) { fail('re-render threw: ' + e.message); process.exit(1) }
 const buttons2 = walk(tree2).filter((n) => n.type === 'button')
 const animBtn2 = buttons2.find((b) => /切为静态|开启动态/.test(textOf(b)))
 if (animBtn2 && !animBtn2.props.disabled) pass('动态等高线 enabled once the layer is on')
 else fail('动态等高线 should be enabled once the contour layer is on')
+const fpsRow2 = walk(tree2).find((n) => n.type === 'div' && n.props && n.props.key === 'contour-fps')
+const fpsButtons2 = fpsRow2 ? walk(fpsRow2).filter((b) => b.type === 'button') : []
+const fps120 = fpsButtons2.find((b) => textOf(b) === '120')
+if (fps120 && !fps120.props.disabled) pass('120 FPS enabled once the layer is on')
+else fail('120 FPS should be enabled once the contour layer is on')
+if (fps120 && typeof fps120.props.onClick === 'function') {
+  try { fps120.props.onClick() } catch (e) { fail('120 FPS toggle threw: ' + e.message) }
+  if (store.get('dsh-theme-endfield-contour-fps') === '120') pass('120 FPS toggle writes dsh-theme-endfield-contour-fps=120')
+  else fail('120 FPS toggle did not write dsh-theme-endfield-contour-fps=120')
+} else fail('120 FPS button has no onClick handler')
 
 /* --- 雷霆大字 on: 预览 becomes usable and the row states the live behaviour --- */
 store.set('dsh-theme-endfield-thunder', '1')
