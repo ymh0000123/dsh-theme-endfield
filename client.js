@@ -295,8 +295,14 @@ function apply(ctx) {
       }
     }
     const onWatermarkResize = () => { if (watermarkEl) positionWatermark() }
+    let contourScrollHook = () => {}
+    let contourScrollEndHook = () => {}
+    const onContourScrollEvent = () => { contourScrollHook() }
+    const onContourScrollEndEvent = () => { contourScrollEndHook() }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('resize', onWatermarkResize)
+      window.addEventListener('scroll', onContourScrollEvent, true)
+      window.addEventListener('scrollend', onContourScrollEndEvent, true)
     }
     let watermarkObserver = null
     /* Assigned to syncContour once that is defined below. Declared here as a real
@@ -364,6 +370,7 @@ function apply(ctx) {
     const CONTOUR_ANIM_KEY = 'dsh-theme-endfield-contour-anim'
     const CONTOUR_FPS_KEY = 'dsh-theme-endfield-contour-fps'
     const CONTOUR_SPEED_KEY = 'dsh-theme-endfield-contour-speed'
+    const CONTOUR_SCROLL_PAUSE_KEY = 'dsh-theme-endfield-contour-scroll-pause'
     const CONTOUR_FPS_OPTIONS = [24, 60, 120]
     const CONTOUR_SPEED_OPTIONS = [1, 2, 4]
     const CONTOUR_PHASE_STEP = 1 / 150
@@ -382,6 +389,8 @@ function apply(ctx) {
       const speed = Number(raw)
       return CONTOUR_SPEED_OPTIONS.includes(speed) ? speed : 2
     }
+    const isContourScrollPauseOn = () => (typeof localStorage !== 'undefined'
+      && localStorage.getItem(CONTOUR_SCROLL_PAUSE_KEY)) !== '0'
 
     /* Deterministic PRNG (mulberry32), used with a PER-PAGE-LOAD seed.
        Determinism is still required WITHIN one load: contourBuild() is re-run on
@@ -499,8 +508,52 @@ function apply(ctx) {
       && typeof window.matchMedia === 'function'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const contourWantsAnim = () => isContourAnimOn() && !prefersReducedMotion()
-      && !contourLoaderActive
+      && !contourLoaderActive && !contourScrollPaused
     let contourLoaderActive = false
+    let contourScrollPaused = false
+    let contourScrollTimer = null
+    let contourResizePending = false
+    const contourHasScrollEnd = typeof window !== 'undefined' && 'onscrollend' in window
+    const contourPauseOnScroll = () => {
+      if (!isEnabled() || contourWrap === null || !isContourScrollPauseOn() || !isContourAnimOn()) return
+      if (!contourScrollPaused) {
+        contourScrollPaused = true
+        contourSwitchSig = ''
+        contourStopLoop()
+      }
+      if (!contourHasScrollEnd && typeof setTimeout === 'function') {
+        if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
+        contourScrollTimer = setTimeout(() => {
+          contourScrollTimer = null
+          contourScrollPaused = false
+          contourSwitchSig = ''
+          contourApplySwitches()
+        }, 10)
+      }
+    }
+    const contourResumeAfterScroll = () => {
+      if (!contourScrollPaused) return
+      if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
+      const resume = () => {
+        contourScrollTimer = null
+        contourScrollPaused = false
+        contourSwitchSig = ''
+        if (contourResizePending && contourHost !== null) {
+          contourResizePending = false
+          if (contourSizeTo(contourHost)) {
+            contourExtract(contourPhase)
+            contourDrawLines()
+          }
+        }
+        contourApplySwitches()
+      }
+      if (typeof setTimeout === 'function') contourScrollTimer = setTimeout(resume, 10)
+      else resume()
+    }
+    const onContourScroll = () => { contourPauseOnScroll() }
+    const onContourScrollEnd = () => { contourResumeAfterScroll() }
+    contourScrollHook = onContourScroll
+    contourScrollEndHook = onContourScrollEnd
     const contourPauseForLoader = () => {
       contourLoaderActive = true
       if (contourWrap !== null && contourRaf !== null) {
@@ -1371,6 +1424,10 @@ function apply(ctx) {
           if (typeof ResizeObserver !== 'undefined') {
             contourRo = new ResizeObserver(() => {
               if (contourHost === null) return
+              if (contourScrollPaused) {
+                contourResizePending = true
+                return
+              }
               if (contourSizeTo(contourHost)) {
                 contourExtract(contourPhase)
                 contourDrawLines()
@@ -3519,6 +3576,11 @@ function apply(ctx) {
       contourSpeedSlow: '慢速',
       contourSpeedNormal: '标准',
       contourSpeedFast: '快速',
+      contourScrollPauseRow: '滚动窗口动画暂停',
+      contourScrollPauseOn: '开启暂停',
+      contourScrollPauseOff: '关闭暂停',
+      contourScrollPauseHintOn: '滚动上下文窗口时暂停等高线动画，停止滚动后约 10ms 恢复',
+      contourScrollPauseHintOff: '警告：关闭后可能出现滚动卡顿',
       contourAnimNeedLayer: '请先开启等高线背景',
       watermarkRow: '背景水印',
       watermarkOn: '开启水印',
@@ -3594,6 +3656,11 @@ function apply(ctx) {
       contourSpeedSlow: 'Slow',
       contourSpeedNormal: 'Normal',
       contourSpeedFast: 'Fast',
+      contourScrollPauseRow: 'Pause animation while scrolling',
+      contourScrollPauseOn: 'Pause on scroll',
+      contourScrollPauseOff: 'Keep animating',
+      contourScrollPauseHintOn: 'Pauses contour animation while scrolling and resumes about 10ms after it stops',
+      contourScrollPauseHintOff: 'Warning: scrolling may stutter when this is off',
       contourAnimNeedLayer: 'Turn on the contour background first',
       watermarkRow: 'Background wordmark',
       watermarkOn: 'Turn on',
@@ -3682,6 +3749,7 @@ function apply(ctx) {
           const [contourAnim, setContourAnim] = R.useState(isContourAnimOn())
           const [contourFps, setContourFps] = R.useState(readContourFps())
           const [contourSpeed, setContourSpeed] = R.useState(readContourSpeed())
+          const [contourScrollPause, setContourScrollPause] = R.useState(isContourScrollPauseOn())
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [palette, setPalette] = R.useState(readPalette())
@@ -3753,6 +3821,11 @@ function apply(ctx) {
             const next = !contourAnim
             if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_ANIM_KEY, next ? '1' : '0')
             setContourAnim(next)
+            if (!next) {
+              contourScrollPaused = false
+              if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
+              contourScrollTimer = null
+            }
             syncContour()
           }
           const setContourFpsValue = (value) => {
@@ -3766,6 +3839,18 @@ function apply(ctx) {
             if (!CONTOUR_SPEED_OPTIONS.includes(next)) return
             if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SPEED_KEY, String(next))
             setContourSpeed(next)
+          }
+          const toggleContourScrollPause = () => {
+            const next = !contourScrollPause
+            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SCROLL_PAUSE_KEY, next ? '1' : '0')
+            setContourScrollPause(next)
+            if (!next) {
+              contourScrollPaused = false
+              if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
+              contourScrollTimer = null
+              contourSwitchSig = ''
+              contourApplySwitches()
+            }
           }
           const toggleWm = () => {
             const next = !wmOn
@@ -3952,7 +4037,7 @@ function apply(ctx) {
                   }, String(fps)))
                 )
               ]),
-              row('contour-speed', true, [
+              row('contour-speed', false, [
                 R.createElement('span', { style: labelStyle },
                   t('contourSpeedRow') + t('sep') + t(contourSpeed === 1 ? 'contourSpeedSlow' : contourSpeed === 4 ? 'contourSpeedFast' : 'contourSpeedNormal'),
                   R.createElement('span', { style: hintStyle }, t('contourSpeedHint'))
@@ -3967,6 +4052,21 @@ function apply(ctx) {
                     title: contourOn ? '' : t('contourAnimNeedLayer'),
                   }, t(speed === 1 ? 'contourSpeedSlow' : speed === 4 ? 'contourSpeedFast' : 'contourSpeedNormal')))
                 )
+              ]),
+              row('contour-scroll-pause', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('contourScrollPauseRow') + t('sep') + stateOf(contourScrollPause),
+                  R.createElement('span', { style: hintStyle },
+                    t(contourScrollPause ? 'contourScrollPauseHintOn' : 'contourScrollPauseHintOff')
+                  )
+                ),
+                R.createElement('button', {
+                  type: 'button',
+                  onClick: toggleContourScrollPause,
+                  style: btnStyleFor(contourScrollPause, !contourOn),
+                  disabled: !contourOn,
+                  title: contourOn ? '' : t('contourAnimNeedLayer'),
+                }, t(contourScrollPause ? 'contourScrollPauseOff' : 'contourScrollPauseOn'))
               ]),
               row('watermark', false, [
                 R.createElement('span', { style: labelStyle }, t('watermarkRow') + t('sep') + stateOf(wmOn)),
@@ -4071,6 +4171,12 @@ function apply(ctx) {
       if (watermarkRaf !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(watermarkRaf)
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') window.removeEventListener('resize', onWatermarkResize)
       if (watermarkEl && watermarkEl.parentNode) watermarkEl.parentNode.removeChild(watermarkEl)
+      if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
+      contourScrollTimer = null
+      contourScrollPaused = false
+      if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+        window.removeEventListener('scroll', onContourScrollEvent, true)
+      }
       // The plate owns a rAF handle and a fixed DOM node; both must go with the run.
       destroyLoader()
       // The contour layer owns a rAF handle, a ResizeObserver, a MutationObserver
