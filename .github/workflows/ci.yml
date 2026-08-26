@@ -1,0 +1,226 @@
+name: CI
+
+on:
+  # PR 是主要目标：明确列出触发时机，别只靠默认值。
+  #   opened / reopened   新开或重开
+  #   synchronize         PR 分支每次新推送
+  #   ready_for_review    draft 转正式
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一 PR 连续推送时取消上一次运行，避免排队浪费额度。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 只读足够：问题是用 workflow command 注解（::error file=...）报出来的，
+# 那条路不需要写权限，所以在来自 fork 的 PR 上一样有效。本仓库的 PR 恰好
+# 都来自 fork，用 API 写 PR 评论在这里必定失败（fork PR 的 token 是只读的），
+# 所以不走那条路，也就不需要 pull-requests: write。
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 静态检查：不启动浏览器，秒级完成，先挡住最廉价的错误。
+  # ---------------------------------------------------------------------------
+  static:
+    name: 静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 空白检查要比对 PR 的 base，需要完整历史。
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 失败会标成 PR diff 上的行内注解，指到具体文件和行。
+      - name: 语法解析
+        if: always()
+        run: node .github/scripts/syntax-check.js
+
+      # 项目自带的护栏：专查那个单模板字面量里的游离反引号和 ${...} 插值。
+      # selftest.js 再拿故意改坏的副本验证护栏本身有效。
+      - name: 样式表护栏
+        if: always()
+        run: |
+          node check.js
+          node selftest.js
+
+      - name: 行尾空白与冲突标记
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: node .github/scripts/whitespace-check.js
+
+      # 这个文件是 `dsh plugin add` 的挂载入口，结构错了不会报错，
+      # 只会让插件静默地装上但不挂载。
+      # YAML 解析走 js-yaml（Node 生态），不用 Python——Ubuntu 24.04 的 PEP 668
+      # 会拒绝 pip 往系统 Python 装 PyYAML。
+      - name: cordis.patch.yml 结构校验
+        if: always()
+        run: |
+          npx --yes js-yaml cordis.patch.yml > patch.json
+          node .github/scripts/check-patch-yml.js patch.json
+          rm -f patch.json
+
+      - name: package.json 自洽性
+        if: always()
+        run: node .github/scripts/package-check.js
+
+  # ---------------------------------------------------------------------------
+  # 测试套件：19 项，逐个跑（不用 npm run test:ci 的 && 串联，那个第一个失败
+  # 就短路，PR 作者只能看到一个问题）。清单仍从 package.json 读，单一来源。
+  # ---------------------------------------------------------------------------
+  test:
+    name: 测试套件 (19 项)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 定位 Chrome
+        run: |
+          p="$(command -v google-chrome || command -v google-chrome-stable \
+            || command -v chromium-browser || command -v chromium || true)"
+          if [ -z "$p" ]; then
+            echo "::error title=环境缺失::runner 上找不到 Chrome/Chromium，15 个浏览器测试无法运行"
+            exit 1
+          fi
+          echo "CHROME_PATH=$p" >> "$GITHUB_ENV"
+          echo "使用 $p"
+          "$p" --version
+
+      # 这些测试全部用 `'file:///' + 绝对路径` 拼 URL。该拼法只在 Windows 上
+      # 正确（C:\x -> file:///C:/x）；Linux 上 /tmp/x 会拼成 file:////tmp/x，
+      # URL 标准把 pathname 保留为 //tmp/x 而**不会**折叠，靠 Linux 自己折叠
+      # 连续斜杠才能打开。这套测试此前只在 Windows 跑过，所以先用同样的拼法
+      # 探一次——万一哪天不成立，这里给出一行明确诊断，而不是 15 个测试一起
+      # 神秘失败。
+      - name: headless Chrome 冒烟检查
+        run: |
+          tmp="$(mktemp -d)"
+          printf '<!doctype html><title>SMOKE-OK</title>' > "$tmp/probe.html"
+          url="file:///$tmp/probe.html"
+          echo "探测 URL: $url"
+          dom="$("$CHROME_PATH" --headless=new --disable-gpu --no-sandbox \
+            --user-data-dir="$(mktemp -d)" --dump-dom "$url" 2>/dev/null || true)"
+          case "$dom" in
+            *SMOKE-OK*)
+              echo "ok    headless Chrome 可通过 'file:///'+绝对路径 加载页面" ;;
+            *)
+              echo "::error title=file URL 拼法在 Linux 上失效::headless Chrome 打不开 $url。修法：把测试里的 \"'file:///' + page.replace(/\\\\/g, '/')\" 换成 require('url').pathToFileURL(page).href"
+              exit 1 ;;
+          esac
+
+      - name: 运行测试
+        run: node .github/scripts/run-tests.js test:ci
+
+  # ---------------------------------------------------------------------------
+  # 性能与覆盖率：非阻塞。
+  #   contour-perf     阈值是 120fps 的 8.3ms/帧预算，虚拟化 runner 的算力抖动
+  #                    会让它假失败（同一台本机两次实测 p95 8.50 / 13.50ms）。
+  #   contour-coverage 跑 5 个随机种子，本身具间歇性。
+  # 数字仍有回归参考价值，所以照跑、写进摘要，只是不当门禁。
+  # ---------------------------------------------------------------------------
+  perf:
+    name: 性能与覆盖率 (非阻塞)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 定位 Chrome
+        run: |
+          p="$(command -v google-chrome || command -v google-chrome-stable \
+            || command -v chromium-browser || command -v chromium || true)"
+          if [ -z "$p" ]; then echo "::warning::找不到 Chrome，跳过"; exit 1; fi
+          echo "CHROME_PATH=$p" >> "$GITHUB_ENV"
+
+      - name: 等高线性能 contour-perf
+        id: perf
+        continue-on-error: true
+        run: npm run test:perf 2>&1 | tee perf.log
+
+      - name: 等高线覆盖率 contour-coverage
+        id: coverage
+        continue-on-error: true
+        run: npm run test:coverage 2>&1 | tee coverage.log
+
+      - name: 写入摘要
+        if: always()
+        run: |
+          {
+            echo '## 性能与覆盖率（非阻塞）'
+            echo ''
+            echo "| 项目 | 结果 |"
+            echo "| --- | --- |"
+            echo "| contour-perf | ${{ steps.perf.outcome }} |"
+            echo "| contour-coverage | ${{ steps.coverage.outcome }} |"
+            echo ''
+            echo '> 这两项不作为合并门禁：perf 的 8.3ms/帧预算对虚拟化 runner 过紧，'
+            echo '> coverage 使用随机种子。数字仅作回归趋势参考。'
+            echo ''
+            for f in perf.log coverage.log; do
+              [ -f "$f" ] || continue
+              echo "<details><summary>$f</summary>"
+              echo ''
+              echo '```text'
+              cat "$f"
+              echo '```'
+              echo ''
+              echo '</details>'
+              echo ''
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 结论：把两个阻塞 job 的结果收成一条确定的状态。
+  # 单独一个 job 的意义在于分支保护只需要盯这一个 required check——不用每加
+  # 一个 job 就去改保护规则。skipped/cancelled 也算不通过，不然取消的运行会
+  # 被误当成绿灯。
+  # ---------------------------------------------------------------------------
+  verdict:
+    name: 结论
+    runs-on: ubuntu-latest
+    needs: [static, test]
+    if: always()
+    steps:
+      - name: 汇总
+        env:
+          STATIC: ${{ needs.static.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "静态检查: $STATIC"
+          echo "测试套件: $TEST"
+          {
+            echo '## 结论'
+            echo ''
+            echo '| 检查 | 结果 |'
+            echo '| --- | --- |'
+            echo "| 静态检查 | $STATIC |"
+            echo "| 测试套件 | $TEST |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATIC" = "success" ] && [ "$TEST" = "success" ]; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '✅ 全部阻塞检查通过。' >> "$GITHUB_STEP_SUMMARY"
+            echo "ok  全部阻塞检查通过"
+          else
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '❌ 有阻塞检查未通过，详见上方各步骤的注解与明细。' >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=CI 未通过::静态检查=$STATIC 测试套件=$TEST"
+            exit 1
+          fi
