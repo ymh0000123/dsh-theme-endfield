@@ -151,12 +151,12 @@ const buttons = nodes.filter((n) => n.type === 'button')
    happened when 大字入场动画 was added (the count stayed at 9 and the assertion
    passed while a tenth row was on screen). The independent total below is what
    makes that impossible now. */
-const ROW_KEYS = ['theme', 'palette', 'radius', 'contour', 'contour-anim', 'contour-fps', 'contour-speed', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim']
+const ROW_KEYS = ['theme', 'palette', 'radius', 'contour', 'contour-anim', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim']
 const rows = nodes.filter((n) => n.type === 'div' && n.props && ROW_KEYS.includes(n.props.key))
 const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.props && /^group-/.test(c.props.key))
 
-if (rows.length === 12) pass('panel has all 12 setting rows')
-else fail('expected 12 rows, found ' + rows.length)
+if (rows.length === 13) pass('panel has all 13 setting rows')
+else fail('expected 13 rows, found ' + rows.length)
 
 /* Count the rows the way the PAGE defines them — every direct child of a group
    container — so an unlisted new row shows up as a mismatch instead of vanishing. */
@@ -235,6 +235,12 @@ if (speedButtons.length === 3 && speedButtons.map((b) => textOf(b)).join(',') ==
 else fail('动态速度 should provide exactly 慢速/标准/快速, found: ' + speedButtons.map((b) => textOf(b)).join(','))
 if (speedButtons.every((b) => b.props.disabled === true)) pass('动态速度 disabled while layer off')
 else fail('动态速度 should be disabled while the contour layer is off')
+const scrollPauseRow = rows.find((r) => r.props.key === 'contour-scroll-pause')
+const scrollPauseBtn = scrollPauseRow ? walk(scrollPauseRow).find((b) => b.type === 'button') : null
+if (scrollPauseBtn && textOf(scrollPauseRow).includes('滚动窗口动画暂停：开启')) pass('滚动窗口动画暂停默认开启')
+else fail('滚动窗口动画暂停 should be enabled by default')
+if (scrollPauseBtn && scrollPauseBtn.props.disabled === true) pass('滚动窗口动画暂停 disabled while layer off')
+else fail('滚动窗口动画暂停 should be disabled while the contour layer is off')
 
 /* --- 雷霆大字 (娱乐): default OFF, and its 预览 follows the same rule ---
    The row is asserted from the DEFAULT state deliberately: "默认关闭" is the part of
@@ -311,6 +317,15 @@ if (fastSpeed && typeof fastSpeed.props.onClick === 'function') {
   if (store.get('dsh-theme-endfield-contour-speed') === '4') pass('快速速度 toggle writes dsh-theme-endfield-contour-speed=4')
   else fail('快速速度 toggle did not write dsh-theme-endfield-contour-speed=4')
 } else fail('快速速度 button has no onClick handler')
+const scrollPauseRow2 = walk(tree2).find((n) => n.type === 'div' && n.props && n.props.key === 'contour-scroll-pause')
+const scrollPauseBtn2 = scrollPauseRow2 ? walk(scrollPauseRow2).find((b) => b.type === 'button') : null
+if (scrollPauseBtn2 && !scrollPauseBtn2.props.disabled) pass('滚动窗口动画暂停 enabled once the layer is on')
+else fail('滚动窗口动画暂停 should be enabled once the contour layer is on')
+if (scrollPauseBtn2 && typeof scrollPauseBtn2.props.onClick === 'function') {
+  try { scrollPauseBtn2.props.onClick() } catch (e) { fail('滚动窗口动画暂停 toggle threw: ' + e.message) }
+  if (store.get('dsh-theme-endfield-contour-scroll-pause') === '0') pass('滚动窗口动画暂停 toggle writes dsh-theme-endfield-contour-scroll-pause=0')
+  else fail('滚动窗口动画暂停 toggle did not write dsh-theme-endfield-contour-scroll-pause=0')
+} else fail('滚动窗口动画暂停 button has no onClick handler')
 
 /* --- 雷霆大字 on: 预览 becomes usable and the row states the live behaviour --- */
 store.set('dsh-theme-endfield-thunder', '1')
