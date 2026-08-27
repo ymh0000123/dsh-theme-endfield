@@ -16,10 +16,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 只读足够：问题是用 workflow command 注解（::error file=...）报出来的，
-# 那条路不需要写权限，所以在来自 fork 的 PR 上一样有效。本仓库的 PR 恰好
-# 都来自 fork，用 API 写 PR 评论在这里必定失败（fork PR 的 token 是只读的），
-# 所以不走那条路，也就不需要 pull-requests: write。
+# 默认只读。问题本身是用 workflow command 注解（::error file=...）报出来的，
+# 那条路不需要写权限，所以在**任何**来源的 PR 上都有效——这是 fork PR 唯一
+# 能拿到的反馈渠道，别删。
+#
+# verdict job 额外单独申请 pull-requests: write，用来把结论贴成 PR 评论。
+# 那是 job 级提升，不影响跑测试的两个 job（它们执行 PR 分支上的代码，不该
+# 拿到写权限）。fork PR 的 token 无论怎么声明都是只读的，所以那一步会自己
+# 跳过，只留注解。
 permissions:
   contents: read
 
@@ -198,6 +202,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [static, test]
     if: always()
+    # 只有这个 job 需要写权限，而且它不 checkout、不跑仓库里的任何代码，
+    # 只读两个 job 的结果字符串。
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: 汇总
         env:
@@ -221,6 +230,72 @@ jobs:
           else
             echo '' >> "$GITHUB_STEP_SUMMARY"
             echo '❌ 有阻塞检查未通过，详见上方各步骤的注解与明细。' >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=CI 未通过::静态检查=$STATIC 测试套件=$TEST"
-            exit 1
           fi
+
+      # 固定一条评论，反复覆盖，PR 里不会堆一串历史结果。认领靠 body 开头的
+      # HTML 注释标记，不靠作者名——同一个 bot 也可能发别的评论。
+      #
+      # 条件里的 head.repo.full_name == repository 是必需的：fork PR 的
+      # GITHUB_TOKEN 强制只读，POST 会 403，那时这一步跳过，反馈退回到行内
+      # 注解（那条路对 fork 一样有效）。
+      - name: 贴 PR 评论
+        if: >-
+          always()
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          STATIC: ${{ needs.static.result }}
+          TEST: ${{ needs.test.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          MARKER='<!-- ci-verdict -->'
+          icon() { [ "$1" = success ] && echo '✅' || echo '❌'; }
+
+          {
+            echo "$MARKER"
+            echo '## CI 结论'
+            echo ''
+            echo '| 检查 | 结果 |'
+            echo '| --- | --- |'
+            echo "| 静态检查 | $(icon "$STATIC") \`$STATIC\` |"
+            echo "| 测试套件 (19 项) | $(icon "$TEST") \`$TEST\` |"
+            echo ''
+            if [ "$STATIC" = success ] && [ "$TEST" = success ]; then
+              echo '全部阻塞检查通过。'
+            else
+              echo '有阻塞检查未通过。失败的具体文件和行见 PR diff 上的行内注解，'
+              echo '完整输出见运行日志。'
+            fi
+            echo ''
+            echo "[运行详情]($RUN_URL) · commit \`${GITHUB_SHA:0:7}\`"
+            echo ''
+            echo '<sub>这条评论由 CI 覆盖更新，不会新增。性能与覆盖率是非阻塞项，不计入结论。</sub>'
+          } > comment.md
+
+          # 分两步取，不用 `gh api ... | head`：head 提前关管道会给 gh 一个
+          # SIGPIPE，配合 pipefail 会把这一步判成失败。
+          ids="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id")"
+          id="$(printf '%s\n' "$ids" | head -n 1)"
+
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md --silent
+            echo "已更新评论 $id"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md --silent
+            echo "已新建评论"
+          fi
+
+      # 门禁单独一步，放在评论之后：评论要在失败时也贴出来，所以退出码不能
+      # 提前把 job 打断。
+      - name: 门禁
+        env:
+          STATIC: ${{ needs.static.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          if [ "$STATIC" = "success" ] && [ "$TEST" = "success" ]; then exit 0; fi
+          echo "::error title=CI 未通过::静态检查=$STATIC 测试套件=$TEST"
+          exit 1
