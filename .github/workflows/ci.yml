@@ -246,6 +246,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
+          # 不用 GITHUB_SHA：pull_request 事件下那是临时的 merge 提交，PR 的
+          # 提交列表里根本没有，读者点不进去。要的是分支顶端。
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           STATIC: ${{ needs.static.result }}
           TEST: ${{ needs.test.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -270,7 +273,7 @@ jobs:
               echo '完整输出见运行日志。'
             fi
             echo ''
-            echo "[运行详情]($RUN_URL) · commit \`${GITHUB_SHA:0:7}\`"
+            echo "[运行详情]($RUN_URL) · commit \`${HEAD_SHA:0:7}\`"
             echo ''
             echo '<sub>这条评论由 CI 覆盖更新，不会新增。性能与覆盖率是非阻塞项，不计入结论。</sub>'
           } > comment.md
