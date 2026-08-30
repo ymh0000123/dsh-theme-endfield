@@ -250,8 +250,6 @@ try {
 /* --- 4. the turn-status label must be recoloured via background-image ---
    A plain `color:` cannot win against upstream's transparent text fill, so an edit
    that "fixes" this rule with color: would silently do nothing. */
-const statusRules = src.match(/[^\n]*turnStatus[^\n]*\{[^}]*\}/g) || []
-const gradientRules = (src.match(/turnStatus'\]\)\s*\{\s*\n\s*background-image:/g) || []).length
 if (src.includes("turnStatus")) {
   const hasBg = /turnStatus[\s\S]{0,400}?background-image:\s*linear-gradient/.test(src)
   if (hasBg) pass('turn-status label is recoloured through background-image (gradient text)')

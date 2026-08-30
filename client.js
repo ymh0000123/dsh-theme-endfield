@@ -44,16 +44,24 @@ function apply(ctx) {
     // Idempotency: the installed bundle can be applied more than once (boot loader +
     // cordis composition both mount it). Only the first application owns tokens/styles;
     // duplicate overrideTokens would replace the layer and break the toggle's dispose.
+    // The flag is RELEASED by the run's dispose (see the ctx.effect cleanup below), so
+    // a dispose followed by a re-apply in the same page session mounts the theme again
+    // instead of staying dead until a hard reload.
     if (typeof window !== 'undefined' && window.__dshThemeEndfieldApplied) return
-    if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = true
-
+    // Claim the flag only once the theme service is actually there: a boot order where
+    // it is still missing must not lock the flag in place and kill every later apply.
     const theme = ctx.get('theme')
     if (theme === undefined) return
+    if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = true
 
     const RADIUS_KEY = 'dsh-theme-endfield-radius'
     const ENABLED_KEY = 'dsh-theme-endfield-enabled'
     const isEnabled = () => (typeof localStorage !== 'undefined' && localStorage.getItem(ENABLED_KEY)) !== '0'
     const syncRadiusMode = () => {
+      // The bundle can run before <body> exists (see runLoader's DOMContentLoaded
+      // deferral for the same window); a classList touch on null would throw and
+      // kill the whole install. syncPaletteClass guards the same way.
+      if (typeof document === 'undefined' || document.body === null) return
       const mode = (typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square'
       if (mode === 'round') document.body.classList.add('theme-endfield-round')
       else document.body.classList.remove('theme-endfield-round')
@@ -149,9 +157,17 @@ function apply(ctx) {
       if (isHeroVisible()) return { mode: 'hero', parent: document.body }
       const conv = findConversationRoot()
       if (conv !== null) return { mode: 'persist', parent: conv }
-      // No conversation column on screen (e.g. a full-page settings view): fall back
-      // to the body, still behind content via a negative z-index.
-      return { mode: 'persist', parent: document.body }
+      // No conversation column on screen (e.g. a full-page settings view). A body
+      // child at z-index:-1 paints BELOW the body/frame's own opaque backgrounds
+      // there and never shows, so prefer the app FRAME: while the mark is mounted
+      // in it the stylesheet gives the frame isolation:isolate (the same pair of
+      // properties the conversation column gets above), so -1 stays above the
+      // frame background and strictly below the page content. body is only the
+      // last resort for a page that has no frame at all. findAppFrame is declared
+      // further down but only ever called from here at runtime, never during the
+      // synchronous apply pass.
+      const frame = findAppFrame()
+      return { mode: 'persist', parent: frame !== null ? frame : document.body }
     }
     const positionWatermark = () => {
       if (!watermarkEl) return
@@ -245,7 +261,9 @@ function apply(ctx) {
       const on = isEnabled() && isWatermarkOn()
       const target = on ? mountPointFor() : null
       // Off the hero page the mark only survives when the persist switch is on.
-      const shouldShow = target !== null && (target.mode === 'hero' || isWatermarkPersistOn())
+      // parent can be null during very early boot (no <body> yet) — never mount.
+      const shouldShow = target !== null && target.parent !== null
+        && (target.mode === 'hero' || isWatermarkPersistOn())
       if (shouldShow && watermarkEl) {
         // A page change can flip the mode or move the parent — restyle/reparent in place.
         if (watermarkEl.getAttribute('data-endfield-watermark') !== target.mode) {
@@ -310,7 +328,15 @@ function apply(ctx) {
        later is in its temporal dead zone during apply() — and `typeof` does NOT
        protect against a TDZ ReferenceError the way it does for an undeclared name. */
     let contourSyncHook = () => {}
-    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
+    /* The bundle can be evaluated before <body> exists (the same window runLoader
+       defends with a DOMContentLoaded deferral). The old code created the observer
+       only when body was already there and never retried, so an early-boot apply
+       left the watermark and the contour sheet without their (re)attach channel
+       for good. Deferred install instead, and right after installing, catch up on
+       everything the observer missed while it did not exist yet. */
+    const installWatermarkObserver = () => {
+      if (watermarkObserver !== null) return
+      if (typeof MutationObserver === 'undefined' || typeof document === 'undefined' || document.body === null) return
       watermarkObserver = new MutationObserver(() => {
         syncWatermarkVisibility()
         // The app frame does not exist during early boot and is replaced on some
@@ -320,6 +346,16 @@ function apply(ctx) {
         contourSyncHook()
       })
       watermarkObserver.observe(document.body, { childList: true, subtree: true })
+    }
+    const watermarkObserverLate = () => {
+      installWatermarkObserver()
+      if (watermarkObserver === null) return
+      syncWatermarkVisibility()
+      contourSyncHook()
+    }
+    if (typeof document !== 'undefined' && document.body !== null) installWatermarkObserver()
+    else if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('DOMContentLoaded', watermarkObserverLate, { once: true })
     }
 
     /* ---------- contour (topographic) background ------------------------------
@@ -476,15 +512,16 @@ function apply(ctx) {
     const CONTOUR_MIN_LEN = 40      // px of on-canvas stroke; below this it is a speck
     const CONTOUR_MIN_RING_BOX = 21 // px; one median line spacing
     /* keep() judges the RAW stitched polyline, but contourDrawLines() redraws it as
-       quadratic curves whose endpoints are segment MIDPOINTS (each original vertex
-       becomes a control point). The curve therefore has different vertices, and
-       measured against the real output a path can land slightly SHORTER or with a
-       slightly smaller box than its raw form -- so a raw measurement sitting just
-       above a threshold can still draw a speck. Observed exactly that: raw-clean
-       runs still emitted a 35.1px stroke and 15.4x17.8 / 2.1x20.1 rings.
-       The thresholds are therefore applied with headroom, and the curve shrinks a
-       path by at most one half-segment at each end (segments average 7.8px), so
-       ~1.35x on length and ~1.5x on ring box covers it with margin. */
+       a smoothed curve (Chaikin corner-cutting followed by a clamped cubic spline),
+       which does not follow the raw polyline exactly: corner-cutting drops the
+       sharp extremes, so measured against the real output a path can land slightly
+       SHORTER or with a slightly smaller box than its raw form -- and a raw
+       measurement sitting just above a threshold can still draw a speck. Observed
+       exactly that: raw-clean runs still emitted a 35.1px stroke and 15.4x17.8 /
+       2.1x20.1 rings.
+       The thresholds are therefore applied with headroom, and the smoothing
+       shrinks a path by at most one half-segment at each end (segments average
+       7.8px), so ~1.35x on length and ~1.5x on ring box covers it with margin. */
     const CONTOUR_KEEP_LEN = CONTOUR_MIN_LEN * 1.35
     const CONTOUR_KEEP_RING = CONTOUR_MIN_RING_BOX * 1.5
     /* Minimum level bands a coverage cell's field must sweep for that region to read
@@ -1147,11 +1184,20 @@ function apply(ctx) {
       const ctx = contourLineCv.getContext('2d')
       if (!ctx) return
       const { w, h } = contourGeom
+      /* Geometry stays in CSS px; scale the context to the backing store that
+         contourSizeTo sized at (capped) devicePixelRatio, so strokes rasterise
+         at device resolution instead of being upsampled into blur on HiDPI
+         screens. Derived from the canvas itself, and skipped entirely at a 1x
+         store or when the context has no setTransform (the spliced-in test
+         harnesses), so a 1x render is byte-identical to before. */
+      const scale = (w > 0 && typeof contourLineCv.width === 'number' && contourLineCv.width > 0 && contourLineCv.width !== w)
+        ? contourLineCv.width / w : 1
+      if (scale !== 1 && typeof ctx.setTransform === 'function') ctx.setTransform(scale, 0, 0, scale, 0, 0)
       ctx.clearRect(0, 0, w, h)
       ctx.strokeStyle = contourStroke()
       ctx.lineWidth = 1
       ctx.lineJoin = 'round'
-      /* Marching squares emits one vertex per grid-cell edge. Two Chaikin passes
+      /* Marching squares emits one vertex per grid-cell edge. Three Chaikin passes
          cut local corners before the clamped cubic B-spline rounds broad bends.
          This reduces angularity without changing the field or adding another
          extraction pass. Open endpoints remain fixed; closed rings wrap cyclically. */
@@ -1289,11 +1335,23 @@ function apply(ctx) {
       const r = host.getBoundingClientRect()
       const w = Math.max(1, Math.round(r.width))
       const h = Math.max(1, Math.round(r.height))
-      if (contourGeom !== null && contourGeom.w === w && contourGeom.h === h) return false
+      /* Backing store at device resolution (capped at 2): the sheet is 1px
+         strokes, and a 1x store on a HiDPI screen upsamples them into blur.
+         Capped because an uncapped 4K-plus-retina store is a lot of canvas for
+         a background texture. contourDrawLines reads the scale back off the
+         canvas dimensions, so nothing else has to know about it. */
+      const ratio = (typeof window !== 'undefined'
+        && typeof window.devicePixelRatio === 'number'
+        && window.devicePixelRatio > 0) ? window.devicePixelRatio : 1
+      const dpr = Math.min(2, ratio)
+      const bw = Math.max(1, Math.round(w * dpr))
+      const bh = Math.max(1, Math.round(h * dpr))
+      if (contourGeom !== null && contourGeom.w === w && contourGeom.h === h
+        && (contourLineCv === null || (contourLineCv.width === bw && contourLineCv.height === bh))) return false
       contourBuild(w, h)
       if (contourLineCv !== null) {
-        contourLineCv.width = w
-        contourLineCv.height = h
+        contourLineCv.width = bw
+        contourLineCv.height = bh
         contourLineCv.style.width = w + 'px'
         contourLineCv.style.height = h + 'px'
       }
@@ -1353,6 +1411,13 @@ function apply(ctx) {
       contourPaths = []
       contourField = null
       contourGeom = null
+      /* Restart the morph clock too. The accept-or-reroll validator evaluates every
+         candidate at phase 0, which seeds the field's temporal blend (previous=F0);
+         if the sheet remounted later with phase far ahead, the first live frame
+         would blend 65% of that phase-0 snapshot into the current field and the
+         landscape would visibly snap backwards before resuming. A fresh mount at
+         phase 0 has no such transient — which is exactly what this restores. */
+      contourPhase = 0
       // Nothing is drawn any more, so the next mount must re-apply the switch rather
       // than trust a signature describing a canvas that no longer exists.
       contourSwitchSig = ''
@@ -1448,12 +1513,26 @@ function apply(ctx) {
        palette change in ANOTHER tab (or a browser restoring the class) repaint the
        sheet, not just a click in this tab's settings panel. */
     let contourSchemeObserver = null
-    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body) {
+    /* Deferred install for the same early-boot reason as the page observer above:
+       body may not exist at apply() time, and a missed install here would leave a
+       later-mounted sheet stuck on its first colour across a scheme flip. */
+    const installContourSchemeObserver = () => {
+      if (contourSchemeObserver !== null) return
+      if (typeof MutationObserver === 'undefined' || typeof document === 'undefined' || document.body === null) return
       contourSchemeObserver = new MutationObserver(() => {
         if (contourWrap === null) return
         contourDrawLines()
       })
       contourSchemeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'class'] })
+    }
+    const contourSchemeObserverLate = () => {
+      installContourSchemeObserver()
+      // Catch up: the scheme may have settled while the observer was absent.
+      if (contourSchemeObserver !== null && contourWrap !== null) contourDrawLines()
+    }
+    if (typeof document !== 'undefined' && document.body !== null) installContourSchemeObserver()
+    else if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('DOMContentLoaded', contourSchemeObserverLate, { once: true })
     }
     // Let the page observer declared above re-attach the layer as the app renders.
     contourSyncHook = syncContour
@@ -1526,6 +1605,12 @@ function apply(ctx) {
        `loaderFuse` is the last line of defence: a single timeout that force-finishes
        the plate even if both clocks stop, so the app can never stay covered. */
     const runLoader = () => {
+      // The plate is themed BY this theme: with the master switch off its
+      // stylesheet is gone and the plate would render as stray unstyled text in
+      // the page flow (the percentage and status rows are real DOM text), so an
+      // off switch must not be able to start it — including the settings 预览
+      // button and the toggle-on path, which both land here.
+      if (!isEnabled()) return
       if (loaderDone || loaderEl !== null) return
       if (typeof document === 'undefined') return
       // The plate is a <body> child. If the client bundle is evaluated before the
@@ -2218,6 +2303,17 @@ function apply(ctx) {
       [class*='wSkVaW_root']:has(> [data-endfield-watermark]) {
         isolation: isolate;
         position: relative;
+      }
+      /* The persist FALLBACK mounts inside the app FRAME on pages with no
+         conversation column (a full-page settings view). Same reason as the rule
+         above: without isolation, the mark's z-index:-1 escapes to the root
+         stacking context and paints below the frame's own opaque background —
+         i.e. it never shows, which is exactly what the old body-level fallback
+         did. The frame is already position:relative (see the contour notes), so
+         isolation alone is enough here. The :has() guard keeps the frame's
+         stacking behaviour stock whenever the mark is not mounted in it. */
+      [class*='_frame']:has(> [data-endfield-watermark]) {
+        isolation: isolate;
       }
       /* The mark sits behind text, so it must never intercept selection or clicks. */
       [data-endfield-watermark] {
@@ -3474,12 +3570,15 @@ function apply(ctx) {
       disposeStyles()
       disposeToken = () => {}
       disposeStyles = () => {}
-      document.body.classList.remove('theme-endfield-round')
-      /* The palette class must go with the stylesheet that gives it meaning:
-         left behind it would be a class nothing defines, and it would make
-         isWulingPalette() report a palette the page is no longer using. The
-         stored preference is untouched, so re-enabling restores it. */
-      document.body.classList.remove(PALETTE_CLASS)
+      // Guarded like every other body touch: an unload race must not throw here.
+      if (typeof document !== 'undefined' && document.body !== null) {
+        document.body.classList.remove('theme-endfield-round')
+        /* The palette class must go with the stylesheet that gives it meaning:
+           left behind it would be a class nothing defines, and it would make
+           isWulingPalette() report a palette the page is no longer using. The
+           stored preference is untouched, so re-enabling restores it. */
+        document.body.classList.remove(PALETTE_CLASS)
+      }
       // The plate is styled by the theme stylesheet just torn down — an orphaned
       // plate would sit there as an unstyled black-less div, so drop it too.
       destroyLoader()
@@ -4105,8 +4204,11 @@ function apply(ctx) {
                   R.createElement('button', {
                     type: 'button',
                     onClick: replayLoader,
-                    style: btnStyleFor(false, !loaderOn),
-                    disabled: !loaderOn,
+                    // The master switch gates this too: the plate is styled by the
+                    // stylesheet the master switch removes, so previewing while the
+                    // theme is off has nothing to show (runLoader refuses as well).
+                    style: btnStyleFor(false, !loaderOn || !enabled),
+                    disabled: !loaderOn || !enabled,
                     title: loaderOn ? '' : t('loaderNeed'),
                   }, t('preview')),
                   R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, t(loaderOn ? 'loaderOff' : 'loaderOn'))
@@ -4167,7 +4269,18 @@ function apply(ctx) {
 
     ctx.effect(() => () => {
       unmount()
+      // Release the idempotency flag so a re-apply after this dispose can mount
+      // the theme again; leaving it set killed the theme until a hard reload.
+      if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = false
       if (watermarkObserver) watermarkObserver.disconnect()
+      /* A deferred observer install may still be waiting on DOMContentLoaded when
+         the run ends; drop the pending listener so a disposed run is not wired
+         back into the page. removeEventListener is a no-op when it never fired
+         or already ran ({ once }), so both branches are safe. */
+      if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        document.removeEventListener('DOMContentLoaded', watermarkObserverLate)
+        document.removeEventListener('DOMContentLoaded', contourSchemeObserverLate)
+      }
       if (watermarkRaf !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(watermarkRaf)
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') window.removeEventListener('resize', onWatermarkResize)
       if (watermarkEl && watermarkEl.parentNode) watermarkEl.parentNode.removeChild(watermarkEl)
