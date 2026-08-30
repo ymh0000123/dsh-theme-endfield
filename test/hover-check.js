@@ -198,15 +198,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   </script></body></html>`)
 
   const port = 9333 + Math.floor(Math.random() * 400)
-  /* Font-rendering flags pin the glyph rasteriser across platforms. Without them
-     this check passes on Windows and fails on Linux: the ink sample below picks
-     "the pixel furthest in luminance from the fill that occurs >= 3 times", and
-     that needs enough SOLID stroke pixels to clear the threshold. Windows
-     (DirectWrite) leaves plenty; Linux (FreeType) with hinting + LCD subpixel AA
-     smears the same glyphs into mostly-blended pixels, so the sample lands on an
-     anti-aliased edge — a ~50% mix of ink and fill — and the measured contrast
-     collapses (3.85:1 on 谷地黄, 3.33:1 on 武陵青) even though the palette itself
-     never changed. Greyscale AA with hinting off keeps the stroke cores solid. */
+  /* Font-rendering flags plus the 4x device scale below are what make this check
+     platform-independent. The ink sample picks "the pixel furthest in luminance
+     from the fill that occurs >= 3 times", which needs SOLID stroke pixels to
+     land on. At 1x and 12px, Windows (DirectWrite) leaves plenty but Linux
+     (FreeType) smears the same glyphs into mostly-blended pixels, so the sample
+     lands on an anti-aliased edge — a ~50% mix of ink and fill — and the measured
+     contrast collapses (3.38:1 on 谷地黄, 2.99:1 on 武陵青; note the sampled
+     rgb(137,133,7) IS the midpoint of #101110 and #fff500) even though the
+     palette never changed. Greyscale AA with hinting off is necessary but not
+     sufficient; rasterising at 4x is what guarantees a solid stroke core exists
+     on every platform. The CSS is untouched, so the rule under test is still the
+     shipped one. */
   const proc = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-sandbox',
     '--hide-scrollbars', '--window-size=520,220',
     '--font-render-hinting=none', '--disable-font-subpixel-positioning',
@@ -229,6 +232,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
     const cdp = await connectWs(target.webSocketDebuggerUrl)
     await cdp.call('Runtime.enable')
     await cdp.call('Page.enable')
+    /* Screenshot at 4x so glyph strokes have solid cores everywhere (see above).
+       Layout stays identical — only the rasteriser output grows. */
+    const SCALE = 4
+    await cdp.call('Emulation.setDeviceMetricsOverride',
+      { width: 520, height: 220, deviceScaleFactor: SCALE, mobile: false })
     await sleep(600)
 
     const evaluate = async (expr) => {
@@ -255,9 +263,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
         const img = await shoot()
 
         /* Inside the button box, split pixels into fill (the dominant colour) and
-           glyph ink (everything far from it), then measure their contrast. */
-        const x0 = Math.max(0, Math.round(b.x) + 2), x1 = Math.min(img.w - 1, Math.round(b.x + b.w) - 2)
-        const y0 = Math.max(0, Math.round(b.y) + 2), y1 = Math.min(img.h - 1, Math.round(b.y + b.h) - 2)
+           glyph ink (everything far from it), then measure their contrast.
+           Rect comes back in CSS px; the screenshot is SCALE times that. */
+        const x0 = Math.max(0, Math.round((b.x + 2) * SCALE)), x1 = Math.min(img.w - 1, Math.round((b.x + b.w - 2) * SCALE))
+        const y0 = Math.max(0, Math.round((b.y + 2) * SCALE)), y1 = Math.min(img.h - 1, Math.round((b.y + b.h - 2) * SCALE))
         const tally = new Map()
         const px = (x, y) => { const i = (y * img.w + x) * img.ch; return [img.data[i], img.data[i + 1], img.data[i + 2]] }
         for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
