@@ -4197,6 +4197,7 @@ function apply(ctx) {
   }
 
 		exports.name = "dsh-theme-endfield";
+		exports.inject = ["theme"];
 		exports.apply = apply;
 		return module.exports;
 	}
