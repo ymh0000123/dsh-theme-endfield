@@ -13,6 +13,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'endfield-a11y-'))
@@ -41,6 +42,11 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 <script>window.__ModuleLoader__={load:(m)=>{window.__MOD__=m}}</script>
 <script src="./client.js"></script>
 <script>
+/* The theme reads switches via the settingsScope seam (not localStorage). Seed a
+   fake binder: theme on, contour + its animation switch ON (reduced-motion must
+   still win over the latter), loader off. */
+${BROWSER_SETTINGS_SCOPE_SNIPPET}
+var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', 'contour-anim':'1' })
 const out=[]
 const R=(n,p,d)=>out.push({name:n,pass:!!p,detail:d===undefined?'':String(d)})
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms))
@@ -48,14 +54,8 @@ const opaque=(cv)=>{if(!cv)return -1
   const d=cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data
   let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>6)n++;return n}
 window.addEventListener('load',async()=>{
-  const LS=localStorage
-  LS.setItem('dsh-theme-endfield-enabled','1')
-  LS.setItem('dsh-theme-endfield-loader','0')
-  LS.setItem('dsh-theme-endfield-contour','1')
-  // The motion switch is deliberately ON: the OS preference must win over it.
-  LS.setItem('dsh-theme-endfield-contour-anim','1')
   const mod=window.__MOD__.factory(()=>null)
-  mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:undefined,effect:(f)=>f()})
+  mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='settingsScope'?__prefs.binder:undefined),effect:(f)=>f()})
   document.body.appendChild(document.createElement('span'))
   await sleep(400)
   R('reduced-motion is actually active in this run',

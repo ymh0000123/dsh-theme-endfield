@@ -8,7 +8,9 @@
  *   2) insertCss —— 注入字体栈、强调色、直角化、去蓝、hover 反色等全局样式。
  *      （动态插件环境走 styles.insert；安装为独立 bundle 时直接注入 <style> 到 head。）
  *   3) 设置页「终末地主题设置」—— 设置项按四组分类（主题 / 背景 / 动画 / 娱乐），
- *      均由 localStorage 持久化，文案跟随 DSH 的语言设置。
+ *      默认值 / 语义标记通过 DSH 的设置命名空间（client ctx.settingsScope，
+ *      host index.js 的 ctx.settings.register）随 profile 落盘，文案跟随 DSH 的语言设置。
+ *      不再使用 localStorage：见本文 apply() 顶部「Durable preference store」注释。
  *
  * 文档：README.md 为索引；设计语言见 docs/design-language.md，
  * 各开关行为见 docs/features.md，实现决策与实测数据见 docs/engineering-notes.md。
@@ -54,15 +56,366 @@ function apply(ctx) {
     if (theme === undefined) return
     if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = true
 
+    /* ---------- Durable preference store (replaces localStorage) ----------
+       The theme's switches used to persist through `localStorage`, which DSH
+       Desktop broke on every restart: Desktop binds a fresh random localhost
+       port per launch, so the origin (and thus the browser storage scope)
+       changed and the saved settings silently reset to defaults.
+
+       The durable authority is now DSH's own user-settings service. The HOST
+       half of this plugin (index.js) registers the `dsh-theme-endfield`
+       namespace through `ctx.settings`, which the settings provider persists
+       to the profile harness home (<dshHome>/settings.yaml) — a path owned by
+       DSH, entirely independent of the web origin/port. Here on the client we
+       read/write that same namespace over the browser `ctx.settingsScope`
+       service (the mirror of the host seam), so:
+
+         dsh web     (browser, fixed loopback port)  -> host persistence
+         DSH Desktop (browser, random loopback port) -> host persistence
+
+       Both are loopback pages, so DSH resolves the connection to 'host' mode
+       and the intended prefs comment stores to disk; a change of port does not
+       move the values because nothing lives in browser storage any more.
+
+       Value model. Namespace fields are the tails of the old localStorage keys
+       and are stored as the same strings, so the semantics (and any older
+       <settings.yaml> section from a prior build) keep scanning identically:
+         default-ON switches store  '1'  and read as  !== '0'
+         default-OFF switches store '0'  and read as  === '1'
+         palette/radius/fps/speed  store one of their documented literals.
+       FIELD_DEFAULTS is the shipped fallback and mirrors index.js.
+
+       Resilience. Before the transport hands us a section (boot), or in an
+       environment with no `settingsScope` service at all (an out-of-DSH page,
+       in-process tests), the store falls back to FIELD_DEFAULTS overlaid with
+       any in-page overrides made this session. Writes are committed to the
+       settings transport only when it is ready + writable; otherwise they are
+       kept session-local so toggles still work in place but do not persist
+       (there is no durable backend to persist to — and no localStorage). */
+    const PREFS_NS = 'dsh-theme-endfield'
+    const PREFS_FIELD_DEFAULTS = {
+      enabled: '1',
+      palette: 'valley',
+      radius: 'square',
+      contour: '0',
+      contourAnim: '1',
+      contourFps: '24',
+      contourSpeed: '2',
+      contourScrollPause: '1',
+      watermark: '1',
+      watermarkPersist: '0',
+      loader: '0',
+      thunder: '0',
+      thunderAnim: '0',
+    }
+    const PREFS_KEY_TO_FIELD = (() => {
+      const m = {}
+      const raw = [
+        'dsh-theme-endfield-radius', 'dsh-theme-endfield-enabled',
+        'dsh-theme-endfield-palette', 'dsh-theme-endfield-watermark',
+        'dsh-theme-endfield-watermark-persist', 'dsh-theme-endfield-contour',
+        'dsh-theme-endfield-contour-anim', 'dsh-theme-endfield-contour-fps',
+        'dsh-theme-endfield-contour-speed', 'dsh-theme-endfield-contour-scroll-pause',
+        'dsh-theme-endfield-loader', 'dsh-theme-endfield-thunder',
+        'dsh-theme-endfield-thunder-anim',
+      ]
+      for (const k of raw) m[k] = k.slice(PREFS_NS.length + 1)
+      return m
+    })()
+    const prefsListeners = []
+    const prefsLocal = Object.assign({}, PREFS_FIELD_DEFAULTS) // schema defaults, for boot / no transport
+    // Fields a panel toggle changed so far but that have not yet been durably
+    // committed to the host scope. If the scope was not ready at apply() time and
+    // only appears later, these are replayed so a pre-bind edit still persists
+    // instead of silently living in page-only memory.
+    const prefsDirty = new Set()
+    let prefsFieldValue = null // last schema-resolved user+base+defaults section from the scope, if any
+    let prefsScope = null // the bound ctx.settingsScope scope, or null while absent/not ready
+    let prefsBindTimer = null // retry handle for a settingsScope that arrives late
+    let prefsRetryTimer = null // bounded retry for held edits whose ready cue has not arrived
+    // Max held-edit retry passes. The ready transition is normally the cue; this
+    // bounded timer is the safety net for a mirror whose first describe predates
+    // a late host registration and sees no document commit to rerun on.
+    const PREFS_RETRY_LIMIT = 20 // ~20 * 500ms = up to ~10s after the last held edit
+    let prefsRetryCount = 0
+    // True while prefsReplayDirty is mid-pass. A normal DSH scope.set is async,
+    // but the mirror can fold a ready snapshot in synchronously (and document
+    // mocks/transitions too), which would re-enter the replay from the theme's
+    // own subscription and write the same held edits twice. The bus flag makes a
+    // single replay pass authoritative; re-entrant calls become no-ops.
+    let prefsReplayBusy = false
+    /* Theme layers install *their* reconcile here once they exist (updated from
+       the bottom of apply) so a transport event can live-apply a real change. */
+    let reconcileFromPrefs = null
+    // Try the idiomatic injected-property access first (how DSH client plugins like
+    // dsh-client-locale consume settingsScope — exports.inject plus `ctx.xxx`), then
+    // the lookup form this module has historically used for optional services.
+    const getSettingsScopeBinder = () => {
+      try {
+        if (ctx.settingsScope !== undefined && ctx.settingsScope !== null
+          && typeof ctx.settingsScope.bind === 'function') return ctx.settingsScope
+      } catch (e) { /* property may be a getter that throws when not available */ }
+      try { return ctx.get('settingsScope') } catch (e) { return undefined }
+    }
+    const prefsGetValue = () => {
+      // A schema-accepted section from the transport, else in-memory defaults
+      // overlaid with any session-local override written while un-writable.
+      return prefsFieldValue || prefsLocal
+    }
+    /** read one field as its raw stored string: <stored-or-default>, never null. */
+    const prefsGet = (rawKey) => {
+      const field = PREFS_KEY_TO_FIELD[rawKey] || rawKey.slice(PREFS_NS.length + 1)
+      const sec = prefsGetValue()
+      if (sec && Object.prototype.hasOwnProperty.call(sec, field)) return String(sec[field])
+      return PREFS_FIELD_DEFAULTS[field]
+    }
+    /** subscribe to any change of the whole namespace (transport or local). */
+    const prefsSubscribe = (listener) => {
+      prefsListeners.push(listener)
+      return () => {
+        const i = prefsListeners.indexOf(listener)
+        if (i >= 0) prefsListeners.splice(i, 1)
+      }
+    }
+    const prefsEmit = () => {
+      for (const l of prefsListeners.slice()) { try { l() } catch (e) { /* keep going */ } }
+      if (reconcileFromPrefs) try { reconcileFromPrefs() } catch (e) { /* keep going */ }
+    }
+    /** write one field with the exact stored-string value the UI derives. */
+    const dbg = (...a) => { try { if (typeof console !== 'undefined' && console.warn) console.warn('[dsh-theme-endfield:prefs]', ...a) } catch (e) { /* noop */ } }
+
+    /* --- Durable write gate -----------------------------------------------
+       A scope snapshot from @deepseek-ai/dsh-client-ui-settings carries three
+       flags that must ALL hold before a scope.set can durably land:
+         mode    === 'host'   loopback page syncing the Host document.
+                              'memory' (non-loopback) never persists.
+         status  === 'ready'  the Host's describe view actually SERVES this
+                              namespace and a decoded value stands. It stays
+                              'loading' before the first accepted section and
+                              becomes 'unavailable' when the namespace is NOT in
+                              the host's served list (the host half has not run
+                              its ctx.settings.register(...) yet, or the mirror
+                              last fetched before it appeared). A scope.set into
+                              a 'loading'/'unavailable' host scope reaches no
+                              durable store.
+         writable=== true     the Host document accepts writes.
+       Gating on snap.writable ALONE is the old bug: a host-mode describe view
+       answers writable=true even while this namespace is still unserved, so the
+       old code fired scope.set into a namespace the host had not registered,
+       cleared the dirty mark and logged the misleading
+       `commit ... status= unavailable` warn — the preference kept working for
+       the page session but vanished on the next reload. We issue a real wire
+       write only once the namespace is genuinely served, and keep the edit
+       dirty so a later ready transition (re)plays it. */
+    const prefsSnap = () => {
+      const scope = prefsScope
+      if (!scope) return null
+      try { return scope.getSnapshot() } catch (e) { return null }
+    }
+    const prefsDurablyServed = (snap) => !!snap && snap.mode === 'host' && snap.status === 'ready' && !!snap.writable
+    /* Push edits recorded while the scope was not durably served as soon as it
+       is (bind catch-up + an unavailable/loading -> ready subscription both call
+       this). A dirty field is cleared only once it is written to a served host
+       scope, or when the host already holds the exact value / it is the shipped
+       default (nothing left to persist). Guarded against races the same way as
+       prefsCommit: a rejected async write keeps the field for a later try. */
+    const prefsReplayDirty = () => {
+      if (prefsReplayBusy) return
+      if (prefsDirty.size === 0) return
+      prefsReplayBusy = true
+      try {
+        const snap = prefsSnap()
+        const durable = prefsDurablyServed(snap)
+        for (const field of Array.from(prefsDirty)) {
+          const local = prefsLocal[field]
+          const hostValue = snap && snap.value
+            ? (Object.prototype.hasOwnProperty.call(snap.value, field) ? String(snap.value[field]) : undefined)
+            : undefined
+          // An edit that equals the host already or the shipped default has
+          // nothing left to persist (defaults are implied, not stored).
+          if (local === hostValue || local === PREFS_FIELD_DEFAULTS[field]) {
+            prefsDirty.delete(field)
+            continue
+          }
+          if (!durable) continue
+          const scope = prefsScope
+          try {
+            let p = null
+            try { p = scope.set(field, local) } catch (e) { dbg('replay set threw', field, e && e.message); p = null }
+            if (p && typeof p.catch === 'function') {
+              p.catch((e) => { dbg('replay set REJECTED', field, local, String(e && e.message || e)); prefsDirty.add(field) })
+            }
+            dbg('replayed held', field, '=', local)
+            prefsDirty.delete(field)
+          } catch (e) { /* keep for later */ }
+        }
+      } finally {
+        prefsReplayBusy = false
+      }
+    }
+    /* Bounded safety net for a held edit whose "ready" cue never arrives on its
+       own. A normal scope subscription fires on the ready transition and replays
+       immediately; this is only for a mirror whose first describe predated a late
+       host registration and that sees no intermediate document commit / reconnect
+       to rerun on. Each tick simply calls prefsReplayDirty() again; once nothing
+       is dirty (all replayed, matched the host, or reverted to a default) the
+       loop stops itself. Stops after PREFS_RETRY_LIMIT ticks so an environment
+       where the namespace is genuinely never served does not spin forever. */
+    const prefsStopRetry = () => {
+      if (prefsRetryTimer !== null && typeof clearTimeout === 'function') clearTimeout(prefsRetryTimer)
+      prefsRetryTimer = null
+      prefsRetryCount = 0
+    }
+    const prefsScheduleRetry = () => {
+      // Nothing held any more: no reason to keep ticking.
+      if (prefsDirty.size === 0) { prefsStopRetry(); return }
+      // A durably-served scope needs no timer — its subscription replays fast.
+      if (prefsDurablyServed(prefsSnap())) { prefsStopRetry(); return }
+      if (prefsRetryTimer !== null) return // already ticking
+      if (typeof setTimeout !== 'function') return // no timer environment
+      prefsRetryCount = 0
+      const tick = () => {
+        prefsRetryTimer = null
+        prefsRetryCount += 1
+        if (prefsRetryCount > PREFS_RETRY_LIMIT) { prefsStopRetry(); return }
+        if (prefsDirty.size === 0) { prefsStopRetry(); return }
+        if (prefsDurablyServed(prefsSnap())) { prefsStopRetry(); return }
+        prefsReplayDirty()
+        if (prefsDirty.size > 0) prefsRetryTimer = setTimeout(tick, 500)
+        else prefsStopRetry()
+      }
+      prefsRetryTimer = setTimeout(tick, 500)
+    }
+    const prefsCommit = (field, encoded) => {
+      // Best-effort durable write. A real wire write happens only while the
+      // scope is durably served (see the gate note above); before that we stay
+      // session-local, record the edit in prefsDirty and let prefsReplayDirty
+      // push it once the namespace is served. We deliberately do NOT
+      // prefsEmit() here: the caller's toggle already reconciles the layer it
+      // changes, and the authoritative echo arrives through the scope
+      // subscription below, so an immediate synchronous emit would do the same
+      // work twice.
+      const scope = prefsScope
+      if (scope) {
+        try {
+          const snap = scope.getSnapshot()
+          if (prefsDurablyServed(snap)) {
+            dbg('commit', field, '=', encoded, 'status=', snap.status, 'mode=', snap.mode)
+            let p = null
+            try { p = scope.set(field, String(encoded)) } catch (e) { dbg('set threw', field, e && e.message); p = null }
+            if (p && typeof p.catch === 'function') p.catch((e) => dbg('set REJECTED', field, encoded, String(e && e.message || e)))
+            prefsDirty.delete(field)
+            return true
+          }
+          dbg('held (namespace not durably served yet)', field, '=', encoded, 'snap=', snap === null ? null : { status: snap.status, writable: snap.writable, mode: snap.mode })
+        } catch (e) { dbg('commit exception', field, e && e.message) }
+      } else {
+        dbg('commit with NO scope bound (page-local only)', field, encoded)
+      }
+      prefsDirty.add(field)
+      prefsScheduleRetry()
+      return false
+    }
+    const prefsSet = (rawKey, encoded) => {
+      const field = PREFS_KEY_TO_FIELD[rawKey] || rawKey.slice(PREFS_NS.length + 1)
+      prefsLocal[field] = String(encoded)
+      prefsCommit(field, prefsLocal[field])
+    }
+    /* Repeatedly try to obtain the settingsScope binder until it (and its mirror)
+       are actually available. DSH web mounts plugin rows concurrently, so the
+       settings scope / shared describe mirror can legitimately settle AFTER this
+       theme's apply() runs; without this retry a single synchronous attempt that
+       raced would leave prefsScope null forever and every subsequent toggle would
+       silently stay page-local — the exact "works now, gone on refresh" symptom. */
+    const rebindPrefs = (attempt) => {
+      if (prefsScope !== null) return
+      if (attempt > 40) { dbg('gave up binding settingsScope after retries; staying in-memory'); return }
+      const binder = getSettingsScopeBinder()
+      if (binder === undefined || binder === null || typeof binder.bind !== 'function') {
+        // Retry until a reasonable ceiling; mirrors the theme's own sessions/late-
+        // service retry used elsewhere in this file.
+        if (typeof setTimeout === 'function') {
+          if (attempt % 8 === 0) dbg('waiting for settingsScope binder (attempt', attempt, ')')
+          prefsBindTimer = setTimeout(() => rebindPrefs(attempt + 1), 250)
+        }
+        return
+      }
+      let scope = null
+      try {
+        scope = binder.bind({ namespace: PREFS_NS, decode: (section) => {
+          // Section arrives already schema-validated by the shared mirror: it
+          // carries the merged defaults + base + stored user values, typed to our
+          // schema (all fields are strings). Fall back to schema defaults for a
+          // field the mirror has not resolved yet.
+          if (section === null || typeof section !== 'object') return Object.assign({}, PREFS_FIELD_DEFAULTS)
+          const out = Object.assign({}, PREFS_FIELD_DEFAULTS)
+          for (const k of Object.keys(PREFS_FIELD_DEFAULTS)) {
+            if (Object.prototype.hasOwnProperty.call(section, k)) out[k] = String(section[k])
+          }
+          return out
+        } })
+      } catch (e) {
+        scope = null
+        dbg('bind threw', e && e.message)
+      }
+      if (scope === null) {
+        if (typeof setTimeout === 'function') prefsBindTimer = setTimeout(() => rebindPrefs(attempt + 1), 250)
+        return
+      }
+      prefsScope = scope
+      const initial = scope.getSnapshot ? scope.getSnapshot() : null
+      if (initial) dbg('bound scope; initial status=', initial.status, 'writable=', initial.writable, 'mode=', initial.mode, 'valueKeys=', initial.value ? Object.keys(initial.value).length : 0)
+      if (initial && initial.status === 'ready' && initial.value !== undefined) {
+        prefsFieldValue = initial.value
+      }
+      if (typeof scope.subscribe === 'function') {
+        scope.subscribe(() => {
+          let snap = null
+          try { snap = scope.getSnapshot() } catch (e) { snap = null }
+          if (snap && (snap.status === 'ready' || snap.status === 'unavailable')) {
+            if (snap.status === 'ready' && snap.value !== undefined) prefsFieldValue = snap.value
+            // An unavailable/loading -> ready transition is precisely when an edit
+            // we HELD (see prefsCommit) can finally be written: replay any dirty
+            // fields the moment the namespace is durably served. prefsReplayDirty
+            // is a no-op when nothing is held or the scope is not yet served.
+            prefsReplayDirty()
+            prefsEmit()
+          }
+        })
+      }
+      // Catch up: an edit made before the scope settled must still persist. Replay
+      // only genuinely user-changed fields (those prefsSet recorded as dirty) that
+      // now differ from a freshly-fetched, durably-served host section.
+      prefsReplayDirty()
+    }
+    // Kick off the (re)trying binder acquisition.
+    rebindPrefs(0)
+    // Dispose on run teardown (mirrors ctx.effect owned resources).
+    ctx.effect(() => () => {
+      prefsListeners.length = 0
+      prefsScope = null
+      prefsFieldValue = null
+      if (prefsBindTimer !== null && typeof clearTimeout === 'function') clearTimeout(prefsBindTimer)
+      prefsBindTimer = null
+      if (prefsRetryTimer !== null && typeof clearTimeout === 'function') clearTimeout(prefsRetryTimer)
+      prefsRetryTimer = null
+    })
+    // Dispose on run teardown (mirrors ctx.effect owned resources).
+    ctx.effect(() => () => {
+      prefsListeners.length = 0
+      prefsScope = null
+      prefsFieldValue = null
+    })
+
     const RADIUS_KEY = 'dsh-theme-endfield-radius'
     const ENABLED_KEY = 'dsh-theme-endfield-enabled'
-    const isEnabled = () => (typeof localStorage !== 'undefined' && localStorage.getItem(ENABLED_KEY)) !== '0'
+    const isEnabled = () => prefsGet(ENABLED_KEY) !== '0'
     const syncRadiusMode = () => {
       // The bundle can run before <body> exists (see runLoader's DOMContentLoaded
       // deferral for the same window); a classList touch on null would throw and
       // kill the whole install. syncPaletteClass guards the same way.
       if (typeof document === 'undefined' || document.body === null) return
-      const mode = (typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square'
+      const mode = prefsGet(RADIUS_KEY) || 'square'
       if (mode === 'round') document.body.classList.add('theme-endfield-round')
       else document.body.classList.remove('theme-endfield-round')
     }
@@ -74,17 +427,17 @@ function apply(ctx) {
        overrides are var(--edge-accent) references, those tokens re-resolve on the
        same flip — no JS repaint, no theme.overrideTokens() re-registration.
 
-       'valley' (谷地黄, signal yellow) is the DEFAULT, so an unset key and any
+       'valley' (谷地黄, signal yellow) is the DEFAULT, so an unset field and any
        unrecognised value both mean yellow. Only the exact string 'wuling' selects
-       武陵青, which keeps a corrupt localStorage value from silently changing the
-       shipped look.
+       武陵青, which keeps a corrupt stored value (schema rejects / outside the
+       fallback) from silently changing the shipped look.
 
        The one surface a class cannot reach is the contour canvas, which is painted
        by JS — hence syncPalette() redraws it, and the observer below catches a flip
        made in another tab or by the browser restoring state. */
     const PALETTE_KEY = 'dsh-theme-endfield-palette'
     const PALETTE_CLASS = 'theme-endfield-wuling'
-    const readPalette = () => ((typeof localStorage !== 'undefined' && localStorage.getItem(PALETTE_KEY)) === 'wuling' ? 'wuling' : 'valley')
+    const readPalette = () => (prefsGet(PALETTE_KEY) === 'wuling' ? 'wuling' : 'valley')
     /* Read from the DOM, not from storage: the canvas must match what is actually
        on screen. While the theme is switched off the class is absent, so the sheet
        keeps its default palette instead of following an ignored preference. */
@@ -116,9 +469,9 @@ function apply(ctx) {
        pointer-events:none layer cannot be hit-tested. */
     const WATERMARK_KEY = 'dsh-theme-endfield-watermark'
     const WATERMARK_PERSIST_KEY = 'dsh-theme-endfield-watermark-persist'
-    const isWatermarkOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_KEY)) !== '0'
+    const isWatermarkOn = () => prefsGet(WATERMARK_KEY) !== '0'
     // Default OFF: the hero-only behaviour stays the shipped default.
-    const isWatermarkPersistOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_PERSIST_KEY)) === '1'
+    const isWatermarkPersistOn = () => prefsGet(WATERMARK_PERSIST_KEY) === '1'
     const isHeroVisible = () => {
       if (typeof document === 'undefined') return false
       const hero = document.querySelector('[class*="pXSMma_root"]')
@@ -411,22 +764,19 @@ function apply(ctx) {
     const CONTOUR_SPEED_OPTIONS = [1, 2, 4]
     const CONTOUR_PHASE_STEP = 1 / 150
     // Default OFF (=== '1'): a background pattern must be opt-in.
-    const isContourOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_KEY)) === '1'
+    const isContourOn = () => prefsGet(CONTOUR_KEY) === '1'
     // Defaults ON, so enabling the layer shows the effect at once; it is
     // meaningless while the layer itself is off.
-    const isContourAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_ANIM_KEY)) !== '0'
+    const isContourAnimOn = () => prefsGet(CONTOUR_ANIM_KEY) !== '0'
     const readContourFps = () => {
-      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_FPS_KEY) : null
-      const fps = Number(raw)
+      const fps = Number(prefsGet(CONTOUR_FPS_KEY))
       return CONTOUR_FPS_OPTIONS.includes(fps) ? fps : 24
     }
     const readContourSpeed = () => {
-      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_SPEED_KEY) : null
-      const speed = Number(raw)
+      const speed = Number(prefsGet(CONTOUR_SPEED_KEY))
       return CONTOUR_SPEED_OPTIONS.includes(speed) ? speed : 2
     }
-    const isContourScrollPauseOn = () => (typeof localStorage !== 'undefined'
-      && localStorage.getItem(CONTOUR_SCROLL_PAUSE_KEY)) !== '0'
+    const isContourScrollPauseOn = () => prefsGet(CONTOUR_SCROLL_PAUSE_KEY) !== '0'
 
     /* Deterministic PRNG (mulberry32), used with a PER-PAGE-LOAD seed.
        Determinism is still required WITHIN one load: contourBuild() is re-run on
@@ -1554,7 +1904,7 @@ function apply(ctx) {
        viewport size. */
     const LOADER_KEY = 'dsh-theme-endfield-loader'
     // Default OFF (=== '1' rather than !== '0'): opt-in, per the request.
-    const isLoaderOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(LOADER_KEY)) === '1'
+    const isLoaderOn = () => prefsGet(LOADER_KEY) === '1'
     let loaderEl = null
     let loaderRaf = null
     let loaderTick = null
@@ -1862,9 +2212,9 @@ function apply(ctx) {
     // Hold time, per the request: visible for 3s, then gone.
     const THUNDER_MS = 3000
     // Default OFF (=== '1' rather than !== '0'): opt-in, like the boot animation.
-    const isThunderOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(THUNDER_KEY)) === '1'
+    const isThunderOn = () => prefsGet(THUNDER_KEY) === '1'
     // Default OFF for the same reason, and read independently of the parent switch.
-    const isThunderAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(THUNDER_ANIM_KEY)) === '1'
+    const isThunderAnimOn = () => prefsGet(THUNDER_ANIM_KEY) === '1'
     /* The OS preference still wins over an enabled animation switch, exactly as
        contourWantsAnim() does for the contour sheet. Checked live rather than
        cached, so changing the OS setting takes effect on the next announcement. */
@@ -3609,6 +3959,33 @@ function apply(ctx) {
       syncThunder()
     }
 
+    /* Live preference reconciler. The namespace scope subscription in the store
+       block near the top of apply() calls this every time an authoritative
+       section change lands (our own committed writes echo back, another window /
+       device edits the same profile's <settings.yaml>, or the host reverts a
+       value). It mirrors the initial mount block above so a runtime change re-
+       paints exactly the live surfaces it can: the master switch mounts/unmounts
+       the token + stylesheet layers, then radius/palette/watermark/contour/
+       thunder re-derive from the new value. The boot loader is deliberately not
+       replayed here — it is a once-per-page-load plate that only its own toggle
+       and 预览 button may start. Every layer entry point is idempotent (mount()
+       and unmount() guard on `mounted`, syncContour is a no-op until the frame
+       and stylesheet exist), so repeated echoes are cheap and safe. */
+    reconcileFromPrefs = () => {
+      const enabledNext = isEnabled()
+      const enabledNow = mounted
+      if (enabledNext && !enabledNow) mount()
+      else if (!enabledNext && enabledNow) unmount()
+      if (enabledNext) {
+        // These sync helpers read the store on each call, so no snapshot passing.
+        syncRadiusMode()
+        syncPaletteClass()
+        syncWatermarkVisibility()
+        syncContour()
+        syncThunder()
+      }
+    }
+
     /* ---------- Settings page copy: zh / en dictionaries ----------
        The panel followed DSH's language setting for nothing before this: every
        label was a hardcoded Chinese literal, so an English UI showed a wholly
@@ -3852,7 +4229,7 @@ function apply(ctx) {
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [palette, setPalette] = R.useState(readPalette())
-          const [mode, setMode] = R.useState((typeof localStorage !== 'undefined' && localStorage.getItem(RADIUS_KEY)) || 'square')
+          const [mode, setMode] = R.useState(prefsGet(RADIUS_KEY) || 'square')
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
           // Sub-label explaining what a switch does, so the row is self-describing.
@@ -3888,7 +4265,7 @@ function apply(ctx) {
           }
           const toggleTheme = () => {
             const next = !enabled
-            if (typeof localStorage !== 'undefined') localStorage.setItem(ENABLED_KEY, next ? '1' : '0')
+            prefsSet(ENABLED_KEY, next ? '1' : '0')
             setEnabled(next)
             if (next) { mount(); syncWatermarkVisibility(); syncContour() }
             else { unmount(); syncWatermarkVisibility() }
@@ -3900,7 +4277,7 @@ function apply(ctx) {
           }
           const toggleContour = () => {
             const next = !contourOn
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_KEY, next ? '1' : '0')
+            prefsSet(CONTOUR_KEY, next ? '1' : '0')
             setContourOn(next)
             syncContour()
           }
@@ -3911,14 +4288,14 @@ function apply(ctx) {
              so the sheet changes in the same frame as the rest of the UI. */
           const togglePalette = () => {
             const next = palette === 'wuling' ? 'valley' : 'wuling'
-            if (typeof localStorage !== 'undefined') localStorage.setItem(PALETTE_KEY, next)
+            prefsSet(PALETTE_KEY, next)
             setPalette(next)
             syncPaletteClass()
             if (contourWrap !== null) contourDrawLines()
           }
           const toggleContourAnim = () => {
             const next = !contourAnim
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_ANIM_KEY, next ? '1' : '0')
+            prefsSet(CONTOUR_ANIM_KEY, next ? '1' : '0')
             setContourAnim(next)
             if (!next) {
               contourScrollPaused = false
@@ -3930,18 +4307,18 @@ function apply(ctx) {
           const setContourFpsValue = (value) => {
             const next = Number(value)
             if (!CONTOUR_FPS_OPTIONS.includes(next)) return
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_FPS_KEY, String(next))
+            prefsSet(CONTOUR_FPS_KEY, String(next))
             setContourFps(next)
           }
           const setContourSpeedValue = (value) => {
             const next = Number(value)
             if (!CONTOUR_SPEED_OPTIONS.includes(next)) return
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SPEED_KEY, String(next))
+            prefsSet(CONTOUR_SPEED_KEY, String(next))
             setContourSpeed(next)
           }
           const toggleContourScrollPause = () => {
             const next = !contourScrollPause
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SCROLL_PAUSE_KEY, next ? '1' : '0')
+            prefsSet(CONTOUR_SCROLL_PAUSE_KEY, next ? '1' : '0')
             setContourScrollPause(next)
             if (!next) {
               contourScrollPaused = false
@@ -3953,19 +4330,19 @@ function apply(ctx) {
           }
           const toggleWm = () => {
             const next = !wmOn
-            if (typeof localStorage !== 'undefined') localStorage.setItem(WATERMARK_KEY, next ? '1' : '0')
+            prefsSet(WATERMARK_KEY, next ? '1' : '0')
             setWmOn(next)
             syncWatermarkVisibility()
           }
           const toggleWmPersist = () => {
             const next = !wmPersist
-            if (typeof localStorage !== 'undefined') localStorage.setItem(WATERMARK_PERSIST_KEY, next ? '1' : '0')
+            prefsSet(WATERMARK_PERSIST_KEY, next ? '1' : '0')
             setWmPersist(next)
             syncWatermarkVisibility()
           }
           const toggleLoader = () => {
             const next = !loaderOn
-            if (typeof localStorage !== 'undefined') localStorage.setItem(LOADER_KEY, next ? '1' : '0')
+            prefsSet(LOADER_KEY, next ? '1' : '0')
             setLoaderOn(next)
             // Turning it on plays it once right away, so the switch shows what it
             // bought instead of making the user reload to find out.
@@ -3979,10 +4356,10 @@ function apply(ctx) {
           }
           const toggleThunder = () => {
             const next = !thunderOn
-            if (typeof localStorage !== 'undefined') localStorage.setItem(THUNDER_KEY, next ? '1' : '0')
+            prefsSet(THUNDER_KEY, next ? '1' : '0')
             setThunderOn(next)
-            /* syncThunder() reads storage, so the write above is what it acts on.
-               Turning it ON also shows the word once: a switch whose effect only
+            /* syncThunder() reads the pref store, so the write above is what it acts
+               on. Turning it ON also shows the word once: a switch whose effect only
                appears at some unpredictable later moment gives the user no way to
                tell whether it worked. The preview runs BEFORE the watcher attaches,
                so it cannot be mistaken for a real edge. */
@@ -3993,7 +4370,7 @@ function apply(ctx) {
           const previewThunder = () => { showThunder(THUNDER_DONE) }
           const toggleThunderAnim = () => {
             const next = !thunderAnim
-            if (typeof localStorage !== 'undefined') localStorage.setItem(THUNDER_ANIM_KEY, next ? '1' : '0')
+            prefsSet(THUNDER_ANIM_KEY, next ? '1' : '0')
             setThunderAnim(next)
             /* Nothing to reconcile: the next showThunder() reads the switch and marks
                the plate accordingly. Replaying now is what makes the change legible —
@@ -4003,7 +4380,7 @@ function apply(ctx) {
           }
           const toggleMode = () => {
             const next = mode === 'round' ? 'square' : 'round'
-            if (typeof localStorage !== 'undefined') localStorage.setItem(RADIUS_KEY, next)
+            prefsSet(RADIUS_KEY, next)
             setMode(next)
             if (next === 'round') document.body.classList.add('theme-endfield-round')
             else document.body.classList.remove('theme-endfield-round')

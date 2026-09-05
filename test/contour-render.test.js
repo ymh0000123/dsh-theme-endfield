@@ -20,6 +20,7 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 // This script lives in test/; the package it verifies is its parent.
 const ROOT = path.resolve(__dirname, '..')
@@ -88,8 +89,16 @@ window.__ModuleLoader__={load:(m)=>{window.__MOD__=m}}
 <script src="./client.js"></script>
 <script>
 const mod=window.__MOD__.factory(()=>null)
+/* The theme reads its switches through the dsh settingsScope seam, not
+   localStorage. This page seeds a fake binder (theme on, contour starts OFF,
+   loader off — exactly what the old localStorage lines expressed) and exposes it
+   as window.__LS__ so the probe block below can flip switches via setItem() like
+   the settings row does. */
+${BROWSER_SETTINGS_SCOPE_SNIPPET}
+var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0' })
+window.__LS__=__prefs
 const ctx={
-  get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:undefined,
+  get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='settingsScope'?__prefs.binder:undefined),
   effect:(f)=>{window.__dispose__=f()},
 }
 window.__apply__=()=>mod.apply(ctx)
@@ -130,7 +139,7 @@ async function main() {
     return {opaque:n,mean:lum/tot}
   }
   window.__run__=async()=>{
-    const LS=window.localStorage
+    const LS=window.__LS__
     // ---------- 1. feature OFF ----------
     LS.setItem('dsh-theme-endfield-enabled','1')
     LS.removeItem('dsh-theme-endfield-contour')

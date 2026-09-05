@@ -24,6 +24,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 
@@ -75,11 +76,10 @@ document.removeEventListener=(type,fn,opts)=>{
   return realRemove(type,fn,opts)
 }
 
-localStorage.setItem('dsh-theme-endfield-enabled','1')
-localStorage.setItem('dsh-theme-endfield-thunder','1')
-localStorage.setItem('dsh-theme-endfield-loader','0')
-localStorage.setItem('dsh-theme-endfield-contour','0')
-localStorage.setItem('dsh-theme-endfield-watermark','0')
+/* Theme reads switches via the settingsScope seam (not localStorage). Enable
+   theme + thunder; keep loader/contour/watermark off. */
+${BROWSER_SETTINGS_SCOPE_SNIPPET}
+var __prefs=__endfieldSettingsScope({ enabled:'1', thunder:'1', loader:'0', contour:'0', watermark:'0' })
 
 const mkObs=(init)=>{let s=init;const subs=new Set();return{
   getSnapshot:()=>s,subscribe:(f)=>{subs.add(f);return()=>subs.delete(f)},
@@ -89,7 +89,7 @@ const list=mkObs({current:'s1'})
 const sessions={list,binding:(id)=>id==='s1'?{sessionId:id,session}:undefined}
 
 const mod=window.__MOD__.factory(()=>null)
-mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='sessions'?sessions:undefined),effect:()=>{}})
+mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='sessions'?sessions:(n==='settingsScope'?__prefs.binder:undefined)),effect:()=>{}})
 
 const plate=()=>document.querySelector('[data-endfield-thunder]')
 const word=()=>{const p=plate();const w=p&&p.querySelector('[data-endfield-thunder-word]');return w?w.textContent:null}

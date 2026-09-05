@@ -27,7 +27,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 - 启动加载动画；
 - 雷霆大字及入场动画。
 
-所有设置均使用 `localStorage` 持久化，设置文案支持中英文。动态等高线支持系统减少动态效果偏好，动画帧率和速度可独立调整。
+所有设置经 DSH 的持久化设置命名空间保存（Host `index.js` 通过 `ctx.settings.register('dsh-theme-endfield', schema)` 声明，浏览器 `client.js` 通过 `ctx.settingsScope` 读写，详见 [docs/features.md](docs/features.md) 与 [docs/engineering-notes.md](docs/engineering-notes.md)）。它随 `<dshHome>/settings.yaml` 落盘，与页面 origin/端口无关，因此 DSH web 与 DSH Desktop 都能正确保存并在重启/换端口后恢复，不再使用会被 Desktop 随机端口清空的 `localStorage`。设置文案支持中英文；动态等高线尊重系统「减少动态效果」，动画帧率和速度可独立调整。
 
 ## 文档
 

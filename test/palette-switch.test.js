@@ -29,6 +29,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 
@@ -77,6 +78,11 @@ fs.writeFileSync(page, `<!doctype html><html><head><meta charset="utf-8"><style>
 <script src="./client.js"></script>
 <script>
 window.__RESULTS__=[]
+/* The theme now reads its preferences through the dsh settingsScope seam. This
+   page seeds a fake binder exactly like the old localStorage lines did, and the
+   master/contour/palette field naming carries the same polarity. */
+${BROWSER_SETTINGS_SCOPE_SNIPPET}
+var __prefs = __endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', 'contour-anim':'0' });
 const R=(name,pass,detail)=>window.__RESULTS__.push({name,pass:!!pass,detail:detail===undefined?'':String(detail)})
 
 /* Apply theme tokens exactly as @deepseek-ai/dsh-client-ui-layout does: inline on
@@ -103,14 +109,10 @@ const setScheme=(s)=>{
 }
 const mod=window.__MOD__.factory(()=>null)
 const ctx={
-  get:(n)=> n==='theme' ? {overrideTokens:(_s,t)=>{applyTokens(t); return ()=>{ for(const n of appliedTokens) document.body.style.removeProperty(n); appliedTokens=[] }}} : undefined,
+  get:(n)=> n==='theme' ? {overrideTokens:(_s,t)=>{applyTokens(t); return ()=>{ for(const n of appliedTokens) document.body.style.removeProperty(n); appliedTokens=[] }}} : (n==='settingsScope' ? __prefs.binder : undefined),
   effect:(f)=>{window.__dispose__=f()},
 }
-localStorage.setItem('dsh-theme-endfield-enabled','1')
-localStorage.setItem('dsh-theme-endfield-loader','0')
-localStorage.setItem('dsh-theme-endfield-contour','1')
-localStorage.setItem('dsh-theme-endfield-contour-anim','0')
-localStorage.removeItem('dsh-theme-endfield-palette')   // default must be yellow
+// palette is intentionally NOT seeded, so it resolves to its default 谷地黄.
 mod.apply(ctx)
 
 const cs=()=>getComputedStyle(document.body)
@@ -147,7 +149,7 @@ const yellowCanvas=canvasHash()
 R('等高线画布已上色', yellowCanvas && yellowCanvas.n>0, JSON.stringify(yellowCanvas))
 
 /* ---- 4. FLIP to 武陵青 — via storage + the theme's own sync, no reload ---- */
-localStorage.setItem('dsh-theme-endfield-palette','wuling')
+__prefs.setField('palette','wuling')
 /* Call the public-ish path the settings row uses. The row lives in a React tree
    this harness does not render, so the class flip is performed the same way the
    handler does and the canvas redraw is left to the theme's MutationObserver —
@@ -187,7 +189,7 @@ setTimeout(()=>{
   R('等高线新配色偏青（B 通道高于 R）', cyanCanvas && cyanCanvas.b>cyanCanvas.r, JSON.stringify(cyanCanvas))
 
   /* ---- 6. switching the theme off must drop the class ---- */
-  localStorage.setItem('dsh-theme-endfield-enabled','0')
+  __prefs.setField('enabled','0')
   if(window.__dispose__) {} // dispose is the run teardown, not the theme switch
   // Reuse the theme's own unmount path through the settings toggle contract:
   // flipping ENABLED_KEY and calling the sync is what the row does.

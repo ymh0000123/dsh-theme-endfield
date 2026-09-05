@@ -34,6 +34,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'endfield-specks-'))
@@ -69,12 +70,10 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 <script src="./client.js"></script>
 <script>
   document.body.setAttribute('data-ds-dark-theme','')
-  const LS=localStorage
-  LS.setItem('dsh-theme-endfield-enabled','1')
-  LS.setItem('dsh-theme-endfield-loader','0')
-  LS.setItem('dsh-theme-endfield-watermark','0')
-  LS.setItem('dsh-theme-endfield-contour','1')
-  LS.setItem('dsh-theme-endfield-contour-anim','0')
+  /* Theme favours via settingsScope seam (not localStorage): contour ON, no
+     motion, watermark/loader off, theme on. */
+  ${BROWSER_SETTINGS_SCOPE_SNIPPET}
+  var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', watermark:'0', contour:'1', 'contour-anim':'0' })
   /* Capture the stitched polylines as the plugin draws them. contourDrawLines()
    emits beginPath, then moveTo + bezierCurveTo (or lineTo) per path, so this
      reconstructs each path's rendered endpoints. */
@@ -89,7 +88,7 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
     if(cur){cur.push(x,y)} return oz.apply(this,arguments)
   }
   const mod=window.__MOD__.factory(()=>null)
-  mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:undefined,effect:(f)=>f()})
+  mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='settingsScope'?__prefs.binder:undefined),effect:(f)=>f()})
   document.body.appendChild(document.createElement('span'))
   setTimeout(()=>{
     const cv=document.querySelector('[data-endfield-contour-lines]')
