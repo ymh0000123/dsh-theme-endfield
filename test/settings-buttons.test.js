@@ -28,6 +28,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 
@@ -105,6 +106,9 @@ fs.writeFileSync(page, `<!doctype html><html><head><meta charset="utf-8"><style>
 <script src="./client.js"></script>
 <script>
 window.__RESULTS__=[]
+/* The theme reads preferences via the settingsScope seam (no localStorage). */
+${BROWSER_SETTINGS_SCOPE_SNIPPET}
+var __prefs = __endfieldSettingsScope({ enabled:'1', loader:'0', contour:'0' });
 const R=(name,pass,detail)=>window.__RESULTS__.push({name,pass:!!pass,detail:detail===undefined?'':String(detail)})
 
 let appliedTokens=[]
@@ -123,11 +127,7 @@ const setScheme=(s)=>{
   if(lastTokens) applyTokens(lastTokens)
 }
 const mod=window.__MOD__.factory(()=>null)
-localStorage.setItem('dsh-theme-endfield-enabled','1')
-localStorage.setItem('dsh-theme-endfield-loader','0')
-localStorage.setItem('dsh-theme-endfield-contour','0')
-localStorage.removeItem('dsh-theme-endfield-palette')
-mod.apply({get:(n)=>n==='theme'?{overrideTokens:(_s,t)=>{applyTokens(t);return ()=>{}}}:undefined,effect:()=>{}})
+mod.apply({get:(n)=>n==='theme'?{overrideTokens:(_s,t)=>{applyTokens(t);return ()=>{}}}: (n==='settingsScope'?__prefs.binder:undefined),effect:()=>{}})
 
 const buttonTransition = getComputedStyle(document.getElementById('edit')).transition
 R('按钮悬停反馈无过渡延迟', buttonTransition === 'none', buttonTransition)

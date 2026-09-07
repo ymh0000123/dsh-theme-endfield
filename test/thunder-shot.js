@@ -81,11 +81,39 @@ const mk = (dark) => `<!doctype html><html><head><meta charset="utf-8"><style>
 <script>window.__ModuleLoader__={load:(m)=>{window.__MOD__=m}}</script>
 <script src="./client.js"></script>
 <script>
-  localStorage.setItem('dsh-theme-endfield-enabled','1')
-  localStorage.setItem('dsh-theme-endfield-thunder','1')
-  localStorage.setItem('dsh-theme-endfield-loader','0')
-  localStorage.setItem('dsh-theme-endfield-contour','0')
-  localStorage.setItem('dsh-theme-endfield-watermark','0')
+  /* The theme's switches no longer persist through localStorage — it reads and
+     writes its own 'dsh-theme-endfield' namespace over the DSH ctx.settingsScope
+     service (client mirror of the host settings.namespace; persisted to the
+     profile's settings.yaml), exactly like dsh-client-locale consumes settings. So
+     seeding browser storage here would switch thunder on for NOTHING: the store
+     would fall back to its shipped schema defaults and thunder would stay OFF, and
+     this capture would photograph a page with no word and no scrim. The settings
+     live in a scope returned by binder.bind(...), so a fake binder is installed
+     below whose in-memory section plays the role settings.yaml plays in production
+     (the same seam test/fixtures/settings-scope.js drives the unit tests with).
+
+     Seeded like the old localStorage store: theme ON, thunder ON (the layer under
+     test), and loader / contour / watermark explicitly OFF so the shot shows only
+     the word over the theme's paper — watermark is default-ON, so it must be forced
+     off here or it would layer into the capture. */
+  const DEFAULTS = { enabled:'1', palette:'valley', radius:'square', contour:'0',
+    contourAnim:'1', contourFps:'24', contourSpeed:'2', contourScrollPause:'1',
+    watermark:'1', watermarkPersist:'0', loader:'0', thunder:'0', thunderAnim:'0' }
+  const section = { enabled:'1', thunder:'1', loader:'0', contour:'0', watermark:'0',
+    thunderAnim:'0' }
+  const value = {}; for (const k in DEFAULTS) value[k] = (k in section) ? section[k] : DEFAULTS[k]
+  let prefListeners = []
+  const prefNotify = () => prefListeners.slice().forEach((f) => { try { f() } catch (e) {} })
+  const prefScope = {
+    getSnapshot: () => ({ status:'ready', value:Object.assign({}, value),
+      base:Object.assign({}, DEFAULTS), user:Object.assign({}, value),
+      revision:1, writable:true, mode:'host' }),
+    subscribe: (f) => { prefListeners.push(f); return () => {
+      const i = prefListeners.indexOf(f); if (i >= 0) prefListeners.splice(i, 1) } },
+    set: (field, encoded) => { value[field] = String(encoded); prefNotify() },
+    unset: (field) => { value[field] = DEFAULTS[field]; prefNotify() },
+  }
+  window.__EndfieldBinder = { bind: () => prefScope }
 
   // A sessions double shaped like the runtime contract, so the plate is produced by
   // the theme's real subscription path rather than by hand-built DOM.
@@ -98,7 +126,12 @@ const mk = (dark) => `<!doctype html><html><head><meta charset="utf-8"><style>
 
   const mod = window.__MOD__.factory(()=>null)
   mod.apply({
-    get:(n)=> n==='theme' ? { overrideTokens:()=>()=>{} } : (n==='sessions' ? sessions : undefined),
+    get:(n)=> {
+      if (n === 'theme') return { overrideTokens:()=>()=>{} }
+      if (n === 'sessions') return sessions
+      if (n === 'settingsScope') return window.__EndfieldBinder
+      return undefined
+    },
     effect:()=>{},
   })
   // Fire the real edge. WORD is substituted per capture.

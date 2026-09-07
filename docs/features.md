@@ -1,27 +1,38 @@
 # 设置项与功能
 
-设置项的行为、默认值、存储键与边界情况。设计取值见 [design-language.md](design-language.md)，实现细节见 [engineering-notes.md](engineering-notes.md)。
+设置项的行为、默认值、字段名与边界情况。设计取值见 [design-language.md](design-language.md)，实现细节见 [engineering-notes.md](engineering-notes.md)。
 
 设置入口：**设置 › 终末地主题设置**。全部文案跟随 DSH 的语言设置（中/英）即时切换，无需刷新。
 
+## 持久化方式（不再用 localStorage）
+
+历史内存风格：这些开关最初存浏览器 `localStorage`。由于浏览器存储按「协议 + 主机 + 端口」的 origin 隔离，而 DSH Desktop 每次启动都在 127.0.0.1 绑定一个**随机临时端口**，端口一变 origin 就变，上次保存的设置永远读不到，表现为「重启后恢复默认」。已改用 DSH 官方的用户设置命名空间：
+
+- **浏览器端（client.js）** 通过 `ctx.settingsScope` 服务绑定命名空间 `dsh-theme-endfield`，读取/写入并订阅变化；
+- **Host 端（index.js）** 通过 `ctx.settings.register('dsh-theme-endfield', schema)` 声明参数 schema，由 `@deepseek-ai/dsh-settings-file` 落到 `<dshHome>/settings.yaml`（DSH Desktop 的 profile 下同样适用）。
+
+落盘位置由 DSH 决定（`$DSH_HOME` 或 `~/.dsh/...`），与浏览器 origin/端口无关，因此在 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 两种运行方式下设置都能正确持久化——它们跑的都是 127.0.0.1 loopback 页面，DSH 会把连接解析为 `host` 持久化模式。
+
+下表「字段」（缩写）就是命名空间里的存储字段，语义等价于旧 localStorage 键名的尾部。
+
 ## 总览
 
-| 组 | 开关 | 默认 | 存储键 |
+| 组 | 开关 | 默认 | 命名空间字段 |
 | --- | --- | --- | --- |
-| 01 主题 | 终末地主题 | 开 | `dsh-theme-endfield-enabled` |
-| | 主题配色 | 谷地黄 | `dsh-theme-endfield-palette` |
-| | 主题圆角 | 直角 | `dsh-theme-endfield-radius` |
-| 02 背景 | 等高线背景 | 关 | `dsh-theme-endfield-contour` |
-| | 动态等高线 | 开 | `dsh-theme-endfield-contour-anim` |
-| | 动态帧率 | 24 FPS | `dsh-theme-endfield-contour-fps` |
-| | 动态速度 | 标准 | `dsh-theme-endfield-contour-speed` |
-| | 背景水印 | 开 | `dsh-theme-endfield-watermark` |
-| | 水印保持显示 | 关 | `dsh-theme-endfield-watermark-persist` |
-| 03 动画 | 启动加载动画 | 关 | `dsh-theme-endfield-loader` |
-| 04 娱乐 | 雷霆大字 | 关 | `dsh-theme-endfield-thunder` |
-| | 大字入场动画 | 关 | `dsh-theme-endfield-thunder-anim` |
+| 01 主题 | 终末地主题 | 开 | `enabled`（旧键 `dsh-theme-endfield-enabled`）|
+| | 主题配色 | 谷地黄 | `palette` |
+| | 主题圆角 | 直角 | `radius` |
+| 02 背景 | 等高线背景 | 关 | `contour` |
+| | 动态等高线 | 开 | `contourAnim` |
+| | 动态帧率 | 24 FPS | `contourFps` |
+| | 动态速度 | 标准 | `contourSpeed` |
+| | 背景水印 | 开 | `watermark` |
+| | 水印保持显示 | 关 | `watermarkPersist` |
+| 03 动画 | 启动加载动画 | 关 | `loader` |
+| 04 娱乐 | 雷霆大字 | 关 | `thunder` |
+| | 大字入场动画 | 关 | `thunderAnim` |
 
-约定：**默认开启**的开关读作 `!== '0'`（未设置即开），**默认关闭**的读作 `=== '1'`（未设置即关）。这样异常的存储值不会悄悄改变出厂观感。
+取值约定（与 localStorage 时代的极性完全一致，现在由 schema 默认值保证）：**默认开启**的开关在该 schema 里默认存 `'1'`，客户端读作 `!== '0'`；**默认关闭**的存 `'0'`，读作 `=== '1'`。回滚/清除字段时客户端回到 schema 默认值；异常存储值被 schema 校验拒绝，不会悄悄改变出厂观感。
 
 ---
 

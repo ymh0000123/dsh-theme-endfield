@@ -63,13 +63,16 @@ node test/verify-shots.js            # 解码四张截图统计强调色像素
 
 ```bash
 node test/settings-rows.test.js     # 设置面板真实渲染 + 开关联动
+node test/settings-durable-hold.test.js  # 命名空间未就绪时的写入 gate + 补写
 node test/settings-off.test.js      # 关闭主题后设置页仍可读
 node test/settings-locale.test.js   # 跟随语言设置（zh/en 词典对齐 + 切换生效）
 ```
 
-**`settings-rows.test.js`** 不用浏览器也不用 React：以**记录型 `React` / `slots` / `localStorage` 桩**在进程内跑一次真实 `apply()`，抓下设置面板真正的元素树。设置页是用户唯一能碰到这些开关的入口，而那里的错误（抛异常、漏 key、开关接错存储键）check.js 与画布测试都看不见。
+**`settings-rows.test.js`** 不用浏览器也不用 React：以**记录型 `React` / `slots` + 假的 `ctx.settingsScope` 绑定器**（`test/fixtures/settings-scope.js`）在进程内跑一次真实 `apply()`，抓下设置面板真正的元素树。设置页是用户唯一能碰到这些开关的入口，而那里的错误（抛异常、漏 key、开关写错了 DSH 设置的字段）check.js 与画布测试都看不见。
 
-断言 10 行齐全且归入 4 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐）与配色样式规则都在、配色行默认显示谷地黄且按钮提供「切换武陵青」、点击写入 `dsh-theme-endfield-palette=wuling`、存了 `wuling` 时反向提供「切换谷地黄」并标注 `#14d0d0`、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、子开关只写自己的存储键而不误写主开关的，以及点击确实写入文档里那个 `localStorage` 键。
+> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置命名空间**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 `ctx.settingsScope` 绑定器——它在内存里扮演 `<settings.yaml>` 中的命名字段节。断言 10 行齐全且归入 4 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐）与配色样式规则都在、配色行默认显示谷地黄且按钮提供「切换武陵青」、点击把 `palette` 写成 `wuling`、存了 `wuling` 时反向提供「切换谷地黄」并标注 `#14d0d0`、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
+
+**`settings-durable-hold.test.js`** 用**两阶段假 `ctx.settingsScope`** 复现那条真实告警：宿主半部 `ctx.settings.register(...)` 尚未跑、命名空间还没进 Host 的 served 列表前，scope 快照是 `{ status:'unavailable', writable:true, mode:'host' }`——单看 `writable` 会照写不误却落不到盘。它先在未就绪态切「圆角 / 武陵青」，断言**没有任何 `scope.set` 出线**（旧 bug 会打 `commit … status= unavailable` 并静默丢脏）；随后模拟文档 committed、命名空间进入 served 列表、快照翻为 `status:'ready'`，断言订阅路径把两份 held 编辑**自动补写**进 `settings.yaml`，且不会重复写两遍（replay 有 re-entrancy 护栏）。
 
 **`settings-off.test.js`** 守的是设置页自己最脆弱的时刻：**开关按钮的强调色底来自主题样式表，而样式表随主题关闭被移除**。它在真实浏览器里加载真实 `client.js`，以应用**自己的默认令牌**（亮 / 暗两套）把主题关掉，用 `slots` 桩抓出真实元素树并物化成 DOM，然后断言每个按钮的合成对比度 ≥ 4.5。
 

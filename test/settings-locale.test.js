@@ -24,6 +24,7 @@
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
+const { settingsScopeStub } = require(path.join(__dirname, 'fixtures', 'settings-scope.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 const src = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8')
@@ -114,13 +115,11 @@ const makeLocale = (active) => {
   }
 }
 
-/** Load the bundle and apply it with a given ctx; returns the captured render fn. */
-const mount = (ctxExtras, store) => {
-  const localStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => { store.set(k, String(v)) },
-    removeItem: (k) => { store.delete(k) },
-  }
+/** Load the bundle and apply it with a given ctx; returns the captured render fn.
+    `section` seeds the fake dsh settingsScope binder (the theme no longer reads
+    localStorage) with the same preferences the old store pre-wrote. */
+const mount = (ctxExtras, section) => {
+  const prefs = settingsScopeStub(section || {})
   const sandbox = {
     window: {
       __ModuleLoader__: null,
@@ -128,7 +127,7 @@ const mount = (ctxExtras, store) => {
       matchMedia: () => ({ matches: false }),
       innerWidth: 1440, setTimeout: () => 0, clearTimeout() {},
     },
-    document, localStorage,
+    document,
     React: makeReact(),
     MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {} },
     ResizeObserver: function () { this.observe = () => {}; this.disconnect = () => {} },
@@ -138,7 +137,6 @@ const mount = (ctxExtras, store) => {
     console,
   }
   sandbox.globalThis = sandbox
-  sandbox.window.localStorage = localStorage
   sandbox.window.document = document
   let loaded = null
   sandbox.window.__ModuleLoader__ = { load: (m) => { loaded = m } }
@@ -158,19 +156,22 @@ const mount = (ctxExtras, store) => {
     get: (n) => {
       if (n === 'theme') return { overrideTokens: () => () => {} }
       if (n === 'slots') return slots
+      if (n === 'settingsScope') return prefs.binder
       return ctxExtras[n]
     },
     effect: (fn) => { const d = fn(); if (typeof d === 'function') effects.push(d) },
   })
-  return { rendered, registerOpts, effects }
+  return { rendered, registerOpts, effects, prefs }
 }
 
-const baseStore = () => new Map([
-  ['dsh-theme-endfield-enabled', '1'],
-  ['dsh-theme-endfield-loader', '0'],
-  ['dsh-theme-endfield-contour', '0'],
-  ['dsh-theme-endfield-watermark', '0'],
-])
+/* Same starting state as the old localStorage seed (theme on, anim-heavy layers off
+   so nothing needs a real frame/draw in the assertion host). */
+const baseStore = () => ({
+  enabled: '1',
+  loader: '0',
+  contour: '0',
+  watermark: '0',
+})
 
 /* ============ 1. dictionary integrity: zh and en must have identical keys ============
    A missing key does not crash — it renders the raw key string into the UI. So the two

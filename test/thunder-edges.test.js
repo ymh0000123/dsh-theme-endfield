@@ -24,6 +24,7 @@
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
+const { settingsScopeStub, fieldName } = require(path.join(__dirname, 'fixtures', 'settings-scope.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 const src = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8')
@@ -138,18 +139,20 @@ const sessions = {
   },
 }
 
-/* ---------- load the real client bundle ---------- */
-const store = new Map([
-  ['dsh-theme-endfield-enabled', '1'],
-  ['dsh-theme-endfield-loader', '0'],
-  ['dsh-theme-endfield-contour', '0'],
-  ['dsh-theme-endfield-watermark', '0'],
-])
-const localStorage = {
-  getItem: (k) => (store.has(k) ? store.get(k) : null),
-  setItem: (k, v) => { store.set(k, String(v)) },
-  removeItem: (k) => { store.delete(k) },
-}
+/* ---------- load the real client bundle ----------
+   The theme reads/writes its preferences through the dsh settingsScope seam, so
+   this test drives it with a fake binder seeded like the old localStorage store:
+   theme on, anim-heavy layers off (thunder itself starts OFF so the edge probes
+   below begin from a pristine state). Changes the sections make write back here;
+   scenarios 11/11b mount fresh sandboxes and seed their own binder. */
+const makePrefStore = (extra = {}) => settingsScopeStub(Object.assign({
+  enabled: '1',
+  loader: '0',
+  contour: '0',
+  watermark: '0',
+}, extra))
+
+const prefStore = makePrefStore()
 
 const sandbox = {
   window: {
@@ -159,7 +162,7 @@ const sandbox = {
     innerWidth: 1440,
     setTimeout: setTimeoutFake, clearTimeout: clearTimeoutFake,
   },
-  document, localStorage,
+  document,
   MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {} },
   ResizeObserver: function () { this.observe = () => {}; this.disconnect = () => {} },
   requestAnimationFrame: () => 0,
@@ -170,7 +173,6 @@ const sandbox = {
   console,
 }
 sandbox.globalThis = sandbox
-sandbox.window.localStorage = localStorage
 sandbox.window.document = document
 
 let loaded = null
@@ -197,6 +199,7 @@ const ctx = {
     if (n === 'theme') return { overrideTokens: () => () => {} }
     if (n === 'slots') return slots
     if (n === 'sessions') return sessions
+    if (n === 'settingsScope') return prefStore.binder
     return undefined
   },
   effect: (fn) => { const d = fn(); if (typeof d === 'function') teardown = d },
@@ -320,7 +323,7 @@ else fail('the plate outlived its 3s hold: ' + JSON.stringify(shownWord()))
    JS timer, not by the keyframes, so turning the animation on must not shorten or
    lengthen the 3s — a regression that would be easy to introduce by tying the
    removal to an animation end event. */
-store.set('dsh-theme-endfield-thunder-anim', '1')
+prefStore.setField('thunder-anim', '1')
 sessionA.set({ running: true })
 if (shownWord() === '任务开始') pass('开启入场动画后仍正常播报')
 else fail('expected 任务开始 with the animation on, got ' + JSON.stringify(shownWord()))
@@ -345,7 +348,7 @@ if (plates()[0].hasAttribute('data-endfield-thunder-still')) pass('系统「减�
 else fail('reduced motion must force the still path even with the animation switch on')
 sandbox.window.matchMedia = realMatchMedia
 advance(3000)
-store.delete('dsh-theme-endfield-thunder-anim')
+prefStore.setField('thunder-anim', '0')
 
 /* --- 6. the other edge: false -> true announces 任务开始 --- */
 sessionA.set({ running: true })
@@ -480,15 +483,18 @@ const sandbox2 = { ...sandbox }
 sandbox2.globalThis = sandbox2
 sandbox2.window = { ...sandbox.window, __ModuleLoader__: { load: (m) => { loaded2 = m } } }
 delete sandbox2.window.__dshThemeEndfieldApplied
-sandbox2.window.localStorage = localStorage
 sandbox2.window.document = document
 vm.createContext(sandbox2)
 new vm.Script(src, { filename: 'client.js' }).runInContext(sandbox2)
 const mod2 = loaded2.factory(() => null)
-store.set('dsh-theme-endfield-thunder', '1')
+const pref2 = makePrefStore({ thunder: '1' })
 try {
   mod2.apply({
-    get: (n) => (n === 'theme' ? { overrideTokens: () => () => {} } : undefined),
+    get: (n) => {
+      if (n === 'theme') return { overrideTokens: () => () => {} }
+      if (n === 'settingsScope') return pref2.binder
+      return undefined
+    },
     effect: () => {},
   })
   pass('无 sessions 服务时主题仍正常挂载（开关在但不播报）')
@@ -512,18 +518,18 @@ sandbox3.window = { ...sandbox.window, __ModuleLoader__: { load: (m) => { loaded
 // See the note in 11: without this, apply() returns at its first line and the
 // whole case is vacuous.
 delete sandbox3.window.__dshThemeEndfieldApplied
-sandbox3.window.localStorage = localStorage
 sandbox3.window.document = document
 vm.createContext(sandbox3)
 new vm.Script(src, { filename: 'client.js' }).runInContext(sandbox3)
 const mod3 = loaded3.factory(() => null)
-store.set('dsh-theme-endfield-thunder', '1')
-store.set('dsh-theme-endfield-enabled', '1')
+// Thunder must be ON for the late-session announce below; enabled is the default.
+const pref3 = makePrefStore({ thunder: '1' })
 try {
   mod3.apply({
     get: (n) => {
       if (n === 'theme') return { overrideTokens: () => () => {} }
       if (n === 'sessions') return lateService
+      if (n === 'settingsScope') return pref3.binder
       return undefined
     },
     effect: () => {},

@@ -23,6 +23,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 
@@ -106,11 +107,12 @@ const setScheme = (s) => {
   applyTokens()
 }
 
-/* --- apply the real theme with the master switch OFF --- */
-localStorage.setItem('dsh-theme-endfield-enabled', '0')
-localStorage.setItem('dsh-theme-endfield-loader', '0')
-localStorage.setItem('dsh-theme-endfield-contour', '0')
-localStorage.setItem('dsh-theme-endfield-watermark', '0')
+/* --- apply the real theme with the master switch OFF ---
+   The theme reads preferences through the dsh settingsScope seam, so this page
+   seeds a fake binder with the same section the old localStorage lines set:
+   master switch and the anim/heavy layers all OFF. */
+${BROWSER_SETTINGS_SCOPE_SNIPPET}
+var __prefs = __endfieldSettingsScope({ enabled:'0', loader:'0', contour:'0', watermark:'0' });
 
 let rendered = null
 const slots = {
@@ -122,7 +124,7 @@ const mod = window.__MOD__.factory(() => null)
 mod.apply({
   get: (n) => n === 'theme'
     ? { overrideTokens: () => () => {} }
-    : (n === 'slots' ? slots : undefined),
+    : (n === 'slots' ? slots : (n === 'settingsScope' ? __prefs.binder : undefined)),
   effect: () => {},
 })
 if (typeof rendered !== 'function') throw new Error('settings.section never registered')

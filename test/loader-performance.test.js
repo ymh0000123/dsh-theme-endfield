@@ -8,6 +8,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'endfield-loader-'))
@@ -37,12 +38,9 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 <script src="./client.js"></script>
 <script>
   document.body.setAttribute('data-ds-dark-theme','')
-  const LS=localStorage
-  LS.setItem('dsh-theme-endfield-enabled','1')
-  LS.setItem('dsh-theme-endfield-loader','1')
-  LS.setItem('dsh-theme-endfield-contour','1')
-  LS.setItem('dsh-theme-endfield-contour-anim','1')
-  LS.setItem('dsh-theme-endfield-watermark','0')
+  /* Theme reads switches via the settingsScope seam (not localStorage). */
+  ${BROWSER_SETTINGS_SCOPE_SNIPPET}
+  var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'1', contour:'1', 'contour-anim':'1', watermark:'0' })
   const originalClearRect=CanvasRenderingContext2D.prototype.clearRect
   let contourClears=0
   CanvasRenderingContext2D.prototype.clearRect=function(x,y,w,h){
@@ -51,7 +49,7 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   }
   const mod=window.__MOD__.factory(()=>null)
   window.__dispose__=mod.apply({
-    get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:undefined,
+    get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='settingsScope'?__prefs.binder:undefined),
     effect:(f)=>f(),
   })
   document.body.appendChild(document.createElement('span'))
@@ -80,10 +78,10 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
     while(document.querySelector('[data-endfield-loader]')) await sleep(100)
     const clearsAtRemoval=contourClears
     const beforeToggle=contourClears
-    LS.setItem('dsh-theme-endfield-contour-anim','0')
+    __prefs.setItem('dsh-theme-endfield-contour-anim','0')
     document.body.appendChild(document.createElement('span'))
     await sleep(150)
-    LS.setItem('dsh-theme-endfield-contour-anim','1')
+    __prefs.setItem('dsh-theme-endfield-contour-anim','1')
     document.body.appendChild(document.createElement('span'))
     await sleep(300)
     const clearsAfterToggle=contourClears

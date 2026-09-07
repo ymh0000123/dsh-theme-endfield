@@ -13,6 +13,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
+const { BROWSER_SETTINGS_SCOPE_SNIPPET } = require(path.join(__dirname, 'fixtures', 'settings-scope.browser.js'))
 
 const ROOT = path.resolve(__dirname, '..')
 // Scratch files go to a temp dir so the package stays clean.
@@ -41,13 +42,12 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 <script>window.__ModuleLoader__={load:(m)=>{window.__MOD__=m}}</script>
 <script src="./client.js"></script>
 <script>
-  const LS=localStorage
-  LS.setItem('dsh-theme-endfield-enabled','1')
-  LS.setItem('dsh-theme-endfield-loader','0')
-  LS.setItem('dsh-theme-endfield-contour','1')
-  LS.setItem('dsh-theme-endfield-contour-anim','1')
+  /* The theme reads switches via the settingsScope seam (not localStorage). Seed
+     a fake binder: theme on, contour + animation on, loader off. */
+  ${BROWSER_SETTINGS_SCOPE_SNIPPET}
+  var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', 'contour-anim':'1' })
   const mod=window.__MOD__.factory(()=>null)
-  mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:undefined,effect:(f)=>f()})
+  mod.apply({get:(n)=>n==='theme'?{overrideTokens:()=>()=>{}}:(n==='settingsScope'?__prefs.binder:undefined),effect:(f)=>f()})
   document.body.appendChild(document.createElement('span'))
   setTimeout(()=>{
     const cv=document.querySelector('[data-endfield-contour-lines]')

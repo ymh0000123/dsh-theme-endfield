@@ -14,10 +14,35 @@
 - [等高线背景](#等高线背景)
 - [启动加载屏](#启动加载屏)
 - [设置页国际化](#设置页国际化)
+- [持久化说明（见下文正文）](#为什么设置必须落在-host-的设置命名空间不再用-localstorage)
 - [已修问题归档](#已修问题归档)
 - [验证方法论](#验证方法论)
 
 ---
+
+## 为什么设置必须落在 Host 的设置命名空间（不再用 localStorage）
+
+最初这些开关用浏览器 `localStorage` 持久化。**这对 DSH Desktop 是错的**：浏览器存储的作用域是「协议 + 主机 + 端口」的同源维度（origin），而 DSH Desktop 每次启动都在 `127.0.0.1` 上绑定一个**随机临时端口**。端口一变，origin 就变，于是上次保存的设置永远读不到，表现就是「**重启后设置恢复默认**」；localStorage 也因此从来没真正持久过跨会话。
+
+### 选哪条存储
+
+原生浏览器侧的**三个候选**都治标不治本，因为它们的键空间同样挂在 origin 上：
+
+- `localStorage`——origin 维度，random port 一换就清空（本 bug 的根源）。
+- `sessionStorage`——更糟，连同一会话的标签页都不共享。
+- IndexedDB——仍按 origin 分库，与 Desktop 随机端口的组合同样无法根治。
+
+正解是 DSH 自己的用户设置服务：**解析与落盘都由 Host 决定**（`ctx.settings.register` → `@deepseek-ai/dsh-settings-file` 写到 `<dshHome>/<…>/settings.yaml`），与页面 origin、端口完全无关。因此 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 走同一条路径：它们都是 `127.0.0.1` loopback 页面，DSH 把连接解析成 `host` 持久化模式，值写进 profile 落盘位置，换端口也能读回。
+
+### Host ↔ Client 数据流
+
+1. **声明**（Host `index.js`）：`ctx.inject(['settings'], sctx => sctx.settings.register('dsh-theme-endfield', schema, { applies:'live' }))`。schema 每个字段都是**字符串**字段并带 `.default(...)`：default-ON 存 `'1'`（读作 `!== '0'`），default-OFF 存 `'0'`（读作 `=== '1'`）；palette/radius/fps/speed 各存一个文档里写明的字面量。字符串化的好处：与旧的存盘点位完全一致，老的 `<settings.yaml>` 节无需迁移即可原样命中。
+2. **写**（浏览器 `client.js`）：设置面板每个 toggle 调用内部 `prefsSet(field, value)` → 只有当 scope 快照是 **durably served**（`mode:'host' && status:'ready' && writable`，即 Host 的 describe 视图已真正列出本命名空间）时才调用 `ctx.settingsScope` 的 `scope.set(field, value)`，Host 收到后原子写盘。只凭快照里的 `writable` 判写是一个坑：host 模式的 describe 视图即便本命名空间**尚未被注册**也会返回 `writable:true` 与 `status:'unavailable'`（`commit radius = round … status= unavailable` 就是这么打出来的）——旧代码照写不误、清了脏标记但什么都没落盘，刷新即丢。现在这种写被**拦下并标脏**（页面内仍生效），等快照在后续 ready 回相（Host `register` 提交文档、镜像重载）时由 subscription 自动补写；注册后仍迟迟不出现则说明 host 半部未挂载，属安装侧问题，前台不再假装写成功了。
+3. **读 / 生效**：同一段 scope 的 `getSnapshot().value` 就是已由 schema 校验并合并默认值的整段；主题层的 `isEnabled()` 与其它 getter 每次调用都 `prefsGet(field)` 现读本段，天然随值变化。
+4. **订阅同步**：`scope.subscribe(...)` 在每次落盘/镜像变化时唤醒，client 再跑一遍 `reconcileFromPrefs()`，把主题开关（enabled → mount/unmount token+样式表）、圆角/配色 class、水印、等高线、雷霆大字重新对齐。这样同 profile 里**另一个窗口/设备**编辑 `<settings.yaml>`（或本轮写入被 Host 回相确认）都不需要刷新即可热生效。
+5. **启动恢复**：`apply()` 早于 transport 就绪时，读 schema 默认值（内存镜像），一旦 `status:'ready'` 的第一个真值镜像到达就切换到持久值——即使 Desktop 在随机端口上启动，也能立刻恢复到上次的设置。
+
+防御性：若 ctx 里根本没有 `settingsScope` 服务（纯独立页/测试桩），则回落内存默认值 + 会话内本地覆盖，写不过盘但**不引入 localStorage**，也绝不 throw。
 
 ## 变量必须声明在 body 而不是 :root
 
