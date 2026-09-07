@@ -323,7 +323,7 @@ else fail('the plate outlived its 3s hold: ' + JSON.stringify(shownWord()))
    JS timer, not by the keyframes, so turning the animation on must not shorten or
    lengthen the 3s — a regression that would be easy to introduce by tying the
    removal to an animation end event. */
-prefStore.setField('thunder-anim', '1')
+prefStore.setField('thunderAnim', '1')
 sessionA.set({ running: true })
 if (shownWord() === '任务开始') pass('开启入场动画后仍正常播报')
 else fail('expected 任务开始 with the animation on, got ' + JSON.stringify(shownWord()))
