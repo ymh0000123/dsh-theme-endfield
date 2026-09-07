@@ -54,6 +54,34 @@ function apply(ctx) {
     if (theme === undefined) return
     if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = true
 
+    /* Compound preference keys are canonical kebab-case. Older builds used
+       camelCase tails; migrate those aliases on first read and remove them on
+       every write so settings survive reloads with one stable spelling. */
+    const PREFS_NS = 'dsh-theme-endfield'
+    const prefsAliasKey = (rawKey) => {
+      const prefix = PREFS_NS + '-'
+      const tail = rawKey.indexOf(prefix) === 0 ? rawKey.slice(prefix.length) : rawKey
+      return prefix + tail.replace(/-([a-z0-9])/g, (_, ch) => ch.toUpperCase())
+    }
+    const prefsGet = (rawKey) => {
+      if (typeof localStorage === 'undefined') return null
+      const value = localStorage.getItem(rawKey)
+      if (value !== null) return value
+      const aliasKey = prefsAliasKey(rawKey)
+      if (aliasKey === rawKey) return null
+      const legacyValue = localStorage.getItem(aliasKey)
+      if (legacyValue === null) return null
+      localStorage.setItem(rawKey, legacyValue)
+      localStorage.removeItem(aliasKey)
+      return legacyValue
+    }
+    const prefsSet = (rawKey, value) => {
+      if (typeof localStorage === 'undefined') return
+      localStorage.setItem(rawKey, String(value))
+      const aliasKey = prefsAliasKey(rawKey)
+      if (aliasKey !== rawKey) localStorage.removeItem(aliasKey)
+    }
+
     const RADIUS_KEY = 'dsh-theme-endfield-radius'
     const ENABLED_KEY = 'dsh-theme-endfield-enabled'
     const isEnabled = () => (typeof localStorage !== 'undefined' && localStorage.getItem(ENABLED_KEY)) !== '0'
@@ -118,7 +146,7 @@ function apply(ctx) {
     const WATERMARK_PERSIST_KEY = 'dsh-theme-endfield-watermark-persist'
     const isWatermarkOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_KEY)) !== '0'
     // Default OFF: the hero-only behaviour stays the shipped default.
-    const isWatermarkPersistOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(WATERMARK_PERSIST_KEY)) === '1'
+    const isWatermarkPersistOn = () => prefsGet(WATERMARK_PERSIST_KEY) === '1'
     const isHeroVisible = () => {
       if (typeof document === 'undefined') return false
       const hero = document.querySelector('[class*="pXSMma_root"]')
@@ -414,19 +442,19 @@ function apply(ctx) {
     const isContourOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_KEY)) === '1'
     // Defaults ON, so enabling the layer shows the effect at once; it is
     // meaningless while the layer itself is off.
-    const isContourAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(CONTOUR_ANIM_KEY)) !== '0'
+    const isContourAnimOn = () => prefsGet(CONTOUR_ANIM_KEY) !== '0'
     const readContourFps = () => {
-      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_FPS_KEY) : null
+      const raw = prefsGet(CONTOUR_FPS_KEY)
       const fps = Number(raw)
       return CONTOUR_FPS_OPTIONS.includes(fps) ? fps : 24
     }
     const readContourSpeed = () => {
-      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONTOUR_SPEED_KEY) : null
+      const raw = prefsGet(CONTOUR_SPEED_KEY)
       const speed = Number(raw)
       return CONTOUR_SPEED_OPTIONS.includes(speed) ? speed : 2
     }
     const isContourScrollPauseOn = () => (typeof localStorage !== 'undefined'
-      && localStorage.getItem(CONTOUR_SCROLL_PAUSE_KEY)) !== '0'
+      && prefsGet(CONTOUR_SCROLL_PAUSE_KEY)) !== '0'
 
     /* Deterministic PRNG (mulberry32), used with a PER-PAGE-LOAD seed.
        Determinism is still required WITHIN one load: contourBuild() is re-run on
@@ -1864,7 +1892,7 @@ function apply(ctx) {
     // Default OFF (=== '1' rather than !== '0'): opt-in, like the boot animation.
     const isThunderOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(THUNDER_KEY)) === '1'
     // Default OFF for the same reason, and read independently of the parent switch.
-    const isThunderAnimOn = () => (typeof localStorage !== 'undefined' && localStorage.getItem(THUNDER_ANIM_KEY)) === '1'
+    const isThunderAnimOn = () => prefsGet(THUNDER_ANIM_KEY) === '1'
     /* The OS preference still wins over an enabled animation switch, exactly as
        contourWantsAnim() does for the contour sheet. Checked live rather than
        cached, so changing the OS setting takes effect on the next announcement. */
@@ -3918,7 +3946,7 @@ function apply(ctx) {
           }
           const toggleContourAnim = () => {
             const next = !contourAnim
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_ANIM_KEY, next ? '1' : '0')
+            prefsSet(CONTOUR_ANIM_KEY, next ? '1' : '0')
             setContourAnim(next)
             if (!next) {
               contourScrollPaused = false
@@ -3930,18 +3958,18 @@ function apply(ctx) {
           const setContourFpsValue = (value) => {
             const next = Number(value)
             if (!CONTOUR_FPS_OPTIONS.includes(next)) return
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_FPS_KEY, String(next))
+            prefsSet(CONTOUR_FPS_KEY, next)
             setContourFps(next)
           }
           const setContourSpeedValue = (value) => {
             const next = Number(value)
             if (!CONTOUR_SPEED_OPTIONS.includes(next)) return
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SPEED_KEY, String(next))
+            prefsSet(CONTOUR_SPEED_KEY, next)
             setContourSpeed(next)
           }
           const toggleContourScrollPause = () => {
             const next = !contourScrollPause
-            if (typeof localStorage !== 'undefined') localStorage.setItem(CONTOUR_SCROLL_PAUSE_KEY, next ? '1' : '0')
+            prefsSet(CONTOUR_SCROLL_PAUSE_KEY, next ? '1' : '0')
             setContourScrollPause(next)
             if (!next) {
               contourScrollPaused = false
@@ -3959,7 +3987,7 @@ function apply(ctx) {
           }
           const toggleWmPersist = () => {
             const next = !wmPersist
-            if (typeof localStorage !== 'undefined') localStorage.setItem(WATERMARK_PERSIST_KEY, next ? '1' : '0')
+            prefsSet(WATERMARK_PERSIST_KEY, next ? '1' : '0')
             setWmPersist(next)
             syncWatermarkVisibility()
           }
@@ -3993,7 +4021,7 @@ function apply(ctx) {
           const previewThunder = () => { showThunder(THUNDER_DONE) }
           const toggleThunderAnim = () => {
             const next = !thunderAnim
-            if (typeof localStorage !== 'undefined') localStorage.setItem(THUNDER_ANIM_KEY, next ? '1' : '0')
+            prefsSet(THUNDER_ANIM_KEY, next ? '1' : '0')
             setThunderAnim(next)
             /* Nothing to reconcile: the next showThunder() reads the switch and marks
                the plate accordingly. Replaying now is what makes the change legible —

@@ -403,6 +403,28 @@ if (thunderBtn && typeof thunderBtn.props.onClick === 'function') {
   else fail('雷霆大字 toggle wrote ' + JSON.stringify(v) + ', expected "1"')
 } else fail('雷霆大字 toggle has no onClick handler')
 
+/* Legacy compound preference regression: camelCase aliases must be read and
+   migrated to the canonical kebab-case keys in one render. */
+const compoundPrefs = [
+  ['watermarkPersist', 'watermark-persist', '1'],
+  ['contourAnim', 'contour-anim', '0'],
+  ['contourFps', 'contour-fps', '60'],
+  ['contourSpeed', 'contour-speed', '4'],
+  ['contourScrollPause', 'contour-scroll-pause', '1'],
+  ['thunderAnim', 'thunder-anim', '1'],
+]
+for (const [camel, kebab, value] of compoundPrefs) {
+  store.delete('dsh-theme-endfield-' + kebab)
+  store.set('dsh-theme-endfield-' + camel, value)
+}
+try { rendered() } catch (e) { fail('legacy compound preference render threw: ' + e.message) }
+for (const [camel, kebab, value] of compoundPrefs) {
+  const canonical = store.get('dsh-theme-endfield-' + kebab)
+  const legacy = store.get('dsh-theme-endfield-' + camel)
+  if (canonical === value && legacy === undefined) pass('migrates ' + camel + ' to ' + kebab)
+  else fail('did not migrate ' + camel + ': canonical=' + JSON.stringify(canonical) + ', legacy=' + JSON.stringify(legacy))
+}
+
 console.log('')
 if (failures) { console.error(failures + ' settings check(s) failed'); process.exit(1) }
 console.log('all settings-panel checks passed')
