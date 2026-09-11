@@ -108,6 +108,15 @@ function apply(ctx) {
       thunder: '0',
       thunderAnim: '0',
     }
+    /* Convert a namespaced storage key tail to the camelCase field used by the
+       settings schema. The persisted schema fields are camelCase; older builds
+       wrote kebab-case tails, so this conversion is also the read migration. */
+    const prefsFieldFromKey = (rawKey) => {
+      const prefix = PREFS_NS + '-'
+      const tail = rawKey.indexOf(prefix) === 0 ? rawKey.slice(prefix.length) : rawKey
+      return tail.replace(/-([a-z0-9])/g, (_, ch) => ch.toUpperCase())
+    }
+
     const PREFS_KEY_TO_FIELD = (() => {
       const m = {}
       const raw = [
@@ -119,7 +128,7 @@ function apply(ctx) {
         'dsh-theme-endfield-loader', 'dsh-theme-endfield-thunder',
         'dsh-theme-endfield-thunder-anim',
       ]
-      for (const k of raw) m[k] = k.slice(PREFS_NS.length + 1)
+      for (const k of raw) m[k] = prefsFieldFromKey(k)
       return m
     })()
     const prefsListeners = []
@@ -164,7 +173,7 @@ function apply(ctx) {
     }
     /** read one field as its raw stored string: <stored-or-default>, never null. */
     const prefsGet = (rawKey) => {
-      const field = PREFS_KEY_TO_FIELD[rawKey] || rawKey.slice(PREFS_NS.length + 1)
+      const field = PREFS_KEY_TO_FIELD[rawKey] || prefsFieldFromKey(rawKey)
       const sec = prefsGetValue()
       if (sec && Object.prototype.hasOwnProperty.call(sec, field)) return String(sec[field])
       return PREFS_FIELD_DEFAULTS[field]
@@ -317,7 +326,7 @@ function apply(ctx) {
       return false
     }
     const prefsSet = (rawKey, encoded) => {
-      const field = PREFS_KEY_TO_FIELD[rawKey] || rawKey.slice(PREFS_NS.length + 1)
+      const field = PREFS_KEY_TO_FIELD[rawKey] || prefsFieldFromKey(rawKey)
       prefsLocal[field] = String(encoded)
       prefsCommit(field, prefsLocal[field])
     }
