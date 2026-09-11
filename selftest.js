@@ -120,15 +120,33 @@ const CASES = [
        --dsw-* token that the app sets inline on body. Measured empty in a browser,
        which silently disabled the themed scrollbar.
 
-       Two traps this pattern has to avoid, both hit for real while writing it:
-       the stylesheet is indented inside a template literal (so no column-0
-       anchor), and this checkout is CRLF (so a literal \n never matches — the
-       same footgun already recorded on the brace case below). Hence \r?\n and a
-       captured indent that is reused verbatim. */
+       This case used to be injected INTO the theme's own :root block. That block
+       is gone now — it was the global font-token override that restyled every
+       third-party widget — so the case injects a :root block of its own instead,
+       which is strictly better: it no longer depends on the theme having a :root
+       block at all, and it still proves the structural check catches the bug.
+
+       The anchor is the stylesheet's first line, which is indentation-agnostic:
+       matching `insertCss(` plus the newline that follows it, whatever it is
+       (this checkout is CRLF, so a literal \n never matches — the same footgun
+       already recorded on the brace case below). */
     mutate: (s) => s.replace(
-      /:root \{(\r?\n)([ \t]*)--dsw-font-family:/,
-      ':root {$1$2--edge-line: var(--dsw-alias-border-l1);$1$2--dsw-font-family:'),
+      /(insertCss\(`[^\S\r\n]*\r?\n)/,
+      '$1      :root { --edge-line: var(--dsw-alias-border-l1); }\n'),
     expect: /declared at :root while substituting a body-level token/,
+  },
+  {
+    name: 'the theme redeclares the app font token (restyles every third-party widget)',
+    /* The real regression this guard exists for: a :root override of the app's
+       UI root font token. Every widget injected into the app root that carries
+       font-family:inherit picked it up (measured on a body-level probe: the
+       widget's computed font-family became Arial while the app's own stack was
+       gone), so the theme must never declare it again — not at :root, not on
+       body, not inside a media query. */
+    mutate: (s) => s.replace(
+      /(insertCss\(`[^\S\r\n]*\r?\n)/,
+      '$1      :root { --dsw-font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; }\n'),
+    expect: /--dsw-font-family.*DECLARED by the theme/,
   },
 ]
 

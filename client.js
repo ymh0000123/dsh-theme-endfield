@@ -108,36 +108,97 @@ function apply(ctx) {
       thunder: '0',
       thunderAnim: '0',
     }
-    /* Convert a namespaced storage key tail to the camelCase field used by the
-       settings schema. The persisted schema fields are camelCase; older builds
-       wrote kebab-case tails, so this conversion is also the read migration. */
+    /* Convert a namespaced storage key tail to the camelCase field the settings
+       schema declares (index.js FIELD_DEFAULTS). A build that derived the field
+       by stripping the namespace prefix instead left a compound name in its
+       kebab-case spelling, so this conversion is also the read migration for any
+       key the explicit table below does not list. */
     const prefsFieldFromKey = (rawKey) => {
       const prefix = PREFS_NS + '-'
       const tail = rawKey.indexOf(prefix) === 0 ? rawKey.slice(prefix.length) : rawKey
       return tail.replace(/-([a-z0-9])/g, (_, ch) => ch.toUpperCase())
     }
+    /* Which schema field each UI/store key names. The left half is the key the
+       theme's own code has always used (the localStorage-era name, which the
+       settings rows, locales and tests all still speak); the right half is the
+       field the HOST registered in its schema (index.js FIELD_DEFAULTS — the
+       only names a scope.set can actually store).
 
-    const PREFS_KEY_TO_FIELD = (() => {
+       THEY ARE NOT THE SAME STRING for any compound field, and deriving one
+       from the other by stripping the namespace prefix — the old
+       `k.slice(PREFS_NS.length + 1)` — is the bug this table exists to kill: it
+       turned 'dsh-theme-endfield-thunder-anim' into 'thunder-anim', while the
+       schema declares 'thunderAnim'. Six fields were affected (thunderAnim,
+       contourAnim, contourFps, contourSpeed, contourScrollPause,
+       watermarkPersist): the write landed on an UNDECLARED key, schemastery
+       kept it (it validates declared fields and passes extras through) but the
+       declared field stayed at its default, so the switch worked for the page
+       session, persisted junk into settings.yaml, and came back at its default
+       on the next load. Hence "开关刷新后复位".
+
+       Keys are therefore listed EXPLICITLY, never computed. */
+    const PREFS_KEY_TO_FIELD = {
+      'dsh-theme-endfield-enabled': 'enabled',
+      'dsh-theme-endfield-palette': 'palette',
+      'dsh-theme-endfield-radius': 'radius',
+      'dsh-theme-endfield-contour': 'contour',
+      'dsh-theme-endfield-contour-anim': 'contourAnim',
+      'dsh-theme-endfield-contour-fps': 'contourFps',
+      'dsh-theme-endfield-contour-speed': 'contourSpeed',
+      'dsh-theme-endfield-contour-scroll-pause': 'contourScrollPause',
+      'dsh-theme-endfield-watermark': 'watermark',
+      'dsh-theme-endfield-watermark-persist': 'watermarkPersist',
+      'dsh-theme-endfield-loader': 'loader',
+      'dsh-theme-endfield-thunder': 'thunder',
+      'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+    }
+    /* The pre-migration spelling of a compound field, for the sections that the
+       buggy build already wrote: 'contourAnim' -> 'contour-anim'. Derived from
+       the table (not from the schema, which cannot know it) so the two can never
+       drift, and only for fields that really do have a distinct legacy double:
+       every single-word field maps to itself and is skipped. */
+    const PREFS_FIELD_TO_LEGACY_KEY = (() => {
       const m = {}
-      const raw = [
-        'dsh-theme-endfield-radius', 'dsh-theme-endfield-enabled',
-        'dsh-theme-endfield-palette', 'dsh-theme-endfield-watermark',
-        'dsh-theme-endfield-watermark-persist', 'dsh-theme-endfield-contour',
-        'dsh-theme-endfield-contour-anim', 'dsh-theme-endfield-contour-fps',
-        'dsh-theme-endfield-contour-speed', 'dsh-theme-endfield-contour-scroll-pause',
-        'dsh-theme-endfield-loader', 'dsh-theme-endfield-thunder',
-        'dsh-theme-endfield-thunder-anim',
-      ]
-      for (const k of raw) m[k] = prefsFieldFromKey(k)
+      for (const field of Object.keys(PREFS_KEY_TO_FIELD)) {
+        const f = PREFS_KEY_TO_FIELD[field]
+        const legacy = field.slice(PREFS_NS.length + 1)
+        if (legacy !== f) m[f] = legacy
+      }
       return m
     })()
+    /* The single place a UI/store key turns into a schema field name: both the
+       read path (prefsGet) and the write path (prefsSet/prefsCommit) go through
+       it, so a switch can never read a field other than the one it writes. A key
+       that is already a field name passes through, which is what the settings
+       panel's own state and the tests use. */
+    const prefsFieldOf = (rawKey) => {
+      if (Object.prototype.hasOwnProperty.call(PREFS_KEY_TO_FIELD, rawKey)) return PREFS_KEY_TO_FIELD[rawKey]
+      if (Object.prototype.hasOwnProperty.call(PREFS_FIELD_DEFAULTS, rawKey)) return rawKey
+      /* Last resort: a key this table does not list. It is camelCased through
+         prefsFieldFromKey rather than handed back as the raw tail, so a compound
+         name reaching this path still lands on the camelCase field the host
+         DECLARES instead of on an undeclared kebab key — which is precisely the
+         failure mode the table above exists to prevent, and which a future
+         compound row could otherwise reintroduce silently. */
+      return prefsFieldFromKey(rawKey)
+    }
     const prefsListeners = []
     const prefsLocal = Object.assign({}, PREFS_FIELD_DEFAULTS) // schema defaults, for boot / no transport
+    // The subset of prefsLocal a USER has actually edited this session. It is what
+    // prefsGetValue overlays on the fetched section: prefsLocal as a whole carries
+    // the shipped defaults, so overlaying all of it would shadow the very values
+    // the host just served (watermark off would read back as its default on).
+    const prefsLocalEdited = new Set()
     // Fields a panel toggle changed so far but that have not yet been durably
     // committed to the host scope. If the scope was not ready at apply() time and
     // only appears later, these are replayed so a pre-bind edit still persists
     // instead of silently living in page-only memory.
     const prefsDirty = new Set()
+    // Fields whose value THIS SESSION changed (see prefsSet), regardless of where
+    // that edit currently stands. Used to tell "the host already holds this value"
+    // apart from "the user put it back to a value the host happens to hold":
+    // only the former means there is nothing left to persist.
+    const prefsEdited = new Set()
     let prefsFieldValue = null // last schema-resolved user+base+defaults section from the scope, if any
     let prefsScope = null // the bound ctx.settingsScope scope, or null while absent/not ready
     let prefsBindTimer = null // retry handle for a settingsScope that arrives late
@@ -166,14 +227,24 @@ function apply(ctx) {
       } catch (e) { /* property may be a getter that throws when not available */ }
       try { return ctx.get('settingsScope') } catch (e) { return undefined }
     }
+    /* A schema-accepted section from the transport, else in-memory defaults
+       (PREFS_FIELD_DEFAULTS is the fallback BEFORE a first section arrives).
+       Fields the user has edited this session are overlaid ON TOP on purpose: a
+       toggle writes prefsLocal synchronously and only then does the host echo the
+       section back, so reading the fetched section first would show the panel the
+       new state while the theme still acted on the old one until the round-trip
+       closed. Only EDITED fields are overlaid (see prefsLocalEdited), so a served
+       value for any other field is still what the theme reads. */
     const prefsGetValue = () => {
-      // A schema-accepted section from the transport, else in-memory defaults
-      // overlaid with any session-local override written while un-writable.
-      return prefsFieldValue || prefsLocal
+      const base = prefsFieldValue || PREFS_FIELD_DEFAULTS
+      if (prefsLocalEdited.size === 0) return base
+      const out = Object.assign({}, base)
+      for (const field of prefsLocalEdited) out[field] = prefsLocal[field]
+      return out
     }
     /** read one field as its raw stored string: <stored-or-default>, never null. */
     const prefsGet = (rawKey) => {
-      const field = PREFS_KEY_TO_FIELD[rawKey] || prefsFieldFromKey(rawKey)
+      const field = prefsFieldOf(rawKey)
       const sec = prefsGetValue()
       if (sec && Object.prototype.hasOwnProperty.call(sec, field)) return String(sec[field])
       return PREFS_FIELD_DEFAULTS[field]
@@ -224,10 +295,10 @@ function apply(ctx) {
     const prefsDurablyServed = (snap) => !!snap && snap.mode === 'host' && snap.status === 'ready' && !!snap.writable
     /* Push edits recorded while the scope was not durably served as soon as it
        is (bind catch-up + an unavailable/loading -> ready subscription both call
-       this). A dirty field is cleared only once it is written to a served host
-       scope, or when the host already holds the exact value / it is the shipped
-       default (nothing left to persist). Guarded against races the same way as
-       prefsCommit: a rejected async write keeps the field for a later try. */
+       this). A dirty field is cleared only once it is WRITTEN to a served host
+       scope, or once the host's own FETCHED section already holds that exact
+       value. Guarded against races the same way as prefsCommit: a rejected async
+       write keeps the field for a later try. */
     const prefsReplayDirty = () => {
       if (prefsReplayBusy) return
       if (prefsDirty.size === 0) return
@@ -240,9 +311,18 @@ function apply(ctx) {
           const hostValue = snap && snap.value
             ? (Object.prototype.hasOwnProperty.call(snap.value, field) ? String(snap.value[field]) : undefined)
             : undefined
-          // An edit that equals the host already or the shipped default has
-          // nothing left to persist (defaults are implied, not stored).
-          if (local === hostValue || local === PREFS_FIELD_DEFAULTS[field]) {
+          /* An edit the host ALREADY holds needs no write — provided the host
+             really holds it, rather than the user having just typed that value
+             back in. Those differ in exactly one case, and it is the one that
+             matters: the user reverts a field to a value the host's stale view
+             still reports (the pre-migration default is the common one), and
+             skipping the write would silently drop the revert. So only a field
+             this session never edited is cleared on equality; an edited field is
+             cleared by its write.
+             Equality with the shipped DEFAULT is likewise not a reason to clear:
+             the host may still hold a non-default value, and "put it back to the
+             default" is then a real edit that has to reach the document. */
+          if (local === hostValue && !prefsEdited.has(field)) {
             prefsDirty.delete(field)
             continue
           }
@@ -267,9 +347,9 @@ function apply(ctx) {
        immediately; this is only for a mirror whose first describe predated a late
        host registration and that sees no intermediate document commit / reconnect
        to rerun on. Each tick simply calls prefsReplayDirty() again; once nothing
-       is dirty (all replayed, matched the host, or reverted to a default) the
-       loop stops itself. Stops after PREFS_RETRY_LIMIT ticks so an environment
-       where the namespace is genuinely never served does not spin forever. */
+       is held (all written) the loop stops itself. Stops after PREFS_RETRY_LIMIT
+       ticks so an environment where the namespace is genuinely never served does
+       not spin forever. */
     const prefsStopRetry = () => {
       if (prefsRetryTimer !== null && typeof clearTimeout === 'function') clearTimeout(prefsRetryTimer)
       prefsRetryTimer = null
@@ -326,9 +406,91 @@ function apply(ctx) {
       return false
     }
     const prefsSet = (rawKey, encoded) => {
-      const field = PREFS_KEY_TO_FIELD[rawKey] || prefsFieldFromKey(rawKey)
+      const field = prefsFieldOf(rawKey)
       prefsLocal[field] = String(encoded)
+      prefsLocalEdited.add(field)
+      prefsEdited.add(field)
       prefsCommit(field, prefsLocal[field])
+    }
+    /* Normalize a section the transport handed us to a full set of SCHEMA
+       fields: the declared fields the mirror resolved, plus schema defaults for
+       any it has not. Field names come from the one table (prefsFieldOf), so a
+       section is keyed exactly the way the theme reads it. */
+    const prefsResolveSection = (section) => {
+      const out = Object.assign({}, PREFS_FIELD_DEFAULTS)
+      if (section === null || typeof section !== 'object') return out
+      for (const field of Object.keys(PREFS_FIELD_DEFAULTS)) {
+        if (Object.prototype.hasOwnProperty.call(section, field)) out[field] = String(section[field])
+      }
+      return out
+    }
+    /* Sections written by the BUILD THAT SHIPPED THE FIELD-NAME BUG still carry
+       the pre-migration spelling of a compound field ('contourAnim' written as
+       'contour-anim'), because that write landed on an undeclared key the schema
+       passes through instead of storing it into the declared field. Without this
+       pass the user's stored choice is ignored and the field default silently
+       wins — for them the switch would look like it reset again after the fix.
+       Returns the [field, value] pairs whose recorded legacy value is the one to
+       honour, i.e. the edits that need re-committing onto the declared field.
+
+       WHEN IS THE DECLARED FIELD THE USER'S OWN VALUE? This is the whole
+       question, because a fetched section ALWAYS carries every declared field:
+       the schema merges its defaults into the stored section, so
+       `hasOwnProperty` cannot tell a user-set value from an implied default.
+       And in practice only ONE signal can: a value that differs from the shipped
+       default. A declared field sitting at its default is indistinguishable from
+       an untouched one — the section is the merged view, so nothing survives in
+       it to say whether the document stored that default or the schema inserted
+       it. Therefore:
+
+         declared absent or === default  -> nothing recorded a choice for this
+                                            field, so the stray legacy key is the
+                                            only trace of one: honour it.
+         declared set to anything else    -> a correctly-writing build stored it,
+                                            so it wins and the stray key is
+                                            ignored. (Never let the pre-migration
+                                            spelling overwrite a real edit.)
+
+       That makes the migration idempotent in the good direction: after the value
+       is re-committed, the declared field is non-default and the stray key can
+       never win again. */
+    const prefsLegacyFields = (section) => {
+      const out = []
+      if (section === null || typeof section !== 'object') return out
+      for (const field of Object.keys(PREFS_FIELD_TO_LEGACY_KEY)) {
+        const legacy = PREFS_FIELD_TO_LEGACY_KEY[field]
+        if (!Object.prototype.hasOwnProperty.call(section, legacy)) continue
+        const value = section[legacy]
+        if (value === undefined || value === null || String(value) === '') continue
+        const declared = Object.prototype.hasOwnProperty.call(section, field) ? String(section[field]) : undefined
+        if (declared !== undefined && declared !== PREFS_FIELD_DEFAULTS[field]) continue
+        out.push([field, String(value)])
+      }
+      return out
+    }
+    /* Re-commit a legacy-spelled value onto the declared field, once. Writes go
+       through prefsSet, i.e. through the same durable gate as a user toggle: on a
+       served scope it lands on the schema field immediately, on one that is not
+       served yet it is held and replayed (and mirrored locally, so the theme
+       behaves correctly meanwhile). The stale key itself is left in the document
+       — the theme no longer declares or reads it, and rewriting a section it does
+       not own would be a bigger hammer than the bug deserves. */
+    const prefsMigrated = new Set()
+    // The section object this pass has already run against. A section is a fresh
+    // object on every transport update, so identity is what says "this document
+    // has not been examined yet" — and it keeps the pass from re-running against
+    // its own writes within the same snapshot.
+    let prefsMigratedFor = null
+    const prefsMigrateLegacy = (section) => {
+      if (section === null || typeof section !== 'object') return
+      if (section === prefsMigratedFor) return
+      prefsMigratedFor = section
+      for (const [field, value] of prefsLegacyFields(section)) {
+        if (prefsMigrated.has(field)) continue
+        prefsMigrated.add(field)
+        dbg('migrating legacy-spelled field', PREFS_FIELD_TO_LEGACY_KEY[field], '->', field, '=', value)
+        prefsSet(field, value)
+      }
     }
     /* Repeatedly try to obtain the settingsScope binder until it (and its mirror)
        are actually available. DSH web mounts plugin rows concurrently, so the
@@ -351,18 +513,7 @@ function apply(ctx) {
       }
       let scope = null
       try {
-        scope = binder.bind({ namespace: PREFS_NS, decode: (section) => {
-          // Section arrives already schema-validated by the shared mirror: it
-          // carries the merged defaults + base + stored user values, typed to our
-          // schema (all fields are strings). Fall back to schema defaults for a
-          // field the mirror has not resolved yet.
-          if (section === null || typeof section !== 'object') return Object.assign({}, PREFS_FIELD_DEFAULTS)
-          const out = Object.assign({}, PREFS_FIELD_DEFAULTS)
-          for (const k of Object.keys(PREFS_FIELD_DEFAULTS)) {
-            if (Object.prototype.hasOwnProperty.call(section, k)) out[k] = String(section[k])
-          }
-          return out
-        } })
+        scope = binder.bind({ namespace: PREFS_NS, decode: prefsResolveSection })
       } catch (e) {
         scope = null
         dbg('bind threw', e && e.message)
@@ -388,6 +539,12 @@ function apply(ctx) {
             // fields the moment the namespace is durably served. prefsReplayDirty
             // is a no-op when nothing is held or the scope is not yet served.
             prefsReplayDirty()
+            // The FIRST served section is also the first chance to see a document
+            // the buggy build wrote (before that there is nothing to read), so the
+            // legacy repair runs here too — and again on any later section that
+            // has not been examined yet. Whatever it queues is replayed below.
+            prefsMigrateLegacy(snap.value)
+            prefsReplayDirty()
             prefsEmit()
           }
         })
@@ -395,6 +552,10 @@ function apply(ctx) {
       // Catch up: an edit made before the scope settled must still persist. Replay
       // only genuinely user-changed fields (those prefsSet recorded as dirty) that
       // now differ from a freshly-fetched, durably-served host section.
+      prefsReplayDirty()
+      // Then repair a section the buggy build wrote with the pre-migration field
+      // spelling, and re-run the catch-up for whatever that migration queued.
+      prefsMigrateLegacy(initial && initial.value)
       prefsReplayDirty()
     }
     // Kick off the (re)trying binder acquisition.
@@ -571,7 +732,12 @@ function apply(ctx) {
       s.color = 'var(--dsw-alias-label-primary)'
       s.textTransform = 'uppercase'
       s.userSelect = 'none'
-      s.fontFamily = 'var(--dsw-font-family)'
+      /* The theme's own face, via its own variable. It used to read
+         --dsw-font-family directly, which now points at the APP's stack (the
+         theme no longer overrides that token) — so reading it here would silently
+         un-style the wordmark. --edge-font is body-scoped and falls back to the
+         same stack, so this element is themed with or without the token. */
+      s.fontFamily = 'var(--edge-font)'
       /* Strength comes from a CSS variable, never a literal number, so the two
          colour schemes can carry DIFFERENT alphas (defined in the stylesheet) and
          a scheme flip simply re-resolves the variable — no observer, no repaint
@@ -2508,10 +2674,43 @@ function apply(ctx) {
     })
 
     disposeStyles = insertCss(`
-      :root {
-        --dsw-font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
-        --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
-      }
+      /* ================= typography: SCOPED to the theme's own elements =====
+         The theme used to redeclare the app's two font TOKENS at :root:
+             --dsw-font-family: Arial, ...      -> dropped, see below
+             --ds-font-family-code: <mono list> -> dropped (see the note under it)
+         and that is what broke third-party widgets.
+
+         WHY IT BROKE THEM. The app declares --dsw-font-family at :root and then
+         renders the UI root font from it — dsh-web-frontend ships exactly
+         'body{font-family:var(--dsw-font-family, <system stack>)}'. A :root
+         declaration WINS over the app's own :root one, so the entire UI root
+         font became Arial; a widget injected into the app root (DeepSeek-
+         Balance-Whale-Widget and friends) carries 'font-family:inherit' and
+         therefore inherited Arial, losing its own face for its balance digits.
+         The root font token is a SHARED PUBLIC INTERFACE of the app, not a
+         theme-private knob: overriding it silently restyles every third-party
+         component on the page, so this theme no longer touches either token.
+
+         WHAT KEEPS THE LOOK. The theme's industrial editorial face lives in
+         --edge-font, declared on body and applied ONLY to elements this theme
+         owns: the boot plate, the watermark wordmark, and the settings panel.
+         --dsw-font-family is still READ on those elements, as the trailing
+         fallback of that stack, so nothing outside the theme is ever affected
+         while the app's own font configuration stays part of the protocol. The
+         ORDER of that stack matters and is documented where it is declared —
+         flipping it re-types the boot plate.
+
+         The code token went for the same reason. It is nearly identical to the
+         app's own list (only the final fallbacks differ: Liberation Mono, Menlo,
+         Courier, PingFang SC, Microsoft YaHei here vs Helvetica, Arial,
+         sans-serif in the app), so dropping the override is visually inert on
+         every code surface the theme does not own.
+
+         NO GLOBAL TEXT PROPERTIES EITHER. There is deliberately no 'body { ... }'
+         rule setting font-family / font-feature-settings / font-variant-*: all
+         three inherit, so all three leak into injected third-party nodes exactly
+         the way the token did. openType features belong on the specific elements
+         that measure with them instead (see the loader's own tabular figures). */
       /* ================= accent palette =================================
          Every accent value in this stylesheet reads from the variables below
          instead of a literal, so the whole theme repaints from ONE declaration
@@ -2641,8 +2840,59 @@ function apply(ctx) {
         --edge-panel: var(--dsw-alias-bg-layer-1);
         --edge-line: var(--dsw-alias-border-l1);
         --edge-soft: var(--dsw-alias-bg-layer-2);
+        /* The theme's own face. THREE things are deliberate here.
+
+           (1) THE THEME STACK LEADS, with --dsw-font-family as a trailing
+               fallback — and this ORDER was measured, not guessed. On this host
+               the app's token renders in Segoe UI while the theme's stack renders
+               Arial (same string, 81.688px vs 84.516px — measured by
+               test/font-scope.test.js), so reading the token FIRST would silently
+               repaint the boot plate, the watermark and the settings panel in a
+               different face and invalidate every Arial-based proportion the
+               loader was measured with (see the pixel-scan notes on the brand
+               block). Leading with the theme stack keeps those surfaces exactly
+               as they render today, which is what this fix has to promise: the
+               request is to stop RESTYLING THE WHOLE APP, not to re-type the
+               theme.
+           (2) THE TOKEN IS STILL HONOURED, which is the protocol half of the
+               requirement: it is read, not ignored, and it is what applies on a
+               host with no Arial/Narrow/PingFang/YaHei at all — so a system
+               carrying neither the theme stack nor a configured root font still
+               lands on the app's stack instead of an arbitrary generic. A user
+               who deliberately configures a root font family therefore still
+               reaches the theme's own elements. If a future author wants the
+               world's configuration to win OUTRIGHT over the theme face, swapping
+               the two halves of this declaration is the whole change — say so in
+               the commit, because it re-types the boot plate.
+           (3) IT IS DECLARED ON body, NOT :root, for the same reason the aliases
+               above are — see the app-token note higher up. The var() fallback is
+               not decoration either: a custom property that substitutes a token
+               missing at the element it is READ from computes to nothing, the
+               trap that already shipped once with --edge-line
+               (test/probe-edge-line.js). Resolving where the value is used cannot
+               hit it. */
+        --edge-font: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif, var(--dsw-font-family);
       }
-      body {
+      /* ---------- where the theme's face is applied, and where it is NOT ----------
+         Only elements this theme created or owns. Every one of the three is a
+         node the theme injected itself, so a third-party widget can never be an
+         ancestor or a descendant of one of them — unless it attaches INSIDE the
+         boot plate or the watermark, which it does not: those layers are
+         pointer-events:none, aria-hidden chrome.
+           [data-endfield-loader]  the boot plate      (also carries the feature
+                                                       settings the layout measures:
+                                                       tabular figures + the
+                                                       altered single-storey
+                                                       glyph)
+           [data-endfield-watermark] the ENDFIELD wordmark
+           .endfield-settings      the 「终末地主题设置」 panel root
+         Deliberately NOT on body: the app renders its UI root font from
+         var(--dsw-font-family) on body, and a body font-family here would
+         re-break every installed widget exactly as the old :root override did. */
+      [data-endfield-loader],
+      [data-endfield-watermark],
+      .endfield-settings {
+        font-family: var(--edge-font);
         font-feature-settings: "tnum" 1, "ss01" 1;
         font-variant-ligatures: no-common-ligatures;
       }
@@ -3487,10 +3737,13 @@ function apply(ctx) {
         inset: 0;
         z-index: 2147483000;
         background: #101110;
-        /* Not inherited from the app: the plate can paint before tokens resolve. */
+        /* Not inherited from the app: the plate can paint before tokens resolve,
+           and since the theme stopped overriding the root font token it must not
+           depend on inheritance for its face either. Both the family and the
+           openType features are declared here rather than globally. */
         color: #f5f5f0;
-        font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
-        font-feature-settings: "tnum" 1;
+        font-family: var(--edge-font);
+        font-feature-settings: "tnum" 1, "ss01" 1;
         overflow: hidden;
         /* Never trap the user: even mid-animation the app underneath stays usable. */
         pointer-events: none;
@@ -3788,6 +4041,17 @@ function apply(ctx) {
       /* Reduced motion is handled in finish(), which skips the sweep/fade entirely
          and removes the plate outright; nothing here needs to disable a transition,
          since the plate no longer declares one. */
+      /* Settings page root (the settings.section slot's own wrapper div, the one
+         element of that panel this theme gets to name). Declaring the theme face
+         here means every row, hint and button inside it inherits it BY
+         CONSTRUCTION, without touching the app's root font token. The class is
+         stable and additive, so it is safe to target. It also carries no colours:
+         the panel keeps taking its ink and surfaces from app tokens, which is
+         what keeps it readable on both schemes and with the theme switched off
+         (see test/settings-off.test.js). */
+      .endfield-settings {
+        font-family: var(--edge-font);
+      }
       /* Settings page group headers (rendered by the settings.section slot).
          The label is accent ink that stays AA on both surfaces: light mode uses
          the darkened accent stops (--edge-status-light: #6b5d00 / #006a6a),
@@ -4430,7 +4694,7 @@ function apply(ctx) {
           /** "<row label>: <on|off>" — one spelling for every status row. */
           const stateOf = (on) => t(on ? 'on' : 'off')
           const row = (key, last, children) => R.createElement('div', { key, style: last ? { ...rowStyle, borderBottom: 'none' } : rowStyle }, children)
-          return R.createElement('div', { style: pageStyle }, [
+          return R.createElement('div', { className: 'endfield-settings', style: pageStyle }, [
             /* --- 01 主题：总开关在最前，随后是配色与圆角 --- */
             R.createElement('div', { key: 'group-theme' }, [
               groupTitle('01', 'groupTheme', true),

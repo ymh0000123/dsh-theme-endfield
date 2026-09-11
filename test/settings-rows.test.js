@@ -294,7 +294,7 @@ else {
 
 /* --- turn the layer on and re-render: the sub-switch must become usable --- */
 prefStore.setField('contour', '1')
-  prefStore.setField('contourFps', '120')
+prefStore.setField('contourFps', '120')
 let tree2
 try { tree2 = rendered() } catch (e) { fail('re-render threw: ' + e.message); process.exit(1) }
 const buttons2 = walk(tree2).filter((n) => n.type === 'button')
@@ -309,7 +309,7 @@ else fail('120 FPS should be enabled once the contour layer is on')
 if (fps120 && typeof fps120.props.onClick === 'function') {
   try { fps120.props.onClick() } catch (e) { fail('120 FPS toggle threw: ' + e.message) }
   if (prefStore.get('contourFps') === '120') pass('120 FPS toggle writes dsh-theme-endfield.contourFps=120')
-  else fail('120 FPS toggle did not write contour-fps=120')
+  else fail('120 FPS toggle did not write contourFps=120')
 } else fail('120 FPS button has no onClick handler')
 const speedRow2 = walk(tree2).find((n) => n.type === 'div' && n.props && n.props.key === 'contour-speed')
 const speedButtons2 = speedRow2 ? walk(speedRow2).filter((b) => b.type === 'button') : []
@@ -319,7 +319,7 @@ else fail('动态速度 should be enabled once the contour layer is on')
 if (fastSpeed && typeof fastSpeed.props.onClick === 'function') {
   try { fastSpeed.props.onClick() } catch (e) { fail('快速速度 toggle threw: ' + e.message) }
   if (prefStore.get('contourSpeed') === '4') pass('快速速度 toggle writes dsh-theme-endfield.contourSpeed=4')
-  else fail('快速速度 toggle did not write contour-speed=4')
+  else fail('快速速度 toggle did not write contourSpeed=4')
 } else fail('快速速度 button has no onClick handler')
 const scrollPauseRow2 = walk(tree2).find((n) => n.type === 'div' && n.props && n.props.key === 'contour-scroll-pause')
 const scrollPauseBtn2 = scrollPauseRow2 ? walk(scrollPauseRow2).find((b) => b.type === 'button') : null
@@ -328,7 +328,7 @@ else fail('滚动窗口动画暂停 should be enabled once the contour layer is 
 if (scrollPauseBtn2 && typeof scrollPauseBtn2.props.onClick === 'function') {
   try { scrollPauseBtn2.props.onClick() } catch (e) { fail('滚动窗口动画暂停 toggle threw: ' + e.message) }
   if (prefStore.get('contourScrollPause') === '0') pass('滚动窗口动画暂停 toggle writes contourScrollPause=0')
-  else fail('滚动窗口动画暂停 toggle did not write contour-scroll-pause=0')
+  else fail('滚动窗口动画暂停 toggle did not write contourScrollPause=0')
 } else fail('滚动窗口动画暂停 button has no onClick handler')
 
 /* --- 雷霆大字 on: 预览 becomes usable and the row states the live behaviour --- */
@@ -362,7 +362,7 @@ if (animOnBtn && typeof animOnBtn.props.onClick === 'function') {
 } else fail('大字入场动画 toggle has no onClick handler')
 
 /* With the animation stored ON, the row must render the reverse affordance. */
- prefStore.setField('thunderAnim', '1')
+prefStore.setField('thunderAnim', '1')
 let treeTA
 try { treeTA = rendered() } catch (e) { fail('re-render (thunder anim on) threw: ' + e.message); process.exit(1) }
 const textTA = textOf(treeTA)
@@ -370,7 +370,7 @@ if (textTA.includes('大字入场动画：开启')) pass('thunderAnim=1 时入�
 else fail('with thunderAnim stored 1 the 大字入场动画 row should read 开启')
 if (/关闭动画/.test(textTA)) pass('开启后按钮提供「关闭动画」')
 else fail('with the animation on the row should offer 关闭动画')
- prefStore.setField('thunderAnim', '0')
+prefStore.setField('thunderAnim', '0')
 prefStore.setField('thunder', '0')
 
 /* --- with 武陵青 stored, the row must render the reverse affordance --- */

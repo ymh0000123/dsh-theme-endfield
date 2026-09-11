@@ -28,6 +28,7 @@ npm test           # 上面两项 + 配色 / 设置页 / 渲染 / 覆盖率 / �
 | 10 个调色板变量全部有定义 | 缺任一变量都不会优雅降级：读它的每条声明都会被丢弃 |
 | `body.theme-endfield-wuling` 块存在 | 缺这个块则切换按钮点了没反应 |
 | 没有任何 `--edge-*` 变量在 `:root` 里引用 `--dsw-*` 令牌 | 结构化检查，守 [:root 陷阱](engineering-notes.md#变量必须声明在-body-而不是-root) |
+| 样式表里没有 `--dsw-font-family:` / `--ds-font-family-code:` 声明 | 这两个令牌是**应用的公共接口**（应用用它渲染 UI 根字体），主题声明它就会连第三方挂件的字体一起改掉，见[字体令牌](engineering-notes.md#字体令牌是应用的公共接口不是主题的开关) |
 | `client.js` 能编译 | 用 `vm.Script` 在进程内解析、不执行 |
 | 回合状态标签仍通过 `background-image` 改色 | 写成 `color:` 对渐变文字无效，属于「改了但没生效」的静默失败 |
 
@@ -64,6 +65,7 @@ node test/verify-shots.js            # 解码四张截图统计强调色像素
 ```bash
 node test/settings-rows.test.js     # 设置面板真实渲染 + 开关联动
 node test/settings-durable-hold.test.js  # 命名空间未就绪时的写入 gate + 补写
+node test/settings-namespace.test.js # 存储字段名对齐 schema + 旧拼写迁移 + 三条读/写边界
 node test/settings-off.test.js      # 关闭主题后设置页仍可读
 node test/settings-locale.test.js   # 跟随语言设置（zh/en 词典对齐 + 切换生效）
 ```
@@ -73,6 +75,14 @@ node test/settings-locale.test.js   # 跟随语言设置（zh/en 词典对齐 + 
 > 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置命名空间**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 `ctx.settingsScope` 绑定器——它在内存里扮演 `<settings.yaml>` 中的命名字段节。断言 10 行齐全且归入 4 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐）与配色样式规则都在、配色行默认显示谷地黄且按钮提供「切换武陵青」、点击把 `palette` 写成 `wuling`、存了 `wuling` 时反向提供「切换谷地黄」并标注 `#14d0d0`、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
 
 **`settings-durable-hold.test.js`** 用**两阶段假 `ctx.settingsScope`** 复现那条真实告警：宿主半部 `ctx.settings.register(...)` 尚未跑、命名空间还没进 Host 的 served 列表前，scope 快照是 `{ status:'unavailable', writable:true, mode:'host' }`——单看 `writable` 会照写不误却落不到盘。它先在未就绪态切「圆角 / 武陵青」，断言**没有任何 `scope.set` 出线**（旧 bug 会打 `commit … status= unavailable` 并静默丢脏）；随后模拟文档 committed、命名空间进入 served 列表、快照翻为 `status:'ready'`，断言订阅路径把两份 held 编辑**自动补写**进 `settings.yaml`，且不会重复写两遍（replay 有 re-entrancy 护栏）。
+
+**`settings-namespace.test.js`** 守的是 issue #15：**存进命名空间的字段名必须与 Host schema 一致**。它不信任任何一侧的字面量，而是三份交叉验证——从 `client.js` 源码里读出的 `PREFS_KEY_TO_FIELD`、Host `index.js` 的 `FIELD_DEFAULTS`、以及设置面板**真实渲染出来的**每个开关（点击后断言出线的字段名是声明字段，且没有任何未声明字段的写入）。六条复合字段（`contourAnim` / `contourFps` / `contourSpeed` / `contourScrollPause` / `watermarkPersist` / `thunderAnim`）逐条覆盖——**只测单字段的用例抓不到这个 bug**，因为它们新旧写法恰好同名。
+
+随后用它复现线上存档的形状（声明字段在默认值旁多出一行旧拼写键），断言这些值被搬回声明字段、且**不会**凭空给没记录过的字段写值；再断言反过来的一条：用户真的在声明字段上设过非默认值时，旧拼写的键**不得**覆盖它。
+
+最后两条是同 issue 里的另两个发现：写入后面板必须**立刻**读到新值（不依赖宿主回相），以及命名空间未就绪时「改回默认值」的编辑不能因为「本地值等于默认」就被丢掉。
+
+> 变异验证 7 类，全部必须报错：把 `prefsFieldOf` 改回按前缀推导（原始 bug）、表里某条映射到相邻的错字段、删掉迁移、让迁移覆盖用户设过的值、`prefsSet` 不再叠加本地值（旧读序）、脏标记在「等于宿主值」时直接清、脏标记在「等于默认值」时直接清。
 
 **`settings-off.test.js`** 守的是设置页自己最脆弱的时刻：**开关按钮的强调色底来自主题样式表，而样式表随主题关闭被移除**。它在真实浏览器里加载真实 `client.js`，以应用**自己的默认令牌**（亮 / 暗两套）把主题关掉，用 `slots` 桩抓出真实元素树并物化成 DOM，然后断言每个按钮的合成对比度 ≥ 4.5。
 
@@ -140,6 +150,24 @@ node test/shoot.js                    # 输出亮/暗 × 两配色共四张截�
 **`contour-perf.test.js`** 不走 `requestAnimationFrame`——headless 会挂起 / 合并 rAF，只能采到 n=1，而没有分布支撑的数字不算测量。它按函数名把算法源码从 `client.js` 里原样切出后在紧循环里计时，并丢弃前两次采样（冷启动含 JIT 预热）。
 
 实测稳态：p95 8.6ms / 41.7ms 预算，约 81% 余量。
+
+---
+
+## 字体作用域
+
+```bash
+node test/font-scope.test.js   # 第三方挂件字体 + 主题自有表面字体，同一页一次跑完
+```
+
+主题曾经在自己的样式表里声明应用的 UI 根字体令牌（`--dsw-font-family`），连带把 `font-feature-settings` / `font-variant-ligatures` 挂在 `body` 上。三项都会**继承**进注入到应用根节点的第三方挂件——挂件写着 `font-family:inherit`，于是它的余额数字被换成主题的 Arial。详见[字体令牌是应用的公共接口](engineering-notes.md#字体令牌是应用的公共接口不是主题的开关)。
+
+这个脚本把**三类节点放在同一页**：应用自己的 `:root` 字体令牌声明（照抄安装态 bundle）、一个注入应用根节点的 `font-family:inherit` 挂件、以及主题的全部自有表面（启动加载屏、水印字标；设置面板根由源码断言其带 `.endfield-settings` 类并有对应规则）。断言：
+
+- 根令牌与 `body` 解析值**与应用声明逐字相同**（`--dsw-font-family` / `--ds-font-family-code` 都没被改写）；
+- 挂件与其数字拿回**应用字体栈**，且 `font-feature-settings` / `font-variant-ligatures` 为 `normal`；
+- 加载屏与水印**仍在主题字体**（Arial）上，并各自带着 `tnum` + `ss01`（这两条属性已从 `body` 下移到元素自身，必须跟进）。
+
+> 变异验证：把旧的 `:root { --dsw-font-family: Arial… }` 注回去，本脚本报「挂件字体被主题偷走」（4 条红），`check.js` 同时报「令牌被主题声明」，`selftest.js` 也有一条对应注入用例。
 
 ---
 

@@ -82,7 +82,7 @@ window.__RESULTS__=[]
    page seeds a fake binder exactly like the old localStorage lines did, and the
    master/contour/palette field naming carries the same polarity. */
 ${BROWSER_SETTINGS_SCOPE_SNIPPET}
-var __prefs = __endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', 'contour-anim':'0' });
+var __prefs = __endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', contourAnim:'0' });
 const R=(name,pass,detail)=>window.__RESULTS__.push({name,pass:!!pass,detail:detail===undefined?'':String(detail)})
 
 /* Apply theme tokens exactly as @deepseek-ai/dsh-client-ui-layout does: inline on

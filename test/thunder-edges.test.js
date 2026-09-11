@@ -348,7 +348,7 @@ if (plates()[0].hasAttribute('data-endfield-thunder-still')) pass('系统「减�
 else fail('reduced motion must force the still path even with the animation switch on')
 sandbox.window.matchMedia = realMatchMedia
 advance(3000)
-prefStore.setField('thunder-anim', '0')
+prefStore.setField('thunderAnim', '0')
 
 /* --- 6. the other edge: false -> true announces 任务开始 --- */
 sessionA.set({ running: true })

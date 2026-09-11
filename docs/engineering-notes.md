@@ -9,6 +9,7 @@
 ## 目录
 
 - [变量必须声明在 body 而不是 :root](#变量必须声明在-body-而不是-root)
+- [字体令牌是应用的公共接口，不是主题的开关](#字体令牌是应用的公共接口不是主题的开关)
 - [样式表是一整个模板字符串](#样式表是一整个模板字符串)
 - [层叠与挂载点](#层叠与挂载点)
 - [等高线背景](#等高线背景)
@@ -44,6 +45,55 @@
 
 防御性：若 ctx 里根本没有 `settingsScope` 服务（纯独立页/测试桩），则回落内存默认值 + 会话内本地覆盖，写不过盘但**不引入 localStorage**，也绝不 throw。
 
+### 存储字段名必须来自 schema，不能用「去掉前缀」推出来（issue #15）
+
+**曾经的写法（错误）**：客户端要往命名空间里写一个字段时，把 UI 键的前缀切掉当作字段名：
+
+```js
+const field = PREFS_KEY_TO_FIELD[rawKey] || rawKey.slice(PREFS_NS.length + 1)
+// 'dsh-theme-endfield-thunder-anim' -> 'thunder-anim'
+```
+
+而 Host 端的 schema（`index.js` 的 `FIELD_DEFAULTS`）声明的是 **camelCase**：`thunderAnim`。**只有单个词的字段两者才碰巧相同**，一切复合字段都不同：
+
+| UI 键（客户端） | 客户端推出的字段 | schema 声明的字段 |
+| --- | --- | --- |
+| `dsh-theme-endfield-thunder-anim` | `thunder-anim` ✗ | `thunderAnim` |
+| `dsh-theme-endfield-contour-anim` | `contour-anim` ✗ | `contourAnim` |
+| `dsh-theme-endfield-contour-fps` | `contour-fps` ✗ | `contourFps` |
+| `dsh-theme-endfield-contour-speed` | `contour-speed` ✗ | `contourSpeed` |
+| `dsh-theme-endfield-contour-scroll-pause` | `contour-scroll-pause` ✗ | `contourScrollPause` |
+| `dsh-theme-endfield-watermark-persist` | `watermark-persist` ✗ | `watermarkPersist` |
+
+**为什么表现是「开关刷新后复位」，而且是静默的。** schemastery 只校验它声明过的字段，**多出来的键原样带过去**。所以这一写并不是「没写进去」：`settings.yaml` 里真的多了一行 `thunder-anim: "1"`，而 `thunderAnim` 仍是默认值 `'0'`。于是：
+
+- 页面内开关正常工作（`prefsLocal` 里有本会话的值）；
+- 刷新后 schema 合并出 `thunderAnim: '0'`，客户端只复制**声明字段**，那行 `thunder-anim` 谁都不读；
+- 又一次回到默认值。用户观察到的正是「打开后刷新又变回关闭」。
+
+配套的坑是**测试桩复述了同一个错误**：`test/fixtures/settings-scope.js` 当时也用 `slice` 去前缀，于是「客户端读 `contour-fps`」与「测试桩写 `contour-fps`」两边对上，全绿——而生产环境里那个名字根本没人认。**测试桩必须按生产 schema 的形状（camelCase 字段名）造数据，否则它证明的是自己跟自己的约定。**
+
+现在的写法：`PREFS_KEY_TO_FIELD` 把每个键**显式**映射到字段名，读写两侧都走 `prefsFieldOf()`，所以「读的字段」与「写的字段」不可能再是两条路径。`test/settings-namespace.test.js` 同时对着三份东西交叉验证：`client.js` 的表、Host 的 `FIELD_DEFAULTS`、以及设置面板真实渲染出来的每个开关。
+
+### 已经写坏的存档：把旧拼写里的值搬回声明字段
+
+用户的 `settings.yaml` 里已经躺着 `thunder-anim` / `contour-anim` / … 这些**未声明键**。只修字段名的话，这些值会被忽略、字段回到默认——对老用户来说还是「又复位了一次」。所以 `prefsMigrateLegacy()` 在拿到第一段 served section 时把这些值**重新提交到声明字段上**（走的是 prefsSet，所以未就绪时照样会被 held + 补写）。判断「声明字段是不是用户自己的值」只有**一个**可靠信号：
+
+- 声明字段缺失或等于出厂默认 → 没人在这上面留下选择，旧拼写的键就是唯一的痕迹，**采纳**；
+- 声明字段是别的值 → 那是会正确写盘的版本存下来的，**让位**，旧键不得覆盖它。
+
+不能用 `hasOwnProperty` 判断：拿到的 section 是 schema **已经合并默认值**之后的视图，每个声明字段都在，分不出「存过这个默认值」和「schema 补的默认值」。
+
+`test/settings-namespace.test.js` 覆盖了这三种情形，并对四类改坏方式做过反向对照（见 [testing.md](testing.md)）。
+
+### 读路径：本会话的编辑排在已取回的 section 之上
+
+`prefsGetValue()` 曾经**优先**返回已取回的 section（`prefsFieldValue`），而 `prefsSet()` 只写 `prefsLocal`。宿主回相是异步的，所以「点一下开关，面板显示新状态、主题却还是旧状态」在回相到达前是真实存在的。现在只把 `prefsLocalEdited`（本会话真正被用户改过的字段）叠加在最上层：其余字段仍然以宿主为准，不会把服务端刚给的值盖掉。
+
+### 脏标记只能由「写成功」或「宿主已有该值」清除
+
+`prefsReplayDirty()` 曾在本地值**等于出厂默认**时就直接清掉脏标记。若宿主仍存着非默认值，用户「改回默认」这一操作就永远不会落盘，下次刷新旧的（非默认）值又回来了。同步地，本地值等于**宿主当前值**也不能直接清：宿主视图可能还是旧的，而用户刚刚把它改成同一个值——那也是一次真实编辑。现在只有两种情况清标记：写出去了，或者宿主取回的 section 确实已经持有该值。
+
 ## 变量必须声明在 body 而不是 :root
 
 **应用把主题令牌写成 `<body>` 的行内样式**（`dsh-client-ui-layout` 对每个令牌调用 `body.style.setProperty`）。
@@ -61,6 +111,37 @@
 这曾经是一个真实缺陷：`scrollbar-color: var(--edge-line) transparent` 里的变量为空，整条声明被丢弃，主题滚动条一直没生效（实测 `scrollbar-color` 计算为 `auto`）。现已全部移到 `body`，并由 `check.js` 做**结构化检查**（遍历每个 `:root` 块，查找引用 `--dsw-*` 的 `--edge-*` 声明）。
 
 推论二：**令牌值自身可以是 `var()` 引用**。主题把 `--dsw-alias-brand-primary` 的暗色值声明为 `var(--edge-accent)`，而调色板变量也在 `body` 上，所以引用在同一元素解析，并随 class 翻转自动重解析——这是「换配色不需要重新注册令牌层」的全部原因。
+
+---
+
+## 字体令牌是应用的公共接口，不是主题的开关
+
+**曾经的写法（错误）**：主题在自己的样式表顶部声明
+
+```css
+:root {
+  --dsw-font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-font-family-code: 'SF Mono', …;
+}
+```
+
+**为什么错**：`--dsw-font-family` 不是主题私有变量，而是**应用的 UI 根字体令牌**——`dsh-web-frontend` 里就是这一条：
+
+```css
+body{font-family:var( --dsw-font-family, -apple-system, … )}
+```
+
+而应用把该令牌声明在 `:root`。主题再声明一次就是在**同一个元素上后写覆盖**，于是整个界面根字体变成 Arial。任何注入到应用根节点、写着 `font-family:inherit` 的第三方挂件（如 DeepSeek-Balance-Whale-Widget）都会**继承**这个字体，余额数字原有的字形随之丢失。实测（本机真实浏览器）：挂件计算字体是主题的 Arial，而应用自己的字体栈已经消失。
+
+同类漏出还有挂在 `body` 上的全局文本属性：`font-feature-settings:"tnum" 1,"ss01" 1` 与 `font-variant-ligatures:no-common-ligatures` 同样会被挂件继承。
+
+**现在怎么做**：
+
+1. 两个字体令牌**一个都不再声明**（连 `--ds-font-family-code` 也去掉：它与应用的列表几乎一致，覆盖它对非主题自有元素是视觉惰性的）。`check.js` 新增结构检查——样式表里只要出现 `--dsw-font-family:` / `--ds-font-family-code:` 就判失败，`selftest.js` 有一个注入用例证明这条检查真的会红。
+2. 主题自己的字体族抽成 `--edge-font`，声明在 `body` 上（原因同上：引用令牌的自定义属性不能在 `:root`），**只施加在主题自己创建/拥有的节点**上：启动加载屏 `[data-endfield-loader]`、水印字标 `[data-endfield-watermark]`、设置面板根 `.endfield-settings`。三者都是主题自己注入的节点，第三方挂件既不会是它们的祖先也不会是后代。
+3. **主题字体栈在前，`--dsw-font-family` 作为末尾兜底**。这个顺序是量出来的，不是猜的：本机同一串文字在应用令牌下渲染 **Segoe UI**（81.688px），在主题字体栈下渲染 **Arial**（84.516px）。若把令牌放在前面，加载屏、水印、设置面板会全部换脸，品牌块那套按 Arial 量出来的比例（见「启动加载屏」）随之失效。放在末尾既保住主题自有表面的现有观感，又保留「应用侧配置了根字体仍能到达主题元素」的协议含义；宿主没有 Arial / Narrow / PingFang / YaHei 时也仍然落在应用字体栈上，而不是某个任意 generic。
+4. 加载屏与水印的 `tnum` / `ss01` **跟着字体一起下移到元素自身**（不能再挂 `body`），否则挂件会被继承，加载屏也会失去它排版时依赖的等宽数字与变体字形。
+5. 回归测试 `test/font-scope.test.js`：在同一页里同时放一个 `font-family:inherit` 的第三方挂件与主题的全部自有表面，断言挂件拿回应用字体、`font-feature-settings` / `font-variant-ligatures` 为默认值，而加载屏与水印仍在主题字体（Arial）上且各自带着 `tnum` + `ss01`。把旧写法注回去，这条测试与 `check.js` 会同时变红。
 
 ---
 

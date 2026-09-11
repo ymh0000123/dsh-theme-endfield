@@ -209,6 +209,33 @@ if (openIdx < 0) {
       fail('no body.theme-endfield-wuling block — the palette switch would do nothing')
     }
 
+    /* --- 7. the app's font TOKENS must not be redeclared anywhere ---
+       Regression guard for a real shipped bug. The theme used to carry
+           :root { --dsw-font-family: Arial, ...; --ds-font-family-code: ... }
+       and that is not a theme-private knob: dsh-web-frontend renders the UI root
+       font from it (`body{font-family:var(--dsw-font-family, <system stack>)}`),
+       so the override restyled EVERY third-party widget injected into the app
+       root. Anything with `font-family:inherit` — e.g. DeepSeek-Balance-Whale-
+       Widget — inherited Arial and lost its own face for its balance digits.
+
+       The check is deliberately a plain "these two names may not be declared at
+       all", not a structural :root walk: the damage is caused by the DECLARATION,
+       and a future edit could equally reinstate it on body or inside a media
+       query. Reading them as fallbacks (`var(--dsw-font-family, <theme stack>)`)
+       is the supported form and stays clean, because only `name:` is matched. */
+    const ownedByApp = ['--dsw-font-family', '--ds-font-family-code']
+    const redeclared = ownedByApp.filter((v) =>
+      new RegExp('(^|[;{\\s])' + v + '\\s*:', 'm').test(stripped))
+    if (redeclared.length === 0) {
+      pass('the app font tokens (--dsw-font-family / --ds-font-family-code) are never redeclared')
+    } else {
+      fail(`the app font token(s) ${redeclared.join(', ')} are DECLARED by the theme\n      `
+        + `-> the app renders the UI root font from --dsw-font-family, so this restyles `
+        + `every third-party widget that inherits it (and --ds-font-family-code every code `
+        + `surface). Use the theme's own --edge-font on the theme's own elements instead; `
+        + `see the typography note at the top of the stylesheet.`)
+    }
+
     /* Any --edge-* variable that substitutes a --dsw-* token must NOT be declared
        inside a :root block. Checked structurally: walk each top-level rule and look
        at :root blocks only. */

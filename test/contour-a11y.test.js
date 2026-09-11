@@ -46,7 +46,7 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
    fake binder: theme on, contour + its animation switch ON (reduced-motion must
    still win over the latter), loader off. */
 ${BROWSER_SETTINGS_SCOPE_SNIPPET}
-var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', 'contour-anim':'1' })
+var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', contour:'1', contourAnim:'1' })
 const out=[]
 const R=(n,p,d)=>out.push({name:n,pass:!!p,detail:d===undefined?'':String(d)})
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms))

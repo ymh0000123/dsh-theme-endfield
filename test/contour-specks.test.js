@@ -73,7 +73,7 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   /* Theme favours via settingsScope seam (not localStorage): contour ON, no
      motion, watermark/loader off, theme on. */
   ${BROWSER_SETTINGS_SCOPE_SNIPPET}
-  var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', watermark:'0', contour:'1', 'contour-anim':'0' })
+  var __prefs=__endfieldSettingsScope({ enabled:'1', loader:'0', watermark:'0', contour:'1', contourAnim:'0' })
   /* Capture the stitched polylines as the plugin draws them. contourDrawLines()
    emits beginPath, then moveTo + bezierCurveTo (or lineTo) per path, so this
      reconstructs each path's rendered endpoints. */

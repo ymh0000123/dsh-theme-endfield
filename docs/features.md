@@ -15,6 +15,8 @@
 
 下表「字段」（缩写）就是命名空间里的存储字段，语义等价于旧 localStorage 键名的尾部。
 
+> **字段名是 camelCase，且必须与 Host schema 逐字一致**（复合字段尤其：`contourAnim` 而非 `contour-anim`）。写错会**静默**落在一个未声明键上：`settings.yaml` 里多一行没人读的值，声明字段仍是默认——表现为「开关刷新后复位」。成因、影响面与旧存档的迁移见 [engineering-notes.md § 存储字段名](engineering-notes.md#存储字段名必须来自-schema不能用去掉前缀推出来issue-15)，回归测试见 [testing.md](testing.md#设置页)。
+
 ## 总览
 
 | 组 | 开关 | 默认 | 命名空间字段 |
