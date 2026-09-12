@@ -96,14 +96,16 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
   .wSkVaW_composerStack{display:flex;flex-direction:column;gap:6px}
   .wSkVaW_composerHero{width:100%;z-index:1;align-self:center;position:relative;padding-bottom:32px}
   .pXSMma_root{display:flex;justify-content:center;align-items:center;min-width:0;padding:0 24px}
-  .pXSMma_headline{color:var(--dsw-alias-label-primary);font-size:26px;line-height:32px}
+  /* 0.1.2-rc.1 renamed the hero headline export to '*_headlineText' (the suffix the
+     theme's watermark positioning matches). */
+  .AvZvRG_headlineText{color:var(--dsw-alias-label-primary);font-size:26px;line-height:32px}
 </style></head><body><div id="root">
   <div class="pI_x6G_frame">
     <div class="pI_x6G_centerCol"><div class="wSkVaW_root" data-phase="hero">
       <div class="wSkVaW_scrollBody"><div class="wSkVaW_viewArea">
         <div class="wSkVaW_composerStack wSkVaW_composerHero">
           <div class="pXSMma_root"><div class="pXSMma_stack">
-            <div class="pXSMma_headline">探索未至之境</div>
+            <div class="AvZvRG_headlineText">探索未至之境</div>
           </div></div>
         </div>
       </div></div>

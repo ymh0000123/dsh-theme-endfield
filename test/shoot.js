@@ -70,7 +70,10 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
     background-clip:text;-webkit-background-clip:text;font-size:13px;font-weight:600}
   .x_newSession{display:block;width:100%;padding:8px 10px;margin-bottom:12px;
     font:600 12px Arial;border:1px solid var(--dsw-alias-border-l2);cursor:pointer}
-  .SVAs4q_label{display:inline-flex;align-items:center;padding:3px 10px;
+  /* Header chip label. The theme styles it via
+     [class$='_centerCol'] [class$='_header'] > [class*='_label'] (hash-free since
+     the 0.1.2-rc.1 rehash killed the pinned .SVAs4q_* names). */
+  .x_label{display:inline-flex;align-items:center;padding:3px 10px;
     font:600 11px Arial}
   table{border-collapse:collapse;width:100%;margin-top:12px;font-size:12px}
   th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--dsw-alias-border-l1)}
@@ -99,7 +102,7 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
     </div></div>
     <div class="pI_x6G_centerCol"><div class="wSkVaW_root">
       <div class="wSkVaW_header">
-        <span class="SVAs4q_label">cordis</span>
+        <span class="x_label">cordis</span>
         <span class="Md3f7G_turnStatus">Deep diving...</span>
       </div>
       <div class="wSkVaW_viewArea"><div class="col">
@@ -123,21 +126,31 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
 <script src="./client.js"></script>
 <script>
   ${dark ? "document.body.setAttribute('data-ds-dark-theme','')" : ''}
-  const LS=localStorage
-  LS.setItem('dsh-theme-endfield-enabled','1')
-  LS.setItem('dsh-theme-endfield-loader','0')
-  LS.setItem('dsh-theme-endfield-watermark','0')
-  LS.setItem('dsh-theme-endfield-contour','1')
-  LS.setItem('dsh-theme-endfield-contour-anim','1')
-  LS.setItem('dsh-theme-endfield-palette', ${wuling ? "'wuling'" : "'valley'"})
+  /* Preferences go through the settingsScope seam: the settings refactor removed
+     the localStorage store, so the LS.setItem calls this page used to make were
+     silently ignored — every shot rendered the default palette with no contour. */
+  const __prefs=(()=>{
+    const sec={enabled:'1',palette:${wuling ? "'wuling'" : "'valley'"},radius:'square',contour:'1',contourAnim:'1',contourFps:'24',contourSpeed:'2',contourScrollPause:'1',watermark:'0',watermarkPersist:'0',loader:'0',thunder:'0',thunderAnim:'0'}
+    const ls=[]
+    return { binder:{ bind:()=>({
+      getSnapshot:()=>({status:'ready',value:sec,writable:true,mode:'host'}),
+      subscribe:(l)=>{ls.push(l);return ()=>{}},
+      set:(f,v)=>{sec[f]=String(v);for(const l of ls){try{l()}catch(e){}}},
+      unset:(f)=>{}
+    })} }
+  })()
   const mod=window.__MOD__.factory(()=>null)
   /* Apply token overrides the way the app does — inline on <body> — because the
      palette-aware tokens are var() references that must resolve on that element. */
   mod.apply({
-    get:(n)=>n==='theme'?{overrideTokens:(_s,t)=>{
-      for(const [k,v] of Object.entries(t)) document.body.style.setProperty(k, v[${dark ? "'dark'" : "'light'"}])
-      return ()=>{}
-    }}:undefined,
+    get:(n)=>{
+      if(n==='theme')return{overrideTokens:(_s,t)=>{
+        for(const [k,v] of Object.entries(t)) document.body.style.setProperty(k, v[${dark ? "'dark'" : "'light'"}])
+        return ()=>{}
+      }}
+      if(n==='settingsScope')return __prefs.binder
+      return undefined
+    },
     effect:(f)=>f(),
   })
   // nudge the observer so the layer mounts

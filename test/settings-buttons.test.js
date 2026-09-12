@@ -97,8 +97,13 @@ fs.writeFileSync(page, `<!doctype html><html><head><meta charset="utf-8"><style>
   <button class="zGbnIq_dangerButton" id="danger">移除</button>
   <button class="gNWCoW_inspectButton" id="inspect">检查</button>
   <button class="gNWCoW_inspectButton HOVERPROBE" id="inspectHover">检查</button>
-  <button class="JVDQca_arrow" id="arrow">&gt;</button>
-  <button class="JVDQca_arrow HOVERPROBE" id="arrowHover">&gt;</button>
+  <!-- The attachment carousel lives inside the composer, and the theme scopes its
+       hover-ink rule to the composer wrappers ('_composerSeat'/'_composerHero') so
+       the trajectory/workspace arrows below (outside, no hover fill) stay untouched. -->
+  <div class="x_composerSeat">
+    <button class="JVDQca_arrow" id="arrow">&gt;</button>
+    <button class="JVDQca_arrow HOVERPROBE" id="arrowHover">&gt;</button>
+  </div>
   <span class="Y0dWHa_arrow" id="trajArrow">&gt;</span>
   <span class="YDXeBa_arrow" id="wsArrow">&gt;</span>
 </div>

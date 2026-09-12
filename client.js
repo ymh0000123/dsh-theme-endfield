@@ -642,9 +642,16 @@ function apply(ctx) {
     const isWatermarkOn = () => prefsGet(WATERMARK_KEY) !== '0'
     // Default OFF: the hero-only behaviour stays the shipped default.
     const isWatermarkPersistOn = () => prefsGet(WATERMARK_PERSIST_KEY) === '1'
+    /* Hash-free selectors only. DSH 0.1.2-rc.1 rebuilt its CSS modules and every
+       hex hash changed (0/33 of the old pinned hashes survive), so anything of the
+       form [class*='pXSMma_root'] dies silently on upgrade. The stable hooks are
+       the semantic SUFFIX of the module class plus structural attributes:
+         data-phase is rendered ONLY on ConversationRoot (settling|hero|active) and
+         a status dot, and only ConversationRoot's class ends in '_root', so
+         [class$='_root'][data-phase=…] names the conversation column exactly. */
     const isHeroVisible = () => {
       if (typeof document === 'undefined') return false
-      const hero = document.querySelector('[class*="pXSMma_root"]')
+      const hero = document.querySelector('[class$="_root"][data-phase="hero"]')
       if (!hero) return false
       const r = hero.getBoundingClientRect()
       return r.width > 0 && r.height > 0
@@ -652,7 +659,7 @@ function apply(ctx) {
     /** The visible conversation column — the persist-mode anchor and mount parent. */
     const findConversationRoot = () => {
       if (typeof document === 'undefined') return null
-      const all = document.querySelectorAll('[class*="wSkVaW_root"]')
+      const all = document.querySelectorAll('[class$="_root"][data-phase]')
       for (const el of all) {
         const r = el.getBoundingClientRect()
         if (r.width > 0 && r.height > 0) return el
@@ -661,7 +668,7 @@ function apply(ctx) {
     }
     const findVisibleHeadline = () => {
       if (typeof document === 'undefined') return null
-      const all = document.querySelectorAll('[class*="pXSMma_headline"]')
+      const all = document.querySelectorAll('[class$="_headlineText"]')
       for (const h of all) {
         const r = h.getBoundingClientRect()
         if (r.width > 0 && r.height > 0) return h
@@ -753,9 +760,9 @@ function apply(ctx) {
         s.height = '110px'
         /* z-index 0, NOT 1 — this is the fix for the wordmark painting on top of
            the app's own popovers, and the cause was a z-index TIE:
-             .wSkVaW_composerHero is position:relative + z-index:1, so it IS a
-             stacking context and the model-select menu's z-index:20 is trapped
-             inside it; that 20 never competes at body level.
+             the hero composer wrapper ('*_composerHero') is position:relative +
+             z-index:1, so it IS a stacking context and the model-select menu's
+             z-index:20 is trapped inside it; that 20 never competes at body level.
            The mark used to be z-index:1 too — the same level as composerHero in
            the root stacking context — and ties are broken by DOM order. Appended
            to <body> last, the mark won every tie and painted over the whole
@@ -909,10 +916,11 @@ function apply(ctx) {
        WHERE IT IS MOUNTED, and why this specific parent. Measured from the app's
        own CSS, three elements paint an OPAQUE --dsw-alias-bg-base over any
        body-level layer: the app frame ([class$='_frame']), the conversation column
-       ([class*='wSkVaW_root']) and the details column. A fixed <body> child would
-       therefore be invisible on every real page. The layer is instead a child of
-       the app FRAME, with those descendant fills neutralised to transparent while
-       the layer is mounted (the :has() guard makes all of it vanish when off).
+       ([class$='_root'] inside the centre column) and the details column. A fixed
+       <body> child would therefore be invisible on every real page. The layer is
+       instead a child of the app FRAME, with those descendant fills neutralised to
+       transparent while the layer is mounted (the :has() guard makes all of it
+       vanish when off).
        The frame is already position:relative and creates NO stacking context, so
        an inset:0 z-index:0 child sits above the frame's own background and below
        every positioned descendant. The sidebar keeps its own colour because in
@@ -2909,7 +2917,10 @@ function apply(ctx) {
          Every absolute descendant the app itself renders (header:after, tab:after,
          heroGlow, the overlay composer seat) already has a positioned ancestor
          nearer than this column, so their containing blocks are unchanged. */
-      [class*='wSkVaW_root']:has(> [data-endfield-watermark]) {
+      /* Suffix-only match: the :has(>) guard pins this to exactly the element the
+         JS mounted the watermark into (only the conversation column or the app
+         frame ever hosts it), so the broad '_root' suffix cannot over-match. */
+      [class$='_root']:has(> [data-endfield-watermark]) {
         isolation: isolate;
         position: relative;
       }
@@ -2998,8 +3009,15 @@ function apply(ctx) {
       [class*='_frame']:has(> [data-endfield-contour]) {
         background: transparent !important;
       }
-      [class*='_frame']:has(> [data-endfield-contour]) [class*='wSkVaW_root'],
-      [class*='_frame']:has(> [data-endfield-contour]) [class*='ydkMvW_root'] {
+      /* WHY _centerCol / _detailsCol and not a bare [class$='_root']: the current
+         build renders 27 '*_root' classes and SIX of them carry an opaque
+         background (trajectory bar, sidebar root, right-panel root, …). Only the
+         conversation column (inside the centre column) and the details panel
+         (inside the details column) may be cleared, so the columns scope the
+         match; both column suffixes are unique to the layout frame and were
+         verified alive on 0.1.2-rc.1. */
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_centerCol'] [class$='_root'],
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_detailsCol'] [class$='_root'] {
         background: transparent !important;
       }
       /* The sidebar reads --dsw-specific-sidebar-fill, which this theme sets to the
@@ -3195,41 +3213,50 @@ function apply(ctx) {
       :is([role='tab'], [role='menuitem'], [role='option'], [role='link'], [role='treeitem'], [role='checkbox'], [role='switch'], [role='radio'], [role='combobox'], [class*='nav-item' i], [class*='menu-item' i], [class*='list-item' i], [class*='session-item' i], [class*='workspace-item' i], [class*='search-result' i], [class*='item' i], [class*='tab' i], [class*='card' i], [class*='row' i], [class*='tool' i], [class*='composer' i]):hover {
         color: var(--dsw-alias-label-primary) !important;
       }
-      /* ---------- Workspace browser rows (YDXeBa) ---------- */
-      .YDXeBa_slot {
+      /* ---------- Workspace browser rows (ui-sidebar) ---------- */
+      /* Hash-free rebuild of the old .YDXeBa_* rules: those class names are
+         '<hash>_suffix' CSS-module exports and 0.1.2-rc.1 rehashed every module,
+         killing all 33 pinned hashes. Matching survives on the SEMANTIC suffix
+         ('_sessionRow' etc.), scoped to the sidebar column — '_slot'/'_row' style
+         suffixes are too generic to match bare, but the sidebar column suffix is
+         unique to the layout frame (same hook findAppFrame() and the contour sheet
+         already rely on). Compound states match on substrings, NOT [class$=]: a
+         suffix match needs the WHOLE class attribute to end with the string, so
+         'x_sessionRow x_selected' would silently miss the second condition.
+         '_unselected' is safe against '_selected' here — the leading underscore
+         breaks the substring. */
+      [class$='_sidebarCol'] [class*='_slot'] {
         color: var(--dsw-alias-brand-primary) !important;
       }
-      .YDXeBa_projectRow:hover,
-      .YDXeBa_sessionRow:hover,
-      .YDXeBa_sessionRow.YDXeBa_selected,
-      .YDXeBa_searchResultRow:hover,
-      .YDXeBa_searchResultRow.YDXeBa_selected {
+      [class$='_sidebarCol'] [class*='_projectRow']:hover,
+      [class$='_sidebarCol'] [class*='_sessionRow']:hover,
+      [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'],
+      [class$='_sidebarCol'] [class*='_searchResultRow']:hover,
+      [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
         background: rgba(var(--edge-accent-rgb), 0.22) !important;
       }
-      .YDXeBa_projectRow:hover *,
-      .YDXeBa_sessionRow:hover *,
-      .YDXeBa_sessionRow.YDXeBa_selected *,
-      .YDXeBa_searchResultRow:hover *,
-      .YDXeBa_searchResultRow.YDXeBa_selected * {
+      [class$='_sidebarCol'] [class*='_projectRow']:hover *,
+      [class$='_sidebarCol'] [class*='_sessionRow']:hover *,
+      [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'] *,
+      [class$='_sidebarCol'] [class*='_searchResultRow']:hover *,
+      [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] * {
         color: #000 !important;
       }
       /* ---------- Light mode: workspace folder / icon buttons ink ---------- */
-      body:not([data-ds-dark-theme]) .YDXeBa_folder,
-      body:not([data-ds-dark-theme]) .YDXeBa_folderActive,
-      body:not([data-ds-dark-theme]) .YDXeBa_chevron,
-      body:not([data-ds-dark-theme]) .YDXeBa_arrow,
-      body:not([data-ds-dark-theme]) .YDXeBa_iconButton,
-      body:not([data-ds-dark-theme]) .qDHVXG_iconButton,
-      body:not([data-ds-dark-theme]) .qDHVXG_searchButton,
-      body:not([data-ds-dark-theme]) .qDHVXG_clearButton {
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_folder'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_chevron'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_arrow'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_iconButton'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_searchButton'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_clearButton'] {
         color: #101110 !important;
       }
       /* ---------- Dark mode: solid signal-yellow inversions ---------- */
-      body[data-ds-dark-theme] .YDXeBa_projectRow:hover,
-      body[data-ds-dark-theme] .YDXeBa_sessionRow:hover,
-      body[data-ds-dark-theme] .YDXeBa_sessionRow.YDXeBa_selected,
-      body[data-ds-dark-theme] .YDXeBa_searchResultRow:hover,
-      body[data-ds-dark-theme] .YDXeBa_searchResultRow.YDXeBa_selected {
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_projectRow']:hover,
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow']:hover,
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'],
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow']:hover,
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
         background: var(--edge-accent) !important;
       }
       body[data-ds-dark-theme] [class*='badge' i]:hover,
@@ -3361,8 +3388,15 @@ function apply(ctx) {
         background: var(--edge-accent) !important;
       }
       /* ---------- Agent-preset header chip: signal yellow, stretches to fill the action row ---------- */
-      /* (scoped: the old broad [class$='_label'] rule yellowed plain text labels like 产物/settings/jobs names) */
-      .SVAs4q_label {
+      /* Hash-free scope for the old .SVAs4q_label. The chip is the label sitting
+         at the top of the conversation column's header row (next to the turn
+         status and the subagent/jobs triggers). A bare [class*='_label'] is
+         PROHIBITED here — it was tried first and it yellowed plain list labels
+         (产物 / settings / jobs names), which is why this was hash-pinned in the
+         first place. The conversation column plus the '_header' row scope it back
+         down; the two column/row suffixes are verified stable on 0.1.2-rc.1, and a
+         rename degrades to the stock chip instead of breaking anything. */
+      [class$='_centerCol'] [class$='_header'] > [class*='_label'] {
         color: #000 !important;
         background: var(--edge-accent) !important;
         flex: 1 1 auto !important;
@@ -3370,11 +3404,11 @@ function apply(ctx) {
         justify-content: center !important;
         padding: 0 12px !important;
       }
-      body:not(.theme-endfield-round) .SVAs4q_label {
+      body:not(.theme-endfield-round) [class$='_centerCol'] [class$='_header'] > [class*='_label'] {
         border-radius: 0 !important;
       }
-      .SVAs4q_label .SVAs4q_icon,
-      .SVAs4q_label svg {
+      [class$='_centerCol'] [class$='_header'] > [class*='_label'] svg,
+      [class$='_centerCol'] [class$='_header'] > [class*='_label'] [class*='_icon'] {
         opacity: 1 !important;
         color: #000 !important;
       }
@@ -3453,19 +3487,27 @@ function apply(ctx) {
         --dsw-alias-fill-l2: #242624;
         --dsw-alias-fill-tsp-secondary: #242624;
       }
-      /* Token meter: messages segment signal yellow, system warm gray (tools keeps purple) */
-      .JObwrW_colorMessages {
+      /* Token meter: messages segment signal yellow, system warm gray (tools keeps purple)
+         Both suffixes are unique to the ContextMeter component, so a bare substring
+         match is safe (hash-pinned .JObwrW_* died in the 0.1.2-rc.1 rehash). */
+      [class*='_colorMessages'] {
         --meter-tint: var(--edge-accent) !important;
       }
-      .JObwrW_colorSystem {
+      [class*='_colorSystem'] {
         --meter-tint: #9a9d98 !important;
       }
-      /* Appearance theme cube selected border: warm */
-      ._8HJdBW_selected {
+      /* Appearance theme cube selected border: warm.
+         '_selected' as a bare substring is safe-ish BECAUSE the rule only sets
+         border-color: an element without a border is untouched, and any bordered
+         selected element gets the warm line colour — which is the theme's
+         de-blue-ing goal everywhere anyway. In dark mode the broad accent rule
+         further down (0,2,0 specificity) outranks this and keeps its own colour. */
+      [class*='_selected'] {
         border-color: var(--dsw-alias-border-l2) !important;
       }
-      /* Hero preview badge: solid signal-yellow + black (reference accent chip) */
-      .pXSMma_previewBadge {
+      /* Hero preview badge: solid signal-yellow + black (reference accent chip).
+         '_previewBadge' is unique to the hero shell (HeroShell on 0.1.2-rc.1). */
+      [class*='_previewBadge'] {
         color: #101110 !important;
         background: var(--edge-accent) !important;
         border-color: var(--edge-accent) !important;
@@ -3498,9 +3540,10 @@ function apply(ctx) {
          (7% measured #20200E, Y +13.4 — about 1.6x the blue's lift), and 5%
          lands within ~2 Y of the original glow. So the hero keeps exactly the
          depth it had, in the theme's own accent.
-         Matched on the '_heroGlow' CSS-module suffix rather than the current
-         'wSkVaW' hash, so an app rebuild that rehashes the module cannot silently
-         bring the blue back. */
+         Matched on the '_heroGlow' CSS-module suffix, never on a build hash.
+         NOTE: 0.1.2-rc.1 removed the glow SVG entirely (the hero was merged into
+         ConversationRoot with no <HeroGlow>), so these rules match nothing there;
+         they are kept as a self-healing hook in case upstream restores it. */
       [class*='_heroGlow'] ellipse {
         fill: var(--edge-signal, var(--edge-accent)) !important;
         fill-opacity: var(--edge-glow-light) !important;
@@ -3534,33 +3577,42 @@ function apply(ctx) {
         background: #000 !important;
       }
       /* ================= composer add (+) button hover inversion ================= */
-      /* Dark: + icon signal yellow at rest; on hover solid yellow bg + black icon */
-      body[data-ds-dark-theme] .uV2eYG_add {
+      /* Dark: + icon signal yellow at rest; on hover solid yellow bg + black icon.
+         Substring '_add' must exclude '_addButton' (the settings 添加提供方
+         buttons share it): ':not()' keeps the accent ink off those plain bordered
+         buttons, whose own label colour has to survive. */
+      body[data-ds-dark-theme] [class*='_add']:not([class*='_addButton']) {
         color: var(--edge-accent) !important;
       }
-      body[data-ds-dark-theme] .uV2eYG_add:hover:not(:disabled),
-      body[data-ds-dark-theme] .uV2eYG_add:focus-visible {
+      body[data-ds-dark-theme] [class*='_add']:not([class*='_addButton']):hover:not(:disabled),
+      body[data-ds-dark-theme] [class*='_add']:not([class*='_addButton']):focus-visible {
         color: #000 !important;
         background: var(--edge-accent) !important;
       }
       /* ================= composer primary send/stop button ================= */
-      /* Dark: hardcoded #fff icon on yellow info-fill -> black icon; hover deeper yellow */
-      body[data-ds-dark-theme] .uV2eYG_primary {
+      /* Dark: hardcoded #fff icon on yellow info-fill -> black icon; hover deeper yellow.
+         Scoped to the composer (the seat band in a live conversation, the hero
+         wrapper on the empty state) and to <button>: '_primary' as a bare suffix is
+         too generic to trust with a colour flip anywhere else. */
+      body[data-ds-dark-theme] :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary'] {
         color: #101110 !important;
       }
-      body[data-ds-dark-theme] .uV2eYG_primary:hover:not(:disabled) {
+      body[data-ds-dark-theme] :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary']:hover:not(:disabled) {
         color: #101110 !important;
         background: var(--edge-accent-deep) !important;
       }
       /* ================= light-mode white-on-dark buttons keep white icon ================= */
-      /* Generic hover inversion would make the white send icon black on the dark fill */
-      body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton),
-      body:not([data-ds-dark-theme]) :is(.uV2eYG_primary, .zGbnIq_primaryButton):hover:not(:disabled) {
+      /* Generic hover inversion would make the white send icon black on the dark fill.
+         (The old list also had .zGbnIq_primaryButton from settings › 模型; upstream
+         removed that class in 0.1.2-rc.1. If a replacement appears, name it here
+         explicitly rather than widening the composer scope.) */
+      body:not([data-ds-dark-theme]) :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary'],
+      body:not([data-ds-dark-theme]) :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary']:hover:not(:disabled) {
         color: #fff !important;
       }
       /* ================= buttons the theme fills with the SOLID accent =================
-         Settings > 模型 draws its row actions with .zGbnIq_secondaryButton, whose
-         upstream rule is:
+         Settings > 模型 draws its row actions with a '<hash>_secondaryButton'
+         class (zGbnIq_ in the 0.1.1 bundles), whose upstream rule is:
              color:      var(--dsw-alias-label-primary)
              background: var(--dsw-alias-interactive-bg-hover-solid)   (on :hover)
          This theme maps that background token to the solid accent but upstream keeps
@@ -3591,34 +3643,43 @@ function apply(ctx) {
          bundles for elements whose hover background is that token found SIX, and
          three of them additionally re-assert color:label-primary in the same rule
          (so they would fight a token-level fix):
-           .zGbnIq_secondaryButton   settings > 模型 row actions   <- reported
-           .gNWCoW_inspectButton     inspect panels (cordis)
-           .iWrAna_inspectButton     inspect panels (skill)
-           .o3BgMG_inspectButton     inspect panels (tool)
-           .JVDQca_arrow             attachment carousel arrow
-           .uV2eYG_add               composer + (already handled above)
+           *_secondaryButton   settings > 模型 row actions           <- reported
+           *_inspectButton     inspect panels (cordis / skill / tool —
+                               three modules, one semantic suffix)
+           *_arrow             attachment carousel arrow
+           *_add               composer + (already handled above)
          All are the same defect on different screens, so they are fixed together
          rather than one bug report at a time.
 
-         '_inspectButton' is matched on the CLASS TOKEN, not with [class$=...], and
-         that distinction is load-bearing: an attribute-suffix match requires the
-         WHOLE class attribute to end with the string, so it silently misses any
-         element that carries a second class after it (measured: it failed on
+         MATCHING IS HASH-FREE and matched on the SUBSTRING, not [class$=...]: an
+         attribute-suffix match requires the WHOLE class attribute to end with the
+         string, so it silently misses any element that carries a second class
+         after it (measured: [class$='_inspectButton'] failed on
          class="gNWCoW_inspectButton HOVERPROBE"). Upstream composes class lists
-         freely, so [class$=] is the wrong tool here. [class~='...'] matches a
-         whitespace-separated token in any position, but the token includes the
-         build hash, so each of the three is listed explicitly — they are stable
-         names in installed bundles, and the audit above is what keeps the list
-         honest. '_arrow' is NOT matched by suffix either: two other components
-         (trajectory, workspace) also end in _arrow and take NO hover fill, so a
-         suffix match there would force ink onto elements that keep their normal
-         background — inventing a new contrast bug while fixing this one. */
-      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow):hover:not(:disabled),
-      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow):hover:not(:disabled) svg,
-      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow):hover:not(:disabled) svg path,
-      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow).HOVERPROBE:not(:disabled),
-      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow).HOVERPROBE:not(:disabled) svg,
-      :is(.zGbnIq_secondaryButton, .gNWCoW_inspectButton, .iWrAna_inspectButton, .o3BgMG_inspectButton, .JVDQca_arrow).HOVERPROBE:not(:disabled) svg path {
+         freely AND rehashes modules between releases (0.1.2-rc.1 killed all 33
+         pinned hashes), so the semantic token embedded in the class is the only
+         durable hook — '_secondaryButton' / '_inspectButton' are specific enough
+         that no other component uses them.
+
+         '_arrow' is the one exception that needs SCOPING, not a bare match: two
+         other components (trajectory, workspace) also carry *_arrow classes and
+         take NO hover fill, so a bare match would force ink onto elements that
+         keep their normal background — black-on-near-black in dark mode,
+         inventing a new contrast bug while fixing this one. The attachment
+         carousel lives inside the composer, so the composer wrappers scope it;
+         if a hover-filled arrow ever renders elsewhere, add its scope here. */
+      :is([class*='_secondaryButton'], [class*='_inspectButton']):hover:not(:disabled),
+      :is([class*='_secondaryButton'], [class*='_inspectButton']):hover:not(:disabled) svg,
+      :is([class*='_secondaryButton'], [class*='_inspectButton']):hover:not(:disabled) svg path,
+      :is([class*='_secondaryButton'], [class*='_inspectButton']).HOVERPROBE:not(:disabled),
+      :is([class*='_secondaryButton'], [class*='_inspectButton']).HOVERPROBE:not(:disabled) svg,
+      :is([class*='_secondaryButton'], [class*='_inspectButton']).HOVERPROBE:not(:disabled) svg path,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']:hover:not(:disabled),
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']:hover:not(:disabled) svg,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']:hover:not(:disabled) svg path,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow'].HOVERPROBE:not(:disabled),
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow'].HOVERPROBE:not(:disabled) svg,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow'].HOVERPROBE:not(:disabled) svg path {
         /* Ink on accent: 16.50:1 on 谷地黄, 6.62:1 on 武陵青 — both AA. */
         color: #101110 !important;
         fill: currentColor !important;
@@ -3629,8 +3690,11 @@ function apply(ctx) {
          (#f2f2ec) is only 3.16:1 — below AA for the 12px label it paints. iOS-style
          reds are tuned for white-on-red fills, not red-on-paper text. Darkening the
          TEXT colour alone (the token keeps its value for fills/dots elsewhere)
-         brings it to 5.12:1 while staying unmistakably red. */
-      body:not([data-ds-dark-theme]) .zGbnIq_dangerButton {
+         brings it to 5.12:1 while staying unmistakably red.
+         (0.1.2-rc.1 removed the old zGbnIq_dangerButton class; the semantic suffix
+         is kept so the rule re-arms itself if the button returns under the same
+         name, and no-ops harmlessly until then.) */
+      body:not([data-ds-dark-theme]) [class*='_dangerButton'] {
         color: #c62016 !important;
       }
       /* ================= dark mode: selected rows = solid signal-yellow + black text ================= */

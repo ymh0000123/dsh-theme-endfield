@@ -365,7 +365,7 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 
 主题把某个背景令牌映射成实心强调色，却没有接管前景，于是应用自己声明的 `color` 直接落在强调底上。
 
-以 `.zGbnIq_secondaryButton`（设置 › 模型 的 `编辑`）为例，上游声明：
+以设置 › 模型 的 `编辑` 按钮（类名 `<hash>_secondaryButton`，0.1.1 bundle 里哈希为 `zGbnIq_`）为例，上游声明：
 
 ```css
 color: var(--dsw-alias-label-primary);
@@ -376,23 +376,24 @@ background: var(--dsw-alias-interactive-bg-hover-solid);   /* :hover */
 
 早前的 hover 反色规则没兜住，是因为那条规则**刻意排除了普通 `button`**，好让「黄底黑字的开关」和「深底白图标的发送键」各自保住配色。而这类按钮恰好是「底色来自主题、文字来自应用」的，只能点名修。
 
-顺着这个模式审计安装态 bundle，发现**同样的缺陷共 6 处**：
+顺着这个模式审计安装态 bundle，发现**同样的缺陷共 6 处**（类名中的哈希随构建变化，现按语义后缀匹配；0.1.1 bundle 中的哈希备查）：
 
-| 元素 | 位置 | 修复前（暗色·谷地黄） | 修复后 |
-| --- | --- | --- | --- |
-| `.zGbnIq_secondaryButton` | 设置 › 模型 行操作（`编辑`） | **1.05:1** | 16.50:1 |
-| `.gNWCoW_inspectButton` | Cordis 检查面板 | 1.05:1 | 16.50:1 |
-| `.iWrAna_inspectButton` | 技能检查面板 | 1.05:1 | 16.50:1 |
-| `.o3BgMG_inspectButton` | 工具检查面板 | 1.05:1 | 16.50:1 |
-| `.JVDQca_arrow` | 附件轮播箭头 | 1.05:1 | 16.50:1 |
-| `.uV2eYG_add` | 输入区 `+` | 早前已修 | — |
+| 元素（语义后缀） | 0.1.1 哈希 | 位置 | 修复前（暗色·谷地黄） | 修复后 |
+| --- | --- | --- | --- | --- |
+| `_secondaryButton` | `.zGbnIq_…` | 设置 › 模型 行操作（`编辑`） | **1.05:1** | 16.50:1 |
+| `_inspectButton` | `.gNWCoW_…` | Cordis 检查面板 | 1.05:1 | 16.50:1 |
+| `_inspectButton` | `.iWrAna_…` | 技能检查面板 | 1.05:1 | 16.50:1 |
+| `_inspectButton` | `.o3BgMG_…` | 工具检查面板 | 1.05:1 | 16.50:1 |
+| `_arrow`（限输入区容器内） | `.JVDQca_…` | 附件轮播箭头 | 1.05:1 | 16.50:1 |
+| `_add`（排除 `_addButton`） | `.uV2eYG_…` | 输入区 `+` | 早前已修 | — |
 
 武陵青下同一处是 2.61:1——也不合格，只是没那么刺眼，这正是它一直没被发现的原因。
 
-**两个「看起来对、其实不对」的选择器坑：**
+**选择器匹配的三条铁律**（0.1.2-rc.1 全量重哈希、33 个哈希选择器同日全灭之后总结，见 issue #17）：
 
-1. **`[class$='_inspectButton']` 匹配不到。** 属性后缀选择器要求**整个 class 属性**以该串结尾，而元素常常还带第二个类（实测 `class="gNWCoW_inspectButton HOVERPROBE"` 直接漏掉）。上游会自由拼接类名，所以只能逐个点名。
-2. **`[class$='_arrow']` 会误伤。** 轨迹与工作区也有以 `_arrow` 结尾的类，但它们**没有 hover 填充**；按后缀匹配会给保持原底色的元素强行刷上墨色字。故只点名真正会拿到强调底的附件箭头，并把这两个「不该被改」的箭头写成回归断言。
+1. **禁止把模块哈希写进选择器。** CSS Module 类名是 `<hash>_<语义后缀>`，每次上游重新构建哈希全变，钉哈希的选择器**静默失效**。`test/selector-guard.test.js` 会在哈希重新出现时报警。
+2. **复合状态用子串匹配，不用 `[class$=]`。** 属性后缀选择器要求**整个 class 属性**以该串结尾，而元素常常还带第二个类（实测 `[class$='_inspectButton']` 在 `class="gNWCoW_inspectButton HOVERPROBE"` 上直接漏掉）。`[class*='_语义名']` 对拼接免疫；`_unselected` 因下划线断词不会误中 `_selected`。
+3. **泛化后缀必须加作用域。** 轨迹与工作区也有 `*_arrow` 类但**没有 hover 填充**，裸匹配会给它们强行刷墨色（暗色下黑-on-黑）。附件箭头按输入区容器（`_composerSeat`/`_composerHero`）限定；同理清等高线背景必须用 `_centerCol`/`_detailsCol` 限定 `_root`——当前构建 27 个 `*_root` 里有 6 个带不透明底。
 
 ### 二类：前景与背景被映射成同一个值
 

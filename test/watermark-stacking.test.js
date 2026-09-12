@@ -106,7 +106,10 @@ const mk = (alpha) => `<!doctype html><html><head><meta charset="utf-8"><style>
     min-width:0;padding:0 24px}
   .pXSMma_stack{width:100%;max-width:var(--dsh-composer-card-max-width);
     display:flex;flex-direction:column;gap:12px}
-  .pXSMma_headline{color:var(--dsw-alias-label-primary);display:grid;
+  /* 0.1.2-rc.1 merged the hero INTO ConversationRoot (data-phase) and renamed the
+     headline export to '*_headlineText'; the theme's findVisibleHeadline() matches
+     that suffix, so the fixture must carry it for the mark to be positioned. */
+  .AvZvRG_headlineText{color:var(--dsw-alias-label-primary);display:grid;
     grid-template-columns:34px auto auto;justify-content:center;
     align-items:center;column-gap:10px;font-size:26px;font-weight:500;
     line-height:32px}
@@ -131,7 +134,7 @@ const mk = (alpha) => `<!doctype html><html><head><meta charset="utf-8"><style>
       <div class="wSkVaW_scrollBody"><div class="wSkVaW_viewArea">
         <div class="wSkVaW_composerStack wSkVaW_composerHero">
           <div class="pXSMma_root"><div class="pXSMma_stack">
-            <div class="pXSMma_headline">探索未至之境</div>
+            <div class="AvZvRG_headlineText">探索未至之境</div>
           </div></div>
           <div class="composer">Message DeepSeek Harness…
             <div class="_7KE1Ra_root"><div class="_7KE1Ra_menu">
