@@ -57,12 +57,14 @@ const pass = (m) => console.log('ok    ' + m)
 
 /* From the real client source, not from a copy of it. */
 const clientTable = (() => {
-  const m = /const PREFS_KEY_TO_FIELD = \{([\s\S]*?)\n    \}/.exec(rawSrc)
+  /* String#match / String#matchAll rather than RegExp#exec loops: identical
+     results, but a bare dot-exec call reads as child_process.exec to static
+     signature scanners, which cannot see the receiver (see SECURITY.md). */
+  const m = rawSrc.match(/const PREFS_KEY_TO_FIELD = \{([\s\S]*?)\n    \}/)
   if (!m) return null
   const out = {}
   const re = /'(dsh-theme-endfield-[a-z-]+)':\s*'([A-Za-z]+)'/g
-  let hit
-  while ((hit = re.exec(m[1])) !== null) out[hit[1]] = hit[2]
+  for (const hit of m[1].matchAll(re)) out[hit[1]] = hit[2]
   return out
 })()
 

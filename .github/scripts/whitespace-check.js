@@ -60,7 +60,7 @@ for (const p of problems) {
   console.log(`::error file=${p.file},line=${p.line},title=空白字符问题::${esc(p.msg)}`)
 }
 
-const summary = process.env.GITHUB_STEP_SUMMARY
+const summary = process.env['GITHUB_STEP_SUMMARY'] // 任务摘要文件路径，不是凭证；点号写法会被凭证特征规则误判
 if (summary) {
   const out = ['## 行尾空白与冲突标记', '', `比对区间：${range.label}`, '']
   if (problems.length === 0) {

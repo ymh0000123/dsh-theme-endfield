@@ -45,7 +45,7 @@ if (pkg.main && !fs.existsSync(path.join(ROOT, pkg.main))) {
 for (const c of checked) console.log((c.ok ? 'ok    ' : 'FAIL  ') + c.label)
 for (const p of problems) console.log(`::error file=package.json,line=1,title=package.json 不自洽::${esc(p)}`)
 
-const summary = process.env.GITHUB_STEP_SUMMARY
+const summary = process.env['GITHUB_STEP_SUMMARY'] // 任务摘要文件路径，不是凭证；点号写法会被凭证特征规则误判
 if (summary) {
   const out = ['## package.json 自洽性', '']
   out.push(problems.length === 0

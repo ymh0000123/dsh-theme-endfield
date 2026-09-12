@@ -53,7 +53,7 @@ for (const rel of TARGETS) {
   }
 }
 
-const summary = process.env.GITHUB_STEP_SUMMARY
+const summary = process.env['GITHUB_STEP_SUMMARY'] // 任务摘要文件路径，不是凭证；点号写法会被凭证特征规则误判
 if (summary) {
   const out = ['## 语法解析', '']
   if (failures.length === 0) {

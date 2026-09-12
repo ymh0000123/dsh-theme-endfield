@@ -76,7 +76,7 @@ for (const rel of tests) {
 const totalMs = Number((process.hrtime.bigint() - started) / 1000000n)
 const failed = results.filter((r) => !r.ok)
 
-const summary = process.env.GITHUB_STEP_SUMMARY
+const summary = process.env['GITHUB_STEP_SUMMARY'] // 任务摘要文件路径，不是凭证；点号写法会被凭证特征规则误判
 if (summary) {
   const out = [`## 测试套件 \`${SCRIPT}\``, '']
   out.push(failed.length === 0

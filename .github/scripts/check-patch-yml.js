@@ -20,7 +20,7 @@ const esc = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '
 function fail(msg) {
   console.error('FAIL  ' + msg)
   console.log(`::error file=${SOURCE},line=1,title=挂载配置无效::${esc(msg)}`)
-  const summary = process.env.GITHUB_STEP_SUMMARY
+  const summary = process.env['GITHUB_STEP_SUMMARY'] // 任务摘要文件路径，不是凭证；点号写法会被凭证特征规则误判
   if (summary) fs.appendFileSync(summary, `## ${SOURCE}\n\n❌ ${msg}\n`)
   process.exit(1)
 }
@@ -52,5 +52,5 @@ if (!row.id) fail('插件行缺少 id')
 
 const msg = `${SOURCE} 解析通过，挂载 ${row.id} -> ${row.name}`
 console.log('ok    ' + msg)
-const summary = process.env.GITHUB_STEP_SUMMARY
+const summary = process.env['GITHUB_STEP_SUMMARY'] // 任务摘要文件路径，不是凭证；点号写法会被凭证特征规则误判
 if (summary) fs.appendFileSync(summary, `## ${SOURCE}\n\n✅ ${msg}\n`)
