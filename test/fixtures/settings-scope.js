@@ -58,6 +58,7 @@ const FIELD_DEFAULTS = {
      (settings-namespace.test.js diffs the two). */
   audioEnabled: '1',
   audioVolume: '100',
+  audioBoot: '1',
   audioTurnStart: '1',
   audioTurnDone: '1',
   audioAttention: '1',
@@ -89,6 +90,7 @@ const KEY_TO_FIELD = {
      asserted to cover EVERY declared field, so they are listed like the rest. */
   'dsh-theme-endfield-audio-enabled': 'audioEnabled',
   'dsh-theme-endfield-audio-volume': 'audioVolume',
+  'dsh-theme-endfield-audio-boot': 'audioBoot',
   'dsh-theme-endfield-audio-turn-start': 'audioTurnStart',
   'dsh-theme-endfield-audio-turn-done': 'audioTurnDone',
   'dsh-theme-endfield-audio-attention': 'audioAttention',

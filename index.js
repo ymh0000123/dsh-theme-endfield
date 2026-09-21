@@ -53,6 +53,7 @@
  */
 
 const { AudioRuntime, PREF, FALLBACK: AUDIO_FALLBACK, LOG_TAG } = require('./lib/audio.js');
+const { SLOT_IDS } = require('./lib/slots.js');
 
 const NAME = 'dsh-theme-endfield';
 
@@ -94,12 +95,13 @@ const FIELD_DEFAULTS = {
   thunder: '0',             // 雷霆大字 —— default off
   thunderAnim: '0',         // 大字入场动画 —— default off
   // --- 音频通知 ---------------------------------------------------------
-  // Two slots only: the prompt that starts a turn, and the final answer that
-  // ends one. `attention` / `turn-fail` exist as sounds and switches but are
-  // not wired to events yet, so a switch that does nothing cannot surprise
-  // anyone: the settings page labels them 预留.
+  // Three live slots: the boot plate, the prompt that starts a turn, and the
+  // final answer that ends one. `attention` / `turn-fail` exist as sounds and
+  // switches but are not wired to events yet, so a switch that does nothing
+  // cannot surprise anyone: the settings page labels them 预留.
   audioEnabled: '1',        // 音频通知总开关 —— default on
   audioVolume: '100',        // 音量 0-100 —— rescaled PCM, not system volume
+  audioBoot: '1',           // 启动加载动画音 —— 页面加载播放加载板时响一次
   audioTurnStart: '1',      // 任务开始音 —— 会话框提交后播放
   audioTurnDone: '1',       // 任务结束音 —— 最终结果产出后播放
   audioAttention: '1',      // (预留) 需要你回应
@@ -336,15 +338,37 @@ function installAudio(ctx, settingsScope) {
         kind: 'prefix',
         path: '/theme-endfield/audio',
         handler: async (req, res) => {
-          const pathname = String(req.url || '').split('?')[0];
+          const url = String(req.url || '');
+          const pathname = url.split('?')[0];
+          const query = url.includes('?') ? new URLSearchParams(url.slice(url.indexOf('?') + 1)) : new URLSearchParams();
+          /* Both preview routes force the play (bypassing the debounce window),
+             because a preview that silently does nothing is indistinguishable
+             from a broken feature. The GET form takes the slot in the query
+             string so a non-JS caller can trigger the same play; neither route
+             is a new capability — both end in audio.play() under the user's own
+             settings, and the Host web server already authenticates the page. */
+          const playForPreview = (slotId, reason) => {
+            const id = String(slotId || '');
+            // The slot's own switch is authoritative even for a preview: playing a
+            // sound the user switched off would make the switch look broken.
+            if (SLOT_IDS.includes(id) && !audio.slotEnabled(id)) {
+              return { slot: id, played: false, why: `slot switch "${id}" is off` };
+            }
+            const result = audio.play(id, { force: true, reason });
+            return Object.assign({ slot: id }, result);
+          };
           try {
             if (req.method === 'GET' && pathname === '/theme-endfield/audio/state') {
               return send(res, 200, audio.snapshot());
             }
+            if (req.method === 'GET' && pathname === '/theme-endfield/audio/preview') {
+              const result = playForPreview(query.get('slot'), 'preview (GET)');
+              return send(res, result.played ? 200 : 409, result);
+            }
             if (req.method === 'POST' && pathname === '/theme-endfield/audio/preview') {
               const body = await readJson(req);
-              const result = audio.play(String(body.slot || ''), { force: true, reason: 'settings preview' });
-              return send(res, result.played ? 200 : 409, Object.assign({ slot: body.slot }, result));
+              const result = playForPreview(body.slot, 'settings preview');
+              return send(res, result.played ? 200 : 409, result);
             }
             return send(res, 404, { error: 'not found' });
           } catch (error) {

@@ -38,7 +38,7 @@ var __endfieldFieldDefaults = {
   enabled:'1', palette:'valley', radius:'square', contour:'0', contourAnim:'1',
   contourFps:'24', contourSpeed:'2', contourRenderer:'canvas', contourScrollPause:'1', watermark:'1',
   watermarkPersist:'0', loader:'0', thunder:'0', thunderAnim:'0',
-  audioEnabled:'1', audioVolume:'100', audioTurnStart:'1', audioTurnDone:'1',
+  audioEnabled:'1', audioVolume:'100', audioBoot:'1', audioTurnStart:'1', audioTurnDone:'1',
   audioAttention:'1', audioTurnFail:'1', audioDebounceMs:'2500', audioSoundDir:'',
   audioHumanOnly:'1', audioDiag:'0'
 };
@@ -56,6 +56,7 @@ var __endfieldKeyToField = {
   'dsh-theme-endfield-loader':'loader', 'dsh-theme-endfield-thunder':'thunder',
   'dsh-theme-endfield-thunder-anim':'thunderAnim',
   'dsh-theme-endfield-audio-enabled':'audioEnabled', 'dsh-theme-endfield-audio-volume':'audioVolume',
+  'dsh-theme-endfield-audio-boot':'audioBoot',
   'dsh-theme-endfield-audio-turn-start':'audioTurnStart', 'dsh-theme-endfield-audio-turn-done':'audioTurnDone',
   'dsh-theme-endfield-audio-attention':'audioAttention', 'dsh-theme-endfield-audio-turn-fail':'audioTurnFail',
   'dsh-theme-endfield-audio-debounce-ms':'audioDebounceMs', 'dsh-theme-endfield-audio-sound-dir':'audioSoundDir',

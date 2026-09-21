@@ -304,6 +304,67 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
       'the player is handed the volume-scaled cache copy, not the bundled file');
   }
 
+  // --- the boot bridge: the page reports "the plate started", the host decides ---
+  {
+    const routes = [];
+    const h = makeHost();
+    h.roots.push(rootAgent);
+    const ctx = Object.assign({}, h.ctx, {
+      get(name) {
+        if (name === 'webServer') return { register(route) { routes.push(route); return () => {}; } };
+        return h.ctx.get(name);
+      },
+    });
+    host.installAudio(ctx, h.scope);
+    check(routes.length === 1 && routes[0].path === '/theme-endfield/audio',
+      'the preview/diagnostics bridge mounts when a web server exists');
+
+    /** Drive one route request through a fake req/res pair. */
+    const call = (method, url) => new Promise((resolve) => {
+      const req = { method, url, on() {}, headers: {} };
+      const res = {
+        statusCode: 0,
+        writeHead(code) { this.statusCode = code; },
+        end(body) { resolve({ status: this.statusCode, body: body === undefined ? {} : JSON.parse(body) }); },
+      };
+      Promise.resolve(routes[routes.length - 1].handler(req, res)).catch(() => resolve({ status: 500, body: {} }));
+    });
+
+    const state = await call('GET', '/theme-endfield/audio/state');
+    check(state.status === 200 && Array.isArray(state.body.slots),
+      'GET /state answers with the slot snapshot the settings page reads');
+    const bootSlot = state.body.slots.find((s) => s.id === 'boot');
+    check(bootSlot !== undefined && bootSlot.file !== null && /boot\.wav$/.test(String(bootSlot.file)),
+      'the snapshot reports the boot slot resolving to its own file');
+
+    // A page load fires exactly this: no body, one query parameter.
+    const played = await call('GET', '/theme-endfield/audio/preview?slot=boot');
+    await settle();
+    check(played.status === 200 && played.body.played === true && h.spawns.length === 1,
+      'GET /preview?slot=boot plays the boot sound (the loader path)');
+
+    const unknown = await call('GET', '/theme-endfield/audio/preview?slot=nope');
+    await settle();
+    check(unknown.status === 409 && h.spawns.length === 1,
+      'an unknown slot is refused instead of playing something else');
+
+    // The host owns the switch: with the boot slot off, the page's request must
+    // not turn into sound.
+    const off = makeHost({ audioBoot: '0' });
+    off.roots.push(rootAgent);
+    const ctx2 = Object.assign({}, off.ctx, {
+      get(name) {
+        if (name === 'webServer') return { register(route) { routes.push(route); return () => {}; } };
+        return off.ctx.get(name);
+      },
+    });
+    host.installAudio(ctx2, off.scope);
+    const refused = await call('GET', '/theme-endfield/audio/preview?slot=boot');
+    await settle();
+    check(refused.status === 409 && off.spawns.length === 0,
+      'the boot switch off makes the loader request a no-op');
+  }
+
   console.log(failures === 0 ? '\nall audio-notification tests passed' : `\n${failures} failure(s)`);
   process.exit(failures === 0 ? 0 : 1);
 })();

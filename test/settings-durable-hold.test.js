@@ -35,7 +35,7 @@ const FIELD_DEFAULTS = {
   contourAnim: '1', contourFps: '24', contourSpeed: '2',
   contourScrollPause: '1', watermark: '1', watermarkPersist: '0',
   loader: '0', thunder: '0', thunderAnim: '0',
-  audioEnabled: '1', audioVolume: '100', audioTurnStart: '1', audioTurnDone: '1',
+  audioEnabled: '1', audioVolume: '100', audioBoot: '1', audioTurnStart: '1', audioTurnDone: '1',
   audioAttention: '1', audioTurnFail: '1', audioDebounceMs: '2500',
   audioSoundDir: '', audioHumanOnly: '1', audioDiag: '0',
 }

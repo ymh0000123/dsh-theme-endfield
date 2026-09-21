@@ -114,6 +114,7 @@ function apply(ctx) {
          not, and the settings rows say so. */
       audioEnabled: '1',
       audioVolume: '100',
+      audioBoot: '1',
       audioTurnStart: '1',
       audioTurnDone: '1',
       audioAttention: '1',
@@ -181,6 +182,7 @@ function apply(ctx) {
          the one place a UI key becomes a field" only holds if it is complete. */
       'dsh-theme-endfield-audio-enabled': 'audioEnabled',
       'dsh-theme-endfield-audio-volume': 'audioVolume',
+      'dsh-theme-endfield-audio-boot': 'audioBoot',
       'dsh-theme-endfield-audio-turn-start': 'audioTurnStart',
       'dsh-theme-endfield-audio-turn-done': 'audioTurnDone',
       'dsh-theme-endfield-audio-attention': 'audioAttention',
@@ -228,6 +230,7 @@ function apply(ctx) {
        prefsFieldOf unchanged and equal the schema field names, so a switch can
        never write an undeclared field. */
     const AUDIO_ENABLED_KEY = 'audioEnabled'
+    const AUDIO_BOOT_KEY = 'audioBoot'
     const AUDIO_TURN_START_KEY = 'audioTurnStart'
     const AUDIO_TURN_DONE_KEY = 'audioTurnDone'
     const AUDIO_VOLUME_KEY = 'audioVolume'
@@ -239,6 +242,7 @@ function apply(ctx) {
     // Default ON for the master switch and both live slots; default OFF for the
     // diagnostics switch, so the host console stays quiet unless asked.
     const isAudioOn = () => prefsGet(AUDIO_ENABLED_KEY) !== '0'
+    const isAudioBootOn = () => prefsGet(AUDIO_BOOT_KEY) !== '0'
     const isAudioStartOn = () => prefsGet(AUDIO_TURN_START_KEY) !== '0'
     const isAudioDoneOn = () => prefsGet(AUDIO_TURN_DONE_KEY) !== '0'
     const isAudioHumanOnly = () => prefsGet(AUDIO_HUMAN_ONLY_KEY) !== '0'
@@ -2395,6 +2399,23 @@ function apply(ctx) {
 
        `loaderFuse` is the last line of defence: a single timeout that force-finishes
        the plate even if both clocks stop, so the app can never stay covered. */
+    /* 启动加载动画音. The sound is played by the HOST (lib/audio.js) — the page
+       only reports that the plate started, so volume, debounce, the custom-sound
+       directory and the slot switch all stay in one place. `audioBootSent` makes
+       this exactly once per page load, which is the loader's own contract: the
+       预览 button re-runs the plate deliberately and must not re-ring a boot
+       sound, and neither must a toggle-on. */
+    let audioBootSent = false
+    const playBootChime = () => {
+      if (audioBootSent) return
+      audioBootSent = true
+      // Master switch, slot switch and volume are the host's call; the page only
+      // avoids the round-trip when the feature is switched off outright.
+      if (typeof isAudioOn === 'function' && !isAudioOn()) return
+      try {
+        previewSlot('boot').catch(() => { /* host bridge absent: boot stays silent */ })
+      } catch (e) { /* keep going */ }
+    }
     const runLoader = () => {
       // The plate is themed BY this theme: with the master switch off its
       // stylesheet is gone and the plate would render as stray unstyled text in
@@ -2414,6 +2435,7 @@ function apply(ctx) {
         return
       }
       loaderDone = true
+      playBootChime()
       contourPauseForLoader()
 
       const el = document.createElement('div')
@@ -4723,6 +4745,10 @@ function apply(ctx) {
       audioOff: '关闭提示音',
       audioHintOn: '由宿主进程播放，页面最小化或切到别的应用时同样能听到',
       audioHintOff: '默认开启；关闭后所有场景都不出声',
+      audioBootRow: '启动加载动画音',
+      audioBootOn: '开启',
+      audioBootOff: '关闭',
+      audioBootHint: '播放 ENDFIELD 加载板时响一次；只认真正的页面加载，点「预览」重播不会响',
       audioStartRow: '任务开始音',
       audioStartOn: '开启',
       audioStartOff: '关闭',
@@ -4852,6 +4878,10 @@ function apply(ctx) {
       audioOff: 'Turn off',
       audioHintOn: 'Played by the host process, so a minimized page or another app in front still gets the sound',
       audioHintOff: 'On by default; with this off nothing plays at all',
+      audioBootRow: 'Boot animation sound',
+      audioBootOn: 'Turn on',
+      audioBootOff: 'Turn off',
+      audioBootHint: 'Rings once when the ENDFIELD boot plate plays; a real page load only — the Preview button replays it silently',
       audioStartRow: 'Task-start sound',
       audioStartOn: 'Turn on',
       audioStartOff: 'Turn off',
@@ -4964,6 +4994,7 @@ function apply(ctx) {
              resolved to), so the panel can show the truth instead of assuming
              the bundled tone is in use. */
           const [audioOn, setAudioOn] = R.useState(isAudioOn())
+          const [audioBoot, setAudioBoot] = R.useState(isAudioBootOn())
           const [audioStart, setAudioStart] = R.useState(isAudioStartOn())
           const [audioDone, setAudioDone] = R.useState(isAudioDoneOn())
           const [audioVolume, setAudioVolume] = R.useState(readAudioVolume())
@@ -5182,6 +5213,14 @@ function apply(ctx) {
             prefsSet(AUDIO_TURN_START_KEY, next ? '1' : '0')
             setAudioStart(next)
             if (next) playPreview('turn-start')
+          }
+          const toggleAudioBoot = () => {
+            const next = !audioBoot
+            prefsSet(AUDIO_BOOT_KEY, next ? '1' : '0')
+            setAudioBoot(next)
+            // Preview the boot slot itself: the real one fires from the loader,
+            // which is awkward to re-trigger from here.
+            if (next) playPreview('boot')
           }
           const toggleAudioDone = () => {
             const next = !audioDone
@@ -5511,6 +5550,28 @@ function apply(ctx) {
                   )
                 ),
                 R.createElement('button', { type: 'button', onClick: toggleAudio, style: btnStyleFor(audioOn) }, t(audioOn ? 'audioOff' : 'audioOn'))
+              ]),
+              /* The boot row pairs two independent switches stacked on the right:
+                 the sound's own on/off, and the loader's preview button. They are
+                 separate switches because the loader can be on with no sound. */
+              row('audio-boot', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioBootRow') + t('sep') + stateOf(audioBoot),
+                  R.createElement('span', { style: hintStyle }, t('audioBootHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', flexDirection: 'column', gap: '6px', flex: '0 0 auto', alignItems: 'stretch' } },
+                  R.createElement('button', {
+                    type: 'button', onClick: replayLoader,
+                    style: btnStyleFor(false, !loaderOn || !enabled),
+                    disabled: !loaderOn || !enabled,
+                    title: loaderOn ? '' : t('loaderNeed'),
+                  }, t('preview') + ' · ' + t('loaderRow')),
+                  R.createElement('button', {
+                    type: 'button', onClick: toggleAudioBoot,
+                    style: btnStyleFor(audioBoot, !audioOn), disabled: !audioOn,
+                    title: audioOn ? '' : t('audioNeedOn'),
+                  }, t(audioBoot ? 'audioBootOff' : 'audioBootOn'))
+                )
               ]),
               row('audio-start', false, [
                 R.createElement('span', { style: labelStyle },
