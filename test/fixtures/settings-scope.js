@@ -52,6 +52,20 @@ const FIELD_DEFAULTS = {
   loader: '0',
   thunder: '0',
   thunderAnim: '0',
+  /* 音频通知 — same defaults as index.js FIELD_DEFAULTS. These names are already
+     camelCase schema fields, so they pass through fieldName() unchanged; they are
+     listed here so the fixture stays a faithful projection of the host schema
+     (settings-namespace.test.js diffs the two). */
+  audioEnabled: '1',
+  audioVolume: '100',
+  audioTurnStart: '1',
+  audioTurnDone: '1',
+  audioAttention: '1',
+  audioTurnFail: '1',
+  audioDebounceMs: '2500',
+  audioSoundDir: '',
+  audioHumanOnly: '1',
+  audioDiag: '0',
 }
 
 /** UI/store key -> schema field. Mirrors client.js PREFS_KEY_TO_FIELD. */
@@ -64,12 +78,25 @@ const KEY_TO_FIELD = {
   'dsh-theme-endfield-contour-fps': 'contourFps',
   'dsh-theme-endfield-contour-speed': 'contourSpeed',
   'dsh-theme-endfield-contour-renderer': 'contourRenderer',
+  contourRenderer: 'contourRenderer',
   'dsh-theme-endfield-contour-scroll-pause': 'contourScrollPause',
   'dsh-theme-endfield-watermark': 'watermark',
   'dsh-theme-endfield-watermark-persist': 'watermarkPersist',
   'dsh-theme-endfield-loader': 'loader',
   'dsh-theme-endfield-thunder': 'thunder',
   'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+  /* Audio rows: the tail already equals the schema field, but the mapping is
+     asserted to cover EVERY declared field, so they are listed like the rest. */
+  'dsh-theme-endfield-audio-enabled': 'audioEnabled',
+  'dsh-theme-endfield-audio-volume': 'audioVolume',
+  'dsh-theme-endfield-audio-turn-start': 'audioTurnStart',
+  'dsh-theme-endfield-audio-turn-done': 'audioTurnDone',
+  'dsh-theme-endfield-audio-attention': 'audioAttention',
+  'dsh-theme-endfield-audio-turn-fail': 'audioTurnFail',
+  'dsh-theme-endfield-audio-debounce-ms': 'audioDebounceMs',
+  'dsh-theme-endfield-audio-sound-dir': 'audioSoundDir',
+  'dsh-theme-endfield-audio-human-only': 'audioHumanOnly',
+  'dsh-theme-endfield-audio-diag': 'audioDiag',
 }
 
 /** Accept a UI key ('dsh-theme-endfield-thunder-anim'), a bare schema field

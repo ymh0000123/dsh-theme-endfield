@@ -17,6 +17,9 @@
   "scripts": {
     "check": "node scripts/build-contour-worker.js --check && node check.js",
     "selftest": "node selftest.js",
+    "sound:build": "node scripts/build-sounds.js",
+    "sound:check": "node scripts/build-sounds.js --check",
+    "test:audio": "node test/audio-notify.test.js",
     "test:contour": "node test/contour-render.test.js",
     "test:settings": "node test/settings-rows.test.js && node test/settings-durable-hold.test.js && node test/settings-namespace.test.js && node test/settings-off.test.js && node test/settings-locale.test.js",
     "test:font": "node test/font-scope.test.js",
@@ -68,6 +71,8 @@
     "cordis.patch.yml",
     "README.md",
     "docs",
+    "lib",
+    "sounds",
     "LICENSE"
   ],
   "engines": {

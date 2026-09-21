@@ -108,6 +108,20 @@ function apply(ctx) {
       loader: '0',
       thunder: '0',
       thunderAnim: '0',
+      /* 音频通知 (host half: lib/audio.js). Two live slots — the prompt that
+         starts a turn and the final answer that ends one. `audioAttention` and
+         `audioTurnFail` are 预留: the sounds and switches ship, the triggers do
+         not, and the settings rows say so. */
+      audioEnabled: '1',
+      audioVolume: '100',
+      audioTurnStart: '1',
+      audioTurnDone: '1',
+      audioAttention: '1',
+      audioTurnFail: '1',
+      audioDebounceMs: '2500',
+      audioSoundDir: '',
+      audioHumanOnly: '1',
+      audioDiag: '0',
     }
     /* Convert a namespaced storage key tail to the camelCase field the settings
        schema declares (index.js FIELD_DEFAULTS). A build that derived the field
@@ -147,12 +161,34 @@ function apply(ctx) {
       'dsh-theme-endfield-contour-fps': 'contourFps',
       'dsh-theme-endfield-contour-speed': 'contourSpeed',
       'dsh-theme-endfield-contour-renderer': 'contourRenderer',
+      /* The renderer row's own key is the BARE 'contourRenderer' (a
+         localStorage-era name), not the namespaced spelling. It is listed
+         explicitly because test/settings-namespace.test.js requires the table to
+         cover every UI key the panel uses, and because the prefix-strip fallback
+         turning 'contourRenderer' into 'contourrenderer' is exactly the class of
+         silent mismatch this table exists to prevent. */
+      contourRenderer: 'contourRenderer',
       'dsh-theme-endfield-contour-scroll-pause': 'contourScrollPause',
       'dsh-theme-endfield-watermark': 'watermark',
       'dsh-theme-endfield-watermark-persist': 'watermarkPersist',
       'dsh-theme-endfield-loader': 'loader',
       'dsh-theme-endfield-thunder': 'thunder',
       'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+      /* 音频通知. These tails happen to equal their schema fields, so every one of
+         them would also resolve correctly through the prefix-strip fallback — they
+         are listed explicitly because test/settings-namespace.test.js asserts that
+         EVERY declared host field has a mapping entry, and because "the mapping is
+         the one place a UI key becomes a field" only holds if it is complete. */
+      'dsh-theme-endfield-audio-enabled': 'audioEnabled',
+      'dsh-theme-endfield-audio-volume': 'audioVolume',
+      'dsh-theme-endfield-audio-turn-start': 'audioTurnStart',
+      'dsh-theme-endfield-audio-turn-done': 'audioTurnDone',
+      'dsh-theme-endfield-audio-attention': 'audioAttention',
+      'dsh-theme-endfield-audio-turn-fail': 'audioTurnFail',
+      'dsh-theme-endfield-audio-debounce-ms': 'audioDebounceMs',
+      'dsh-theme-endfield-audio-sound-dir': 'audioSoundDir',
+      'dsh-theme-endfield-audio-human-only': 'audioHumanOnly',
+      'dsh-theme-endfield-audio-diag': 'audioDiag',
     }
     /* The pre-migration spelling of a compound field, for the sections that the
        buggy build already wrote: 'contourAnim' -> 'contour-anim'. Derived from
@@ -183,6 +219,46 @@ function apply(ctx) {
          failure mode the table above exists to prevent, and which a future
          compound row could otherwise reintroduce silently. */
       return prefsFieldFromKey(rawKey)
+    }
+    /* ---------- 音频通知 preferences (host half owns playback) ----------
+       The browser's whole job here is switches, a volume number and the preview
+       buttons; every sound is played by the host process, including the previews
+       (that is the point: the preview must go through the same path as a real
+       notification, or testing it proves nothing). The keys below pass through
+       prefsFieldOf unchanged and equal the schema field names, so a switch can
+       never write an undeclared field. */
+    const AUDIO_ENABLED_KEY = 'audioEnabled'
+    const AUDIO_TURN_START_KEY = 'audioTurnStart'
+    const AUDIO_TURN_DONE_KEY = 'audioTurnDone'
+    const AUDIO_VOLUME_KEY = 'audioVolume'
+    const AUDIO_HUMAN_ONLY_KEY = 'audioHumanOnly'
+    const AUDIO_DIAG_KEY = 'audioDiag'
+    const AUDIO_SOUND_DIR_KEY = 'audioSoundDir'
+    const AUDIO_STATE_URL = '/theme-endfield/audio/state'
+    const AUDIO_PREVIEW_URL = '/theme-endfield/audio/preview'
+    // Default ON for the master switch and both live slots; default OFF for the
+    // diagnostics switch, so the host console stays quiet unless asked.
+    const isAudioOn = () => prefsGet(AUDIO_ENABLED_KEY) !== '0'
+    const isAudioStartOn = () => prefsGet(AUDIO_TURN_START_KEY) !== '0'
+    const isAudioDoneOn = () => prefsGet(AUDIO_TURN_DONE_KEY) !== '0'
+    const isAudioHumanOnly = () => prefsGet(AUDIO_HUMAN_ONLY_KEY) !== '0'
+    const isAudioDiagOn = () => prefsGet(AUDIO_DIAG_KEY) === '1'
+    const readAudioVolume = () => {
+      const parsed = Number.parseInt(prefsGet(AUDIO_VOLUME_KEY), 10)
+      return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 100
+    }
+    const readAudioSoundDir = () => prefsGet(AUDIO_SOUND_DIR_KEY) || ''
+    /** Ask the host to play one slot through the real notification path. */
+    const previewSlot = (slot) => {
+      if (typeof fetch !== 'function') return Promise.resolve({ played: false, why: 'no fetch' })
+      return fetch(AUDIO_PREVIEW_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ slot }),
+      }).then(
+        (res) => res.json().catch(() => ({ played: false, why: 'bad response' })),
+        (error) => ({ played: false, why: String(error && error.message ? error.message : error) }),
+      )
     }
     const prefsListeners = []
     const prefsLocal = Object.assign({}, PREFS_FIELD_DEFAULTS) // schema defaults, for boot / no transport
@@ -4639,6 +4715,55 @@ function apply(ctx) {
       thunderAnimHintOn: '大字由大缩小砸入并淡出（关闭后为直接显示，仍保持 3 秒）',
       thunderAnimHintOff: '默认关闭；大字直接出现、3 秒后消失，不做缩放与淡入淡出',
       thunderAnimHintReduced: '系统已开启「减少动态效果」，当前直接显示',
+      /* 音频通知：播放发生在宿主进程（lib/audio.js），所以这里的每一行都在
+         说明「什么时候响」而不是「怎么响」；试听按钮走宿主真实播放链路。 */
+      groupAudio: '音频',
+      audioRow: '音频通知',
+      audioOn: '开启提示音',
+      audioOff: '关闭提示音',
+      audioHintOn: '由宿主进程播放，页面最小化或切到别的应用时同样能听到',
+      audioHintOff: '默认开启；关闭后所有场景都不出声',
+      audioStartRow: '任务开始音',
+      audioStartOn: '开启',
+      audioStartOff: '关闭',
+      audioStartHint: '只在你从会话框提交指令后播放（后台唤醒、目标续跑不计）',
+      audioDoneRow: '任务结束音',
+      audioDoneOn: '开启',
+      audioDoneOff: '关闭',
+      audioDoneHint: '只在我产出最终结果后播放；中途报错或等待审批时不出声',
+      audioVolumeRow: '音量',
+      audioVolumeHint: '只缩放提示音本身，不改系统音量',
+      audioSlotStart: '开始',
+      audioSlotDone: '结束',
+      audioSlotAttention: '待回应',
+      audioSlotFail: '出错',
+      audioAttentionRow: '需要你回应（预留）',
+      audioTurnFailRow: '出错提示音（预留）',
+      audioReservedHint: '音效与开关已就位，触发事件将在后续版本接入',
+      audioReservedNeed: '后续版本接入，当前不会响',
+      audioSoundDirRow: '自定义音效目录',
+      audioSoundDirHint: '把 turn-start.wav / turn-done.wav 放进该目录即可覆盖内置音；留空则查工作区与桌面',
+      audioSoundDirDefault: '未设置（用桌面 / 工作区 / 内置音）',
+      audioFileRow: '当前音源',
+      audioFileBundled: '内置合成音',
+      audioFileOwn: '自定义文件',
+      audioFileMissing: '未找到文件',
+      audioHumanOnlyRow: '开始音仅认会话框',
+      audioHumanOnlyOn: '仅会话框',
+      audioHumanOnlyOff: '宽松模式',
+      audioHumanOnlyHintOn: '只认带提交凭据的用户消息，最不容易误触发',
+      audioHumanOnlyHintOff: '任何用户来源消息都算（调试用，后台唤醒可能误响）',
+      audioDiagRow: '诊断日志',
+      audioDiagOn: '开启',
+      audioDiagOff: '关闭',
+      audioDiagHint: '在宿主控制台与 /theme-endfield/audio/state 记录每次事件判定',
+      audioTest: '试听',
+      audioTestPlaying: '播放中…',
+      audioTestOk: '已交由宿主播放',
+      audioTestFail: '宿主未播放',
+      audioTestOff: '请先开启音频通知',
+      audioNeedOn: '请先开启音频通知',
+      audioRefresh: '刷新状态',
     }
     const LOCALE_EN = {
       nav: 'Endfield Theme',
@@ -4721,6 +4846,53 @@ function apply(ctx) {
       thunderAnimHintOn: 'The word punches in from oversized and fades out (appears instantly when off, still held 3s)',
       thunderAnimHintOff: 'Off by default; the word appears instantly and leaves after 3s, with no scaling or fading',
       thunderAnimHintReduced: 'Your system asks for reduced motion, so it appears instantly',
+      groupAudio: 'AUDIO',
+      audioRow: 'Audio notifications',
+      audioOn: 'Turn on',
+      audioOff: 'Turn off',
+      audioHintOn: 'Played by the host process, so a minimized page or another app in front still gets the sound',
+      audioHintOff: 'On by default; with this off nothing plays at all',
+      audioStartRow: 'Task-start sound',
+      audioStartOn: 'Turn on',
+      audioStartOff: 'Turn off',
+      audioStartHint: 'Plays only after you submit from the composer (wakeups and goal continuations do not count)',
+      audioDoneRow: 'Task-end sound',
+      audioDoneOn: 'Turn on',
+      audioDoneOff: 'Turn off',
+      audioDoneHint: 'Plays only after the final answer; interrupted turns and approval waits stay silent',
+      audioVolumeRow: 'Volume',
+      audioVolumeHint: 'Rescales only the notification sound, never the system volume',
+      audioSlotStart: 'Start',
+      audioSlotDone: 'Done',
+      audioSlotAttention: 'Attention',
+      audioSlotFail: 'Error',
+      audioAttentionRow: 'Needs your response (reserved)',
+      audioTurnFailRow: 'Error sound (reserved)',
+      audioReservedHint: 'Sound and switch ship now; the trigger lands in a later version',
+      audioReservedNeed: 'Not wired yet — this will not play in this version',
+      audioSoundDirRow: 'Custom sound directory',
+      audioSoundDirHint: 'Drop turn-start.wav / turn-done.wav there to override the built-in tone; blank falls back to the workspace and the Desktop',
+      audioSoundDirDefault: 'Not set (Desktop / workspace / bundled)',
+      audioFileRow: 'Current source',
+      audioFileBundled: 'Bundled synthesized tone',
+      audioFileOwn: 'Your own file',
+      audioFileMissing: 'No file found',
+      audioHumanOnlyRow: 'Start sound: composer only',
+      audioHumanOnlyOn: 'Composer only',
+      audioHumanOnlyOff: 'Loose mode',
+      audioHumanOnlyHintOn: 'Requires the submission credential a real prompt carries — least likely to misfire',
+      audioHumanOnlyHintOff: 'Any user-source message counts (debugging; background wakeups may misfire)',
+      audioDiagRow: 'Diagnostics',
+      audioDiagOn: 'Turn on',
+      audioDiagOff: 'Turn off',
+      audioDiagHint: 'Logs every event verdict to the host console and /theme-endfield/audio/state',
+      audioTest: 'Preview',
+      audioTestPlaying: 'Playing…',
+      audioTestOk: 'Handed to the host',
+      audioTestFail: 'The host did not play it',
+      audioTestOff: 'Turn audio notifications on first',
+      audioNeedOn: 'Turn audio notifications on first',
+      audioRefresh: 'Refresh state',
     }
 
     /* The locale service is optional, exactly like `theme` and `sessions`: the
@@ -4786,6 +4958,36 @@ function apply(ctx) {
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [palette, setPalette] = R.useState(readPalette())
           const [mode, setMode] = R.useState(prefsGet(RADIUS_KEY) || 'square')
+          /* 音频通知 is a HOST feature: the browser only owns its switches and
+             the preview buttons. `hostState` mirrors what the host half reports
+             over /theme-endfield/audio/state (which file each slot actually
+             resolved to), so the panel can show the truth instead of assuming
+             the bundled tone is in use. */
+          const [audioOn, setAudioOn] = R.useState(isAudioOn())
+          const [audioStart, setAudioStart] = R.useState(isAudioStartOn())
+          const [audioDone, setAudioDone] = R.useState(isAudioDoneOn())
+          const [audioVolume, setAudioVolume] = R.useState(readAudioVolume())
+          const [audioHumanOnly, setAudioHumanOnly] = R.useState(isAudioHumanOnly())
+          const [audioDiag, setAudioDiag] = R.useState(isAudioDiagOn())
+          const [hostState, setHostState] = R.useState(null)
+          const [previewNote, setPreviewNote] = R.useState('')
+          const refreshHostState = () => {
+            if (typeof fetch !== 'function') return
+            fetch(AUDIO_STATE_URL, { headers: { accept: 'application/json' } })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((json) => { if (json) setHostState(json) })
+              .catch(() => { /* host bridge absent: the rows simply show no source */ })
+          }
+          // One read per panel mount: the host is the only authority on which
+          // file each slot resolved to, and re-reading on every render would
+          // hammer the route while the user drags the volume slider. Guarded
+          // because the in-process settings tests drive this panel with a
+          // minimal recording React that has no effect hook at all — an
+          // unguarded call would turn "cannot refresh the source read-out" into
+          // "the whole panel throws".
+          if (typeof R.useEffect === 'function') {
+            R.useEffect(() => { refreshHostState() }, [])
+          }
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
           // Sub-label explaining what a switch does, so the row is self-describing.
@@ -4946,6 +5148,93 @@ function apply(ctx) {
             setMode(next)
             if (next === 'round') document.body.classList.add('theme-endfield-round')
             else document.body.classList.remove('theme-endfield-round')
+          }
+          /* ---------- 音频通知 handlers ----------
+             A switch writes its field and updates local state; the host half
+             watches the same namespace, so the next event uses the new value
+             without a reload. The preview buttons deliberately do NOT play
+             anything in the browser: they ask the host, so what you hear while
+             testing is exactly what a real notification will sound like. */
+          const showPreviewNote = (result) => {
+            if (result && result.played) setPreviewNote(t('audioTestOk'))
+            else setPreviewNote(t('audioTestFail') + (result && result.why ? '：' + result.why : ''))
+          }
+          const playPreview = (slot) => { previewSlot(slot).then(showPreviewNote) }
+          const audioTestButton = (slot, labelKey) => R.createElement('button', {
+            key: 'audio-test-' + slot,
+            type: 'button',
+            onClick: () => playPreview(slot),
+            style: btnStyleFor(false, !audioOn),
+            // Previewing while the master switch is off is refused by the host
+            // (volume 0 / disabled), so the button says why instead of failing
+            // silently.
+            disabled: !audioOn,
+            title: audioOn ? '' : t('audioNeedOn'),
+          }, t('audioTest') + ' · ' + t(labelKey))
+          const toggleAudio = () => {
+            const next = !audioOn
+            prefsSet(AUDIO_ENABLED_KEY, next ? '1' : '0')
+            setAudioOn(next)
+            if (next) playPreview('turn-done')
+          }
+          const toggleAudioStart = () => {
+            const next = !audioStart
+            prefsSet(AUDIO_TURN_START_KEY, next ? '1' : '0')
+            setAudioStart(next)
+            if (next) playPreview('turn-start')
+          }
+          const toggleAudioDone = () => {
+            const next = !audioDone
+            prefsSet(AUDIO_TURN_DONE_KEY, next ? '1' : '0')
+            setAudioDone(next)
+            if (next) playPreview('turn-done')
+          }
+          const setAudioVolumeValue = (next) => {
+            const clamped = Math.min(100, Math.max(0, Math.round(next)))
+            prefsSet(AUDIO_VOLUME_KEY, String(clamped))
+            setAudioVolume(clamped)
+          }
+          const toggleAudioHumanOnly = () => {
+            const next = !audioHumanOnly
+            prefsSet(AUDIO_HUMAN_ONLY_KEY, next ? '1' : '0')
+            setAudioHumanOnly(next)
+          }
+          const toggleAudioDiag = () => {
+            const next = !audioDiag
+            prefsSet(AUDIO_DIAG_KEY, next ? '1' : '0')
+            setAudioDiag(next)
+          }
+          const applySoundDir = (value) => {
+            const text = typeof value === 'string' ? value.trim() : ''
+            prefsSet(AUDIO_SOUND_DIR_KEY, text)
+            refreshHostState()
+          }
+          /** The host's view of one slot, or undefined while it has not answered. */
+          const slotState = (slot) => {
+            if (hostState === null || !Array.isArray(hostState.slots)) return undefined
+            return hostState.slots.find((entry) => entry.id === slot)
+          }
+          // The two reserved rows have no switch, so their value read-out reports
+          // whether the SOUND is previewable instead of pretending to be a toggle.
+          const audioTestReady = () => (hostState === null ? true : slotState('attention') !== undefined)
+          const sourceSummary = () => {
+            const done = slotState('turn-done')
+            if (done === undefined) return '—'
+            if (done.file === null) return t('audioFileMissing')
+            return done.bundled ? t('audioFileBundled') : t('audioFileOwn')
+          }
+          const sourceDetail = () => {
+            const rows = []
+            for (const slot of ['turn-start', 'turn-done']) {
+              const state = slotState(slot)
+              const name = slot === 'turn-start' ? t('audioSlotStart') : t('audioSlotDone')
+              rows.push(name + t('sep') + (state === undefined || state.file === null ? t('audioFileMissing') : state.file))
+            }
+            if (hostState !== null && Array.isArray(hostState.log) && hostState.log.length > 0) {
+              const last = hostState.log[hostState.log.length - 1]
+              rows.push(t('audioDiagRow') + t('sep') + last.kind + (last.detail ? ' ' + last.detail : ''))
+            }
+            return rows.join('　·　')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
           /* The ten switches are grouped into four concerns so the page can be
@@ -5206,6 +5495,135 @@ function apply(ctx) {
                   disabled: !thunderOn,
                   title: thunderOn ? '' : t('thunderNeed'),
                 }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
+              ]),
+            ]),
+            /* --- 05 音频：两个生效槽位 + 两个预留槽位 ---
+               Every row states WHEN it fires, because that is the whole contract
+               of this feature; the two reserved rows say outright that they will
+               not fire yet, so a switch that does nothing cannot read as broken. */
+            R.createElement('div', { key: 'group-audio' }, [
+              groupTitle('05', 'groupAudio', false),
+              row('audio', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioRow') + t('sep') + stateOf(audioOn),
+                  R.createElement('span', { style: hintStyle },
+                    t(audioOn ? 'audioHintOn' : 'audioHintOff')
+                  )
+                ),
+                R.createElement('button', { type: 'button', onClick: toggleAudio, style: btnStyleFor(audioOn) }, t(audioOn ? 'audioOff' : 'audioOn'))
+              ]),
+              row('audio-start', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioStartRow') + t('sep') + stateOf(audioStart),
+                  R.createElement('span', { style: hintStyle }, t('audioStartHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  audioTestButton('turn-start', 'audioSlotStart'),
+                  R.createElement('button', {
+                    type: 'button', onClick: toggleAudioStart,
+                    style: btnStyleFor(audioStart, !audioOn), disabled: !audioOn,
+                    title: audioOn ? '' : t('audioNeedOn'),
+                  }, t(audioStart ? 'audioStartOff' : 'audioStartOn'))
+                )
+              ]),
+              row('audio-done', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioDoneRow') + t('sep') + stateOf(audioDone),
+                  R.createElement('span', { style: hintStyle }, t('audioDoneHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  audioTestButton('turn-done', 'audioSlotDone'),
+                  R.createElement('button', {
+                    type: 'button', onClick: toggleAudioDone,
+                    style: btnStyleFor(audioDone, !audioOn), disabled: !audioOn,
+                    title: audioOn ? '' : t('audioNeedOn'),
+                  }, t(audioDone ? 'audioDoneOff' : 'audioDoneOn'))
+                )
+              ]),
+              row('audio-volume', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioVolumeRow') + t('sep') + String(audioVolume) + '%',
+                  R.createElement('span', { style: hintStyle }, t('audioVolumeHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 0 auto' } },
+                  R.createElement('input', {
+                    type: 'range', min: 0, max: 100, step: 5,
+                    'aria-label': t('audioVolumeRow'),
+                    value: audioVolume,
+                    disabled: !audioOn,
+                    onChange: (event) => setAudioVolumeValue(Number(event.target.value)),
+                    onMouseUp: () => { previewSlot('turn-done').then(showPreviewNote) },
+                    style: { width: '140px', accentColor: enabled ? 'var(--edge-accent)' : undefined },
+                  }),
+                  R.createElement('span', { style: { ...labelStyle, minWidth: '38px', textAlign: 'right' } }, String(audioVolume) + '%')
+                )
+              ]),
+              row('audio-attention', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioAttentionRow') + t('sep') + stateOf(audioTestReady()),
+                  R.createElement('span', { style: hintStyle }, t('audioReservedHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  audioTestButton('attention', 'audioSlotAttention')
+                )
+              ]),
+              row('audio-fail', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioTurnFailRow') + t('sep') + stateOf(audioTestReady()),
+                  R.createElement('span', { style: hintStyle }, t('audioReservedHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  audioTestButton('turn-fail', 'audioSlotFail')
+                )
+              ]),
+              row('audio-source', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioFileRow') + t('sep') + sourceSummary(),
+                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
+                ),
+                R.createElement('button', {
+                  type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
+                  style: btnStyleFor(false),
+                }, t('audioRefresh'))
+              ]),
+              row('audio-dir', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioSoundDirRow') + t('sep') + (readAudioSoundDir() || t('audioSoundDirDefault')),
+                  R.createElement('span', { style: hintStyle }, t('audioSoundDirHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('audioSoundDirRow'),
+                    defaultValue: readAudioSoundDir(),
+                    placeholder: t('audioSoundDirDefault'),
+                    onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
+                    onBlur: (event) => applySoundDir(event.target.value),
+                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
+                  })
+                )
+              ]),
+              row('audio-human', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioHumanOnlyRow') + t('sep') + t(audioHumanOnly ? 'audioHumanOnlyOn' : 'audioHumanOnlyOff'),
+                  R.createElement('span', { style: hintStyle },
+                    t(audioHumanOnly ? 'audioHumanOnlyHintOn' : 'audioHumanOnlyHintOff')
+                  )
+                ),
+                R.createElement('button', {
+                  type: 'button', onClick: toggleAudioHumanOnly,
+                  style: btnStyleFor(audioHumanOnly, !audioOn), disabled: !audioOn,
+                  title: audioOn ? '' : t('audioNeedOn'),
+                }, t(audioHumanOnly ? 'audioHumanOnlyOff' : 'audioHumanOnlyOn'))
+              ]),
+              row('audio-diag', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioDiagRow') + t('sep') + stateOf(audioDiag),
+                  R.createElement('span', { style: hintStyle },
+                    previewNote !== '' ? previewNote : t('audioDiagHint')
+                  )
+                ),
+                R.createElement('button', { type: 'button', onClick: toggleAudioDiag, style: btnStyleFor(audioDiag) }, t(audioDiag ? 'audioDiagOff' : 'audioDiagOn'))
               ]),
             ]),
           ])
