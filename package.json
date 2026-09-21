@@ -20,6 +20,7 @@
     "sound:build": "node scripts/build-sounds.js",
     "sound:check": "node scripts/build-sounds.js --check",
     "test:audio": "node test/audio-notify.test.js",
+    "test:audio-watch": "node test/audio-attention-watch.test.js",
     "test:contour": "node test/contour-render.test.js",
     "test:settings": "node test/settings-rows.test.js && node test/settings-durable-hold.test.js && node test/settings-namespace.test.js && node test/settings-off.test.js && node test/settings-locale.test.js",
     "test:font": "node test/font-scope.test.js",
