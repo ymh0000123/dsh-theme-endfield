@@ -71,6 +71,9 @@ const document = {
 
 const polls = []
 const requests = []
+/* Frames queued by requestAnimationFrame, so the mutation path can be driven by
+   hand: the watcher coalesces a burst of mutations into one queued look. */
+const frames = []
 const sandbox = {
   window: {
     __ModuleLoader__: null,
@@ -83,8 +86,8 @@ const sandbox = {
   React: makeReact(),
   MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {} },
   ResizeObserver: function () { this.observe = () => {}; this.disconnect = () => {} },
-  requestAnimationFrame: () => 0,
-  cancelAnimationFrame() {},
+  requestAnimationFrame: (fn) => { frames.push(fn); return frames.length },
+  cancelAnimationFrame: (handle) => { if (handle > 0) frames[handle - 1] = null },
   performance: { now: () => 0 },
   // A truthy handle, so the watcher's "already running" guard behaves like the
   // browser's and the poll callback can be driven by hand.
@@ -153,19 +156,37 @@ const poll = polls.find(Boolean)
 if (poll === undefined) {
   fail('no attention poll was started, so nothing can be verified further')
 } else {
-  presentSelector = null
-  poll()
-  check(requests.length === 0, 'nothing on screen means nothing is reported')
+  /* The fast path first: a DOM mutation schedules ONE look on the next frame.
+     This is the path that removed the measured delay; the poll is the backstop
+     below it, because an observer bound to a container the app later replaces
+     stops delivering and cannot tell anyone. */
+  const schedule = mod.__attentionSchedule
+  if (typeof schedule !== 'function') {
+    fail('the client does not expose the mutation-path check, so the fast path cannot be verified')
+  } else {
+    presentSelector = null
+    schedule()
+    const idleFrame = frames.shift()
+    if (typeof idleFrame === 'function') idleFrame()
+    check(requests.length === 0, 'with nothing on screen the scheduled look finds nothing')
 
-  presentSelector = '[data-approval-key]'
-  poll()
-  check(requests.length === 1 && requests[0].url === '/theme-endfield/audio/attention',
-    'an approval box on screen reports to the host attention route');
-  check(requests[0].body.kind === 'approval', 'the report names the kind (approval)');
+    presentSelector = '[data-approval-key]'
+    schedule()
+    check(frames.length === 1, 'a DOM mutation schedules exactly one look on the next frame')
+    schedule()
+    check(frames.length === 1, 'a burst of mutations still schedules only one look')
+    const flush = frames.shift()
+    flush()
+    check(requests.length === 1 && requests[0].url === '/theme-endfield/audio/attention',
+      'the mutation path reports an approval box to the host attention route')
+    check(requests[0].body.kind === 'approval', 'the report names the kind (approval)')
+  }
 
+  /* The backstop poll must reach the same conclusion. */
   poll()
   poll()
-  check(requests.length === 1, 'a box that stays open is not reported again');
+  check(requests.length === 1, 'a box that stays open is not reported again')
+  check(polls.filter(Boolean).length === 1, 'the poll remains armed as the backstop')
 
   presentSelector = null
   poll()
