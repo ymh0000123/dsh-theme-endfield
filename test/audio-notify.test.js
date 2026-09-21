@@ -151,7 +151,7 @@ function makeHost(initial) {
       if (typeof result === 'function') result();
     }
   };
-  return { ctx, scope, spawns, emit, roots, section };
+  return { ctx, scope, spawns, emit, roots, section, subscribed: () => [...listeners.keys()] };
 }
 
 /** Wait for the fire-and-forget play path to settle. */
@@ -424,6 +424,33 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     h.emit('agent/error', { agent: rootAgent, turn: 1, step: 1, error: { message: 'boom' } });
     await settle();
     check(h.spawns.length === before, 'an agent error plays nothing (silent by design)');
+  }
+
+  /* --- the tools/execute seam must stay untouched ---
+  
+     This plugin must NOT listen on `tools/execute`. That event is a waterfall
+     whose contract is "call next() and return its result"; a listener that
+     inspects the call and returns without calling `next()` reports "no result",
+     so the tool never executes and EVERY later tool call in the session fails.
+     That regression is what these assertions exist to prevent from coming back.
+  
+     The fake host records which events were subscribed, so this is a direct
+     structural check rather than a behavioural one. */
+  {
+    const h = makeHost();
+    host.installAudio(h.ctx, h.scope);
+    const subscribed = h.subscribed();
+    check(!subscribed.includes('tools/execute'),
+      'the plugin never subscribes to the tools/execute waterfall');
+    check(subscribed.includes('approval/request') && subscribed.includes('user-questions/request'),
+      'both human-intervention seams are still subscribed');
+
+    // And for completeness: that event firing changes nothing about playback.
+    const before = h.spawns.length;
+    h.emit('tools/execute', { name: 'ask_user_question', agent: rootAgent }, () => undefined);
+    await settle();
+    check(h.spawns.length === before,
+      'a tool execution alone never plays the attention sound (the request seam owns it)');
   }
 
   console.log(failures === 0 ? '\nall audio-notification tests passed' : `\n${failures} failure(s)`);

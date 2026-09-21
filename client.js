@@ -42,8 +42,7 @@ function insertCss(css) {
   }
 }
 
-function apply(ctx) {
-    // Idempotency: the installed bundle can be applied more than once (boot loader +
+function apply(ctx) {    // Idempotency: the installed bundle can be applied more than once (boot loader +
     // cordis composition both mount it). Only the first application owns tokens/styles;
     // duplicate overrideTokens would replace the layer and break the toggle's dispose.
     // The flag is RELEASED by the run's dispose (see the ctx.effect cleanup below), so
@@ -239,6 +238,7 @@ function apply(ctx) {
     const AUDIO_SOUND_DIR_KEY = 'audioSoundDir'
     const AUDIO_STATE_URL = '/theme-endfield/audio/state'
     const AUDIO_PREVIEW_URL = '/theme-endfield/audio/preview'
+    const AUDIO_ATTENTION_URL = '/theme-endfield/audio/attention'
     // Default ON for the master switch and both live slots; default OFF for the
     // diagnostics switch, so the host console stays quiet unless asked.
     const isAudioOn = () => prefsGet(AUDIO_ENABLED_KEY) !== '0'
@@ -259,6 +259,60 @@ function apply(ctx) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ slot }),
+      }).then(
+        (res) => res.json().catch(() => ({ played: false, why: 'bad response' })),
+        (error) => ({ played: false, why: String(error && error.message ? error.message : error) }),
+      )
+    }
+    /* ---------- 需要你回应：界面观察器 ----------
+       WHY THIS EXISTS. The host-side seams that would normally carry this moment
+       (`approval/request`, `user-questions/request`, raised by dsh-user-approval
+       and dsh-tool-ask-user) do not fire in every deployment. Measured here: with
+       the theme plugin mounted, a question was on screen and ANSWERED while the
+       host half's counter stayed at 0 — because `ask_user_question` in this
+       composition is provided outside the profile's plugin stack, so
+       `dsh-tool-ask-user` never runs and the waterfall is never raised.
+  
+       The UI is therefore the only place where "a human must act" is always real.
+       The host still owns the sound (switch, volume, debounce) — the page only
+       reports that a confirmation box appeared. The host-side listeners stay in
+       place for compositions where they DO fire; both paths end at the same slot
+       and the host's debounce collapses a double report into one sound.
+  
+       ANCHORS: only semantic suffixes and data attributes, never a hashed module
+       class (the theme's own chrome selectors take the same stance). Verified
+       against the installed packages:
+         approval panel   <div data-approval-key="…" class="…_root">
+         plan review      class="…_frame"
+         question dialog  class="…_card"
+       A marker that disappears in a future UI release silences this feature
+       without breaking anything — hence the counter in the settings page, which
+       is the only way to notice that the anchors stopped matching. */
+    const ATTENTION_MARKERS = [
+      { kind: 'approval', selector: '[data-approval-key]' },
+      { kind: 'plan-review', selector: "[class*='_frame']" },
+      { kind: 'question', selector: "[class*='_card']" },
+    ];
+    // Exposed on the module so a test can assert the anchors stay semantic (see
+    // exports.__attentionMarkers at the bottom of this file).
+    module.exports.__attentionMarkers = ATTENTION_MARKERS;
+    /** Which kind of pending interaction is on screen right now, if any. */
+    const detectPendingInteraction = () => {
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null
+      for (const marker of ATTENTION_MARKERS) {
+        try {
+          if (document.querySelector(marker.selector) !== null) return marker.kind
+        } catch (e) { /* malformed selector: treat as absent */ }
+      }
+      return null
+    }
+    /** Tell the host a confirmation box appeared; it decides whether to sound. */
+    const reportAttention = (kind) => {
+      if (typeof fetch !== 'function') return Promise.resolve({ played: false, why: 'no fetch' })
+      return fetch(AUDIO_ATTENTION_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind }),
       }).then(
         (res) => res.json().catch(() => ({ played: false, why: 'bad response' })),
         (error) => ({ played: false, why: String(error && error.message ? error.message : error) }),
@@ -2922,6 +2976,54 @@ function apply(ctx) {
       thunderRebind()
     }
 
+    /* ---------- 需要你回应 watcher ----------
+       A coarse poll rather than a MutationObserver. The reason is the failure mode
+       rather than the cost: an observer watching a container that the app later
+       replaces (or an anchor that renders before `document.body` exists) stops
+       delivering and cannot tell anyone, while a poll that asks "is a confirmation
+       box on screen?" keeps working through any re-render, and its only symptom is
+       up to `AUDIO_ATTENTION_POLL_MS` of latency — imperceptible for a chime.
+
+       The edge is "a box is on screen after a moment where none was". A box that
+       stays open does not re-report, so a forgotten dialog cannot beep forever; and
+       a re-render that briefly drops the node and puts it back would re-report, so
+       the poll is deliberately slower than a React remount. Whatever still slips
+       through lands on the host's per-slot debounce, which is the backstop for
+       every path. */
+    const AUDIO_ATTENTION_POLL_MS = 400
+    let audioAttentionTimer = null
+    let audioAttentionKind = null
+    const audioAttentionTick = () => {
+      try {
+        const kind = detectPendingInteraction()
+        if (kind === null) {
+          audioAttentionKind = null
+          return
+        }
+        if (kind === audioAttentionKind) return
+        audioAttentionKind = kind
+        if (!isAudioOn()) return
+        reportAttention(kind)
+      } catch (e) { /* never let the watcher break the page */ }
+    }
+    const syncAudioAttentionWatch = () => {
+      const wanted = isEnabled() && isAudioOn()
+      if (wanted && audioAttentionTimer === null && typeof setInterval === 'function') {
+        audioAttentionKind = null
+        audioAttentionTimer = setInterval(audioAttentionTick, AUDIO_ATTENTION_POLL_MS)
+        audioAttentionTick()
+      } else if (!wanted && audioAttentionTimer !== null) {
+        if (typeof clearInterval === 'function') clearInterval(audioAttentionTimer)
+        audioAttentionTimer = null
+        audioAttentionKind = null
+      }
+    }
+    const stopAudioAttentionWatch = () => {
+      if (audioAttentionTimer !== null && typeof clearInterval === 'function') clearInterval(audioAttentionTimer)
+      audioAttentionTimer = null
+      audioAttentionKind = null
+    }
+
     let disposeToken = () => {}
     let disposeStyles = () => {}
     let mounted = false
@@ -4588,6 +4690,9 @@ function apply(ctx) {
          announce into. */
       thunderStopWatch()
       destroyThunder()
+      // The attention poll belongs to the themed, audio-enabled page; leaving it
+      // running would keep reporting confirmations for a theme that is off.
+      stopAudioAttentionWatch()
     }
 
     if (isEnabled()) {
@@ -4603,6 +4708,8 @@ function apply(ctx) {
       // Task announcements: subscribes only while switched on, and the first value
       // it reads is a baseline, so enabling mid-turn stays silent.
       syncThunder()
+      // 需要你回应: starts only while the theme and the audio feature are both on.
+      syncAudioAttentionWatch()
     }
 
     /* Live preference reconciler. The namespace scope subscription in the store
@@ -4632,6 +4739,12 @@ function apply(ctx) {
         syncWatermarkVisibility()
         syncContour()
         syncThunder()
+        // Same reason: it re-reads both switches and starts or stops the poll.
+        syncAudioAttentionWatch()
+      } else {
+        // Switched off mid-session: the watcher must not keep polling a page the
+        // theme no longer owns.
+        stopAudioAttentionWatch()
       }
     }
 
@@ -4766,6 +4879,7 @@ function apply(ctx) {
       audioSlotFail: '出错',
       audioSlotQuestion: '提问',
       audioSlotApproval: '审批',
+      audioSlotUi: '界面',
       audioAttentionRow: '需要你回应',
       audioTurnFailRow: '出错提示音',
       audioReservedHint: '审批请求、我的提问、计划求批都会响',
@@ -4902,6 +5016,7 @@ function apply(ctx) {
       audioSlotFail: 'Error',
       audioSlotQuestion: 'Questions',
       audioSlotApproval: 'Approvals',
+      audioSlotUi: 'Seen',
       audioAttentionRow: 'Needs your response',
       audioTurnFailRow: 'Error sound',
       audioReservedHint: 'Fires on approval requests, my questions and plan reviews',
@@ -5212,6 +5327,9 @@ function apply(ctx) {
             const next = !audioOn
             prefsSet(AUDIO_ENABLED_KEY, next ? '1' : '0')
             setAudioOn(next)
+            // The attention watcher is gated on this switch, so it has to be
+            // reconciled here as well as on the pref echo.
+            syncAudioAttentionWatch()
             if (next) playPreview('turn-done')
           }
           const toggleAudioStart = () => {
@@ -5281,7 +5399,9 @@ function apply(ctx) {
                indistinguishable from the page. Re-open this page (or press 刷新)
                after answering a question to watch the counter move. */
             if (hostState !== null && hostState.attention !== undefined) {
-              rows.push(t('audioAttentionRow') + t('sep') + t('audioSlotQuestion') + ' ' + String(hostState.attention.question)
+              rows.push(t('audioAttentionRow') + t('sep')
+                + t('audioSlotUi') + ' ' + String(hostState.attention.ui)
+                + ' / ' + t('audioSlotQuestion') + ' ' + String(hostState.attention.question)
                 + ' / ' + t('audioSlotApproval') + ' ' + String(hostState.attention.approval))
             }
             if (hostState !== null && Array.isArray(hostState.log) && hostState.log.length > 0) {
@@ -5748,6 +5868,9 @@ function apply(ctx) {
          them here too, or the callbacks keep firing against a dead run. */
       thunderStopWatch()
       destroyThunder()
+      // Same reason as the announcement watcher: a poll that outlives its fiber
+      // keeps POSTing against a dead run.
+      stopAudioAttentionWatch()
       disposeSettings()
     })
   }
@@ -5755,6 +5878,10 @@ function apply(ctx) {
 		exports.name = "dsh-theme-endfield";
 		exports.inject = ["theme"];
 		exports.apply = apply;
+		/* The attention markers are attached by apply() itself (they are declared in
+		   its scope) and read by test/audio-attention-watch.test.js, which asserts
+		   they stay semantic: a hashed module class would rot on an upstream rebuild
+		   and the watcher would just stop matching, with no error anywhere. */
 		return module.exports;
 	}
 });

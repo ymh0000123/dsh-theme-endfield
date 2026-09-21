@@ -227,8 +227,11 @@ function installAudio(ctx, settingsScope) {
   const audio = new AudioRuntime(ctx);
   const terminals = new Map(); // `${sessionId}:${turn}` -> saw a text answer
   const playedDone = new Set(); // turn keys already reported, so a turn speaks once
-  /** How many human-intervention requests actually reached this host half. */
-  const attentionSeen = { approval: 0, question: 0 };
+  /** How many human-intervention requests actually reached this host half.
+      `ui` counts confirmations the PAGE observed and reported — the path that
+      actually works in this deployment; `approval`/`question` count the host-side
+      seams, which a different composition may drive instead. */
+  const attentionSeen = { approval: 0, question: 0, ui: 0, uiLastAt: 0, uiLastKind: '' };
 
   if (settingsScope !== undefined) {
     try {
@@ -302,6 +305,23 @@ function installAudio(ctx, settingsScope) {
     if (audio.enabled(PREF.attention)) audio.play('attention', { reason: 'user question' });
     return typeof next === 'function' ? next() : undefined;
   });
+
+  /* There is deliberately NO `tools/execute` handler here.
+  
+     An earlier version added one as a redundant second trigger for
+     `ask_user_question`. It was wrong and it was destructive: `tools/execute` is
+     a WATERFALL (`dsh-tools`: `await this.ctx.waterfall(carrier, 'tools/execute',
+     mutableExec, () => this.dispatchToolBody(mutableExec))`), so a listener that
+     inspects the call and returns `undefined` without calling `next()` reports
+     "no result" for that tool — the tool never runs and the failure surfaces on
+     every subsequent call in the session (observed as every tool returning
+     `Cannot read properties of undefined (reading 'isError')` while this plugin
+     was mounted, and the tool chain recovering the moment it was removed).
+  
+     The attention slot does not need it: `approval/request` and
+     `user-questions/request` are the two moments that need a human, and both are
+     already wired above to the same slot. A redundant path is not worth a seam
+     that can silently break every tool in the profile. */
 
   ctx.on('agent/turn-stopping', ({ agent, turn }) => {
     if (!isRootAgent(agent)) return;
@@ -381,6 +401,33 @@ function installAudio(ctx, settingsScope) {
             if (req.method === 'POST' && pathname === '/theme-endfield/audio/preview') {
               const body = await readJson(req);
               const result = playForPreview(body.slot, 'settings preview');
+              return send(res, result.played ? 200 : 409, result);
+            }
+            /* The page reports "a confirmation box is on screen".
+  
+               This route exists because the two host-side seams that would
+               normally carry this moment (`approval/request`,
+               `user-questions/request`) do not fire in every composition: in this
+               deployment `ask_user_question` is provided OUTSIDE the profile's
+               plugin stack, so `dsh-tool-ask-user` never runs and the waterfall is
+               never raised — measured directly as a zero counter while a question
+               was on screen. The UI is the one place the moment is always real.
+  
+               It deliberately does NOT force: unlike a settings preview, a real
+               notification must respect the switch, the volume and the per-slot
+               debounce, all of which stay owned by the host. `force` is what makes
+               a preview bypass the window, and reusing it here would let two rapid
+               boxes beep twice because the browser holds no shared clock. */
+            if (req.method === 'POST' && pathname === '/theme-endfield/audio/attention') {
+              const body = await readJson(req);
+              attentionSeen.ui += 1;
+              attentionSeen.uiLastAt = Date.now();
+              attentionSeen.uiLastKind = String(body.kind || 'pending');
+              if (audio.diagnosing) audio.note('attention (page)', `saw ${attentionSeen.uiLastKind}`);
+              if (!audio.slotEnabled('attention')) {
+                return send(res, 409, { played: false, why: 'slot switch "attention" is off' });
+              }
+              const result = audio.play('attention', { reason: `page: ${attentionSeen.uiLastKind}` });
               return send(res, result.played ? 200 : 409, result);
             }
             return send(res, 404, { error: 'not found' });
