@@ -247,7 +247,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     const audio = host.installAudio(h.ctx, h.scope);
     h.emit('approval/request', { kind: 'exec' }, () => undefined);
     await settle();
-    check(h.spawns.length === 1, 'an approval request plays (reserved slot, already wired)');
+    check(h.spawns.length === 1, 'an approval request plays');
     h.emit('approval/request', { kind: 'exec' }, () => undefined);
     await settle();
     check(h.spawns.length === 1, 'a second approval inside the debounce window stays silent');
@@ -255,6 +255,31 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     await settle();
     check(preview.played === true && h.spawns.length === 2,
       'a forced preview bypasses the debounce window');
+  }
+
+  // --- the ask_user_question path ---
+  // This is the OTHER attention trigger, and the one a user actually meets most
+  // often. It arrives as `user-questions/request` (a waterfall raised by
+  // ctx.userQuestions.ask(), which dsh-tool-ask-user calls); the payload may or
+  // may not carry an agent, and both shapes must sound. It is asserted
+  // separately from `approval/request` because the two have different emitters
+  // and one working says nothing about the other.
+  {
+    const withAgent = makeHost();
+    withAgent.roots.push(rootAgent);
+    host.installAudio(withAgent.ctx, withAgent.scope);
+    let nextCalled = false;
+    withAgent.emit('user-questions/request', { agent: rootAgent, questions: [{ id: 'q' }] }, () => { nextCalled = true; });
+    await settle();
+    check(withAgent.spawns.length === 1, 'a user question with an agent plays the attention sound');
+    check(nextCalled === true, 'the attention handler still passes the waterfall on (it must not swallow the question)');
+
+    const noAgent = makeHost();
+    noAgent.roots.push(rootAgent);
+    host.installAudio(noAgent.ctx, noAgent.scope);
+    noAgent.emit('user-questions/request', { questions: [{ id: 'q' }] }, () => undefined);
+    await settle();
+    check(noAgent.spawns.length === 1, 'a user question without an agent plays it too');
   }
 
   // --- degradation without the subprocess seam ---
@@ -333,6 +358,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     const state = await call('GET', '/theme-endfield/audio/state');
     check(state.status === 200 && Array.isArray(state.body.slots),
       'GET /state answers with the slot snapshot the settings page reads');
+    check(state.body.attention !== undefined && state.body.attention.question === 0,
+      'GET /state reports how many intervention requests reached the host');
     const bootSlot = state.body.slots.find((s) => s.id === 'boot');
     check(bootSlot !== undefined && bootSlot.file !== null && /boot\.wav$/.test(String(bootSlot.file)),
       'the snapshot reports the boot slot resolving to its own file');
@@ -363,6 +390,40 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     await settle();
     check(refused.status === 409 && off.spawns.length === 0,
       'the boot switch off makes the loader request a no-op');
+  }
+
+  // --- the counter proves reachability, and errors stay silent by design ---
+  {
+    const routes = [];
+    const h = makeHost();
+    h.roots.push(rootAgent);
+    const ctx = Object.assign({}, h.ctx, {
+      get(name) {
+        if (name === 'webServer') return { register(route) { routes.push(route); return () => {}; } };
+        return h.ctx.get(name);
+      },
+    });
+    host.installAudio(ctx, h.scope);
+    const readState = () => new Promise((resolve) => {
+      const req = { method: 'GET', url: '/theme-endfield/audio/state', on() {}, headers: {} };
+      const res = { writeHead() {}, end(body) { resolve(JSON.parse(body)); } };
+      Promise.resolve(routes[0].handler(req, res)).catch(() => resolve({}));
+    });
+
+    h.emit('user-questions/request', { questions: [{ id: 'q' }] }, () => undefined);
+    h.emit('approval/request', { kind: 'exec' }, () => undefined);
+    await settle();
+    const after = await readState();
+    check(after.attention.question === 1 && after.attention.approval === 1,
+      'the counter reports one question and one approval reaching the host');
+
+    /* The user's rule: an error that needs no human decision must not sound.
+       `agent/error` is therefore wired to nothing, and this assertion is what
+       keeps a future change from quietly re-adding it. */
+    const before = h.spawns.length;
+    h.emit('agent/error', { agent: rootAgent, turn: 1, step: 1, error: { message: 'boom' } });
+    await settle();
+    check(h.spawns.length === before, 'an agent error plays nothing (silent by design)');
   }
 
   console.log(failures === 0 ? '\nall audio-notification tests passed' : `\n${failures} failure(s)`);

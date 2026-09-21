@@ -4761,12 +4761,15 @@ function apply(ctx) {
       audioVolumeHint: '只缩放提示音本身，不改系统音量',
       audioSlotStart: '开始',
       audioSlotDone: '结束',
+      audioSlotBoot: '开机',
       audioSlotAttention: '待回应',
       audioSlotFail: '出错',
-      audioAttentionRow: '需要你回应（预留）',
-      audioTurnFailRow: '出错提示音（预留）',
-      audioReservedHint: '音效与开关已就位，触发事件将在后续版本接入',
-      audioReservedNeed: '后续版本接入，当前不会响',
+      audioSlotQuestion: '提问',
+      audioSlotApproval: '审批',
+      audioAttentionRow: '需要你回应',
+      audioTurnFailRow: '出错提示音',
+      audioReservedHint: '审批请求、我的提问、计划求批都会响',
+      audioReservedNeed: '无事件接线：不需要人工干预的错误保持静音',
       audioSoundDirRow: '自定义音效目录',
       audioSoundDirHint: '把 turn-start.wav / turn-done.wav 放进该目录即可覆盖内置音；留空则查工作区与桌面',
       audioSoundDirDefault: '未设置（用桌面 / 工作区 / 内置音）',
@@ -4894,12 +4897,15 @@ function apply(ctx) {
       audioVolumeHint: 'Rescales only the notification sound, never the system volume',
       audioSlotStart: 'Start',
       audioSlotDone: 'Done',
+      audioSlotBoot: 'Boot',
       audioSlotAttention: 'Attention',
       audioSlotFail: 'Error',
-      audioAttentionRow: 'Needs your response (reserved)',
-      audioTurnFailRow: 'Error sound (reserved)',
-      audioReservedHint: 'Sound and switch ship now; the trigger lands in a later version',
-      audioReservedNeed: 'Not wired yet — this will not play in this version',
+      audioSlotQuestion: 'Questions',
+      audioSlotApproval: 'Approvals',
+      audioAttentionRow: 'Needs your response',
+      audioTurnFailRow: 'Error sound',
+      audioReservedHint: 'Fires on approval requests, my questions and plan reviews',
+      audioReservedNeed: 'Not wired by design: an error needing no human decision stays silent',
       audioSoundDirRow: 'Custom sound directory',
       audioSoundDirHint: 'Drop turn-start.wav / turn-done.wav there to override the built-in tone; blank falls back to the workspace and the Desktop',
       audioSoundDirDefault: 'Not set (Desktop / workspace / bundled)',
@@ -5264,10 +5270,19 @@ function apply(ctx) {
           }
           const sourceDetail = () => {
             const rows = []
-            for (const slot of ['turn-start', 'turn-done']) {
+            for (const slot of ['boot', 'turn-start', 'turn-done']) {
               const state = slotState(slot)
-              const name = slot === 'turn-start' ? t('audioSlotStart') : t('audioSlotDone')
+              const name = slot === 'boot' ? t('audioSlotBoot') : slot === 'turn-start' ? t('audioSlotStart') : t('audioSlotDone')
               rows.push(name + t('sep') + (state === undefined || state.file === null ? t('audioFileMissing') : state.file))
+            }
+            /* How many intervention requests this host half has actually seen.
+               Without it, "no sound" cannot distinguish "the event never reached
+               the plugin" from "the plugin chose to stay silent" — the two are
+               indistinguishable from the page. Re-open this page (or press 刷新)
+               after answering a question to watch the counter move. */
+            if (hostState !== null && hostState.attention !== undefined) {
+              rows.push(t('audioAttentionRow') + t('sep') + t('audioSlotQuestion') + ' ' + String(hostState.attention.question)
+                + ' / ' + t('audioSlotApproval') + ' ' + String(hostState.attention.approval))
             }
             if (hostState !== null && Array.isArray(hostState.log) && hostState.log.length > 0) {
               const last = hostState.log[hostState.log.length - 1]

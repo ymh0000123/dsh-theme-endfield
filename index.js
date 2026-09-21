@@ -95,17 +95,18 @@ const FIELD_DEFAULTS = {
   thunder: '0',             // 雷霆大字 —— default off
   thunderAnim: '0',         // 大字入场动画 —— default off
   // --- 音频通知 ---------------------------------------------------------
-  // Three live slots: the boot plate, the prompt that starts a turn, and the
-  // final answer that ends one. `attention` / `turn-fail` exist as sounds and
-  // switches but are not wired to events yet, so a switch that does nothing
-  // cannot surprise anyone: the settings page labels them 预留.
+  // Four live slots: the boot plate, the prompt that starts a turn, the final
+  // answer that ends one, and `attention` for the two moments that actually
+  // need a human (an approval request and my own question). `turn-fail` ships as
+  // a sound and a switch but is wired to nothing on purpose: an error that needs
+  // no human decision must stay silent.
   audioEnabled: '1',        // 音频通知总开关 —— default on
   audioVolume: '100',        // 音量 0-100 —— rescaled PCM, not system volume
   audioBoot: '1',           // 启动加载动画音 —— 页面加载播放加载板时响一次
   audioTurnStart: '1',      // 任务开始音 —— 会话框提交后播放
   audioTurnDone: '1',       // 任务结束音 —— 最终结果产出后播放
-  audioAttention: '1',      // (预留) 需要你回应
-  audioTurnFail: '1',       // (预留) 出错
+  audioAttention: '1',      // 需要你回应 —— 审批请求 / 我的提问 / 计划求批
+  audioTurnFail: '1',       // 出错音 —— 无事件接线：不需要人工干预的错误保持静音
   audioDebounceMs: '2500',  // 同一槽位最小间隔
   audioSoundDir: '',        // 自定义音效目录，留空则用工作区/桌面/内置
   audioHumanOnly: '1',      // 开始音只认会话框提交（带 rpcId 的用户消息）
@@ -226,6 +227,8 @@ function installAudio(ctx, settingsScope) {
   const audio = new AudioRuntime(ctx);
   const terminals = new Map(); // `${sessionId}:${turn}` -> saw a text answer
   const playedDone = new Set(); // turn keys already reported, so a turn speaks once
+  /** How many human-intervention requests actually reached this host half. */
+  const attentionSeen = { approval: 0, question: 0 };
 
   if (settingsScope !== undefined) {
     try {
@@ -275,22 +278,29 @@ function installAudio(ctx, settingsScope) {
     else if (!terminals.has(key)) terminals.set(key, false);
   });
 
-  // Reserved triggers: the slots and switches ship now, the events later.
+  /* The two "a human has to do something" triggers, and the ONLY things that
+     sound besides the boot plate and a finished answer.
+  
+     A turn that fails on its own is deliberately NOT one of them: the user's
+     rule is that an error needing no human decision should stay silent, so
+     `agent/error` is not wired to any slot. The `turn-fail` sound still ships
+     and can still be previewed, but nothing fires it.
+  
+     Each handler keeps a counter so the settings bridge can answer "did the host
+     actually receive this request?" — the failure mode where the event exists
+     but never reaches a host listener is otherwise invisible from the outside. */
   ctx.on('approval/request', (request, next) => {
+    attentionSeen.approval += 1;
     if (audio.diagnosing) audio.note('approval/request', String(request === undefined ? '' : request.kind || ''));
     if (audio.enabled(PREF.attention)) audio.play('attention', { reason: 'approval request' });
     return typeof next === 'function' ? next() : undefined;
   });
 
   ctx.on('user-questions/request', (request, next) => {
+    attentionSeen.question += 1;
     if (audio.diagnosing) audio.note('user-questions/request', 'pending question');
     if (audio.enabled(PREF.attention)) audio.play('attention', { reason: 'user question' });
     return typeof next === 'function' ? next() : undefined;
-  });
-
-  ctx.on('agent/error', ({ agent }) => {
-    if (!isRootAgent(agent)) return;
-    if (audio.enabled(PREF.fail)) audio.play('turn-fail', { reason: 'turn error' });
   });
 
   ctx.on('agent/turn-stopping', ({ agent, turn }) => {
@@ -359,7 +369,10 @@ function installAudio(ctx, settingsScope) {
           };
           try {
             if (req.method === 'GET' && pathname === '/theme-endfield/audio/state') {
-              return send(res, 200, audio.snapshot());
+              // `attention` rides along so a caller can tell "the host never got
+              // the request" apart from "the host got it and chose to stay
+              // silent" — the two look identical from the page otherwise.
+              return send(res, 200, Object.assign(audio.snapshot(), { attention: Object.assign({}, attentionSeen) }));
             }
             if (req.method === 'GET' && pathname === '/theme-endfield/audio/preview') {
               const result = playForPreview(query.get('slot'), 'preview (GET)');
