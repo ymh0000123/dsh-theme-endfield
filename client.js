@@ -279,19 +279,26 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        place for compositions where they DO fire; both paths end at the same slot
        and the host's debounce collapses a double report into one sound.
   
-       ANCHORS: only semantic suffixes and data attributes, never a hashed module
-       class (the theme's own chrome selectors take the same stance). Verified
-       against the installed packages:
-         approval panel   <div data-approval-key="…" class="…_root">
-         plan review      class="…_frame"
-         question dialog  class="…_card"
+       ANCHORS: only the per-panel DATA ATTRIBUTES, never a class name.
+  
+       A class-based first attempt was tried and it mis-fired in the field:
+       `[class*='_card']` matches 15 different components across the installed
+       client packages (model selector, agent-preset picker, …) and
+       `[class*='_frame']` matches 8, so opening any such card rang the attention
+       sound while no confirmation box was on screen. What the panels actually
+       expose, verified against the installed packages, is one stable attribute
+       each:
+         approval panel    <div data-approval-key="…">
+         plan review panel <div data-plan-review-key="…">
+         question dialog   <div data-question-key="…">
+  
        A marker that disappears in a future UI release silences this feature
        without breaking anything — hence the counter in the settings page, which
        is the only way to notice that the anchors stopped matching. */
     const ATTENTION_MARKERS = [
       { kind: 'approval', selector: '[data-approval-key]' },
-      { kind: 'plan-review', selector: "[class*='_frame']" },
-      { kind: 'question', selector: "[class*='_card']" },
+      { kind: 'plan-review', selector: '[data-plan-review-key]' },
+      { kind: 'question', selector: '[data-question-key]' },
     ];
     // Exposed on the module so a test can assert the anchors stay semantic (see
     // exports.__attentionMarkers at the bottom of this file).

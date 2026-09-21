@@ -125,21 +125,26 @@ const ctx = {
 try { mod.apply(ctx) } catch (e) { fail('apply() threw: ' + e.message); process.exit(1) }
 pass('apply() completed with the theme and audio notifications on')
 
-/* --- 1. the anchors are semantic, never hashed module classes ---
+/* --- 1. the anchors are data attributes, never class names ---
    The markers are attached by apply() (they live in its scope), so they are read
-   after it ran. */
+   after it ran. The class-based first attempt rang on unrelated UI cards — 15
+   components in the installed client packages share a `_card` class and 8 share
+   `_frame` — so "no class matching at all" is the property this guards. */
 const markers = mod.__attentionMarkers
 if (markers === undefined || !Array.isArray(markers) || markers.length === 0) {
   fail('the client does not export its attention markers, so they cannot be verified')
 } else {
   const selectors = markers.map((m) => m.selector)
   check(selectors.includes('[data-approval-key]'),
-    'the approval marker uses the data attribute the panel actually renders')
-  const hashed = selectors.filter((s) => /[A-Za-z0-9]{6}_/.test(s.replace(/_root|_frame|_card|_/g, (m) => m)))
-  check(hashed.length === 0, 'no marker depends on a hashed module class name');
-  const semantic = selectors.filter((s) => /\[class\*='_[a-zA-Z]+'\]/.test(s))
-  check(semantic.length === selectors.length - 1 || semantic.length === selectors.length,
-    'the class-based markers all use a semantic suffix');
+    'the approval marker uses the attribute the approval panel renders')
+  check(selectors.includes('[data-plan-review-key]'),
+    'the plan-review marker uses the attribute that panel renders')
+  check(selectors.includes('[data-question-key]'),
+    'the question marker uses the attribute the dialog renders')
+  check(selectors.every((s) => s.startsWith('[data-') && s.endsWith(']')),
+    'every marker is a pure data-attribute selector')
+  check(selectors.filter((s) => s.includes('class')).length === 0,
+    'no marker can collide with the app\'s ~23 module cards')
 }
 
 /* --- 2. the poll is running, and reports a box exactly once --- */
@@ -164,7 +169,7 @@ if (poll === undefined) {
 
   presentSelector = null
   poll()
-  presentSelector = "[class*='_card']"
+  presentSelector = '[data-question-key]'
   poll()
   check(requests.length === 2 && requests[1].body.kind === 'question',
     'a second box after the first closed is reported again, as a question')
@@ -172,10 +177,18 @@ if (poll === undefined) {
   /* --- 3. the plan-review anchor --- */
   presentSelector = null
   poll()
-  presentSelector = "[class*='_frame']"
+  presentSelector = '[data-plan-review-key]'
   poll()
   check(requests.length === 3 && requests[2].body.kind === 'plan-review',
     'a plan-review panel reports as its own kind')
+
+  /* --- an unrelated card must NOT report (the field regression) --- */
+  presentSelector = null
+  poll()
+  presentSelector = '[class*="_card"]'
+  poll()
+  check(requests.length === 3,
+    'a plain UI card that is not a confirmation box stays silent')
 }
 
 /* --- 4. switching the audio feature off stops the watcher --- */
