@@ -85,6 +85,16 @@ Full run: 14/14 test files pass, plus `node check.js` and `node selftest.js`.
 **One pre-existing failure is untouched by this branch**: `test/contour-perf.test.js` reports
 `p95 over 120fps budget` on the pristine upstream tree too (verified by stashing this branch).
 
+## A note on the commit history
+
+Two pairs of commits in this branch show their own development and cancel out:
+
+- `290e5dc` adds a `tools/execute` listener, `f77beda` removes it (the waterfall regression explained above)
+- `8d9aaf3` introduces the notification feature and the later commits refine the same code
+
+The **aggregate diff is what matters** and is clean; the branch was left linear and honest rather
+than rewritten, so the reasoning is auditable. Squash on merge if you prefer.
+
 ## One unrelated fix included
 
 `contourRenderer` was written and read by the settings panel but was **never declared** in
