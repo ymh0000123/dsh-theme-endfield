@@ -95,6 +95,24 @@ Two pairs of commits in this branch show their own development and cancel out:
 The **aggregate diff is what matters** and is clean; the branch was left linear and honest rather
 than rewritten, so the reasoning is auditable. Squash on merge if you prefer.
 
+### Re-authoring the commits
+
+Everything in this branch was committed under a placeholder identity (`dsh agent <agent@local>`),
+because the work went through an assistant session. Two ranges need different authors — the
+upstream-only baseline, and this contribution:
+
+```bash
+# the two baseline commits contain ONLY upstream code -> keep the upstream author
+git rebase --exec 'git commit --amend --no-edit --author="没用的小废鼠 <107793048+ymh0000123@users.noreply.github.com>"' 6375836
+# then the audio commits
+git rebase --exec 'git commit --amend --no-edit --reset-author --ignore-date' 292e8a0
+```
+
+`C:\TestBox\reauthor-and-push.ps1` does exactly this — one amend per commit, because amending a
+commit twice makes the second amend's parent the first one's result and git aborts the rebase
+mid-way — then force-pushes with `--force-with-lease` and verifies the tree hash is unchanged, so the
+rewrite can never silently alter file content.
+
 ## One unrelated fix included
 
 `contourRenderer` was written and read by the settings panel but was **never declared** in
