@@ -329,6 +329,39 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
       'the player is handed the volume-scaled cache copy, not the bundled file');
   }
 
+  /* --- the "still speaking" gate: duration-matched, not a fixed window ---
+  
+     A real voice line is not a chime. The user's generated Endfield lines run
+     2.9-4.7 seconds, so a fixed 2.5 s debounce alone would let one announcement
+     start on top of another. `soundDurationMs()` derives the window from the file
+     itself, which is why both halves are asserted here: the reading (so the gate
+     is not silently 0) and the behaviour (so a long line is not clipped). */
+  {
+    // Reading: a 500 ms file must read as 500 ms.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'endfield-dur-'));
+    const { renderWav } = require(path.join(ROOT, 'lib', 'tone.js'));
+    const { SLOTS } = require(path.join(ROOT, 'lib', 'slots.js'));
+    const half = Object.assign({}, SLOTS['turn-done'], { duration: 0.5 });
+    fs.writeFileSync(path.join(dir, 'turn-done.wav'), renderWav(half));
+    const h = makeHost({ audioSoundDir: dir });
+    const audio = host.installAudio(h.ctx, h.scope);
+    const read = audio.soundDurationMs(path.join(dir, 'turn-done.wav'));
+    check(Math.abs(read - 500) <= 2, `soundDurationMs reads a 500 ms file as ${read} ms`);
+
+    // Behaviour: with the debounce floor set to zero, the ONLY thing that can
+    // refuse the second play is the duration gate.
+    const g = makeHost({ audioSoundDir: dir, audioDebounceMs: '0' });
+    const gated = host.installAudio(g.ctx, g.scope);
+    const first = gated.play('turn-done', { reason: 'test' });
+    const second = gated.play('turn-done', { reason: 'test' });
+    check(first.played === true && second.played === false && /still speaking/.test(String(second.why)),
+      'a second play is refused while the previous one is still speaking');
+    const forced = gated.play('turn-done', { force: true, reason: 'preview' });
+    check(forced.played === true,
+      'a forced preview bypasses the still-speaking gate (a preview must always be heard)');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   // --- the boot bridge: the page reports "the plate started", the host decides ---
   {
     const routes = [];
