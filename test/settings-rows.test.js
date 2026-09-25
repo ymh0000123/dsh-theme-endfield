@@ -149,7 +149,7 @@ pass('settings panel rendered without throwing')
 const nodes = walk(tree)
 const buttons = nodes.filter((n) => n.type === 'button')
 /* The rows live inside four group containers (主题 / 背景 / 动画 / 娱乐), so "all
-   rows" means every div whose key is one of the fifteen switch rows, wherever
+   rows" means every div whose key is one of the sixteen switch rows, wherever
    it sits in the tree.
 
    ROW_KEYS is BOTH the expected set and the counter, so a new row that is not

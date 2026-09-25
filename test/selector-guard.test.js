@@ -69,7 +69,7 @@ const hooks = [
     'contour: details column transparency'],
   ["[class$='_sidebarCol'] [class*='_sessionRow']", 'sidebar workspace rows'],
   ["[class$='_sidebarCol'] [class*='_folder']", 'light-mode sidebar ink'],
-  ["[class$='_centerCol'] [class$='_header'] > [class*='_label']", 'agent-preset header chip'],
+  ["[class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg)", 'agent-preset header chip'],
   ["[class*='_colorMessages']", 'token meter messages segment'],
   ["[class*='_selected']", 'appearance cube warm border'],
   ["[class*='_previewBadge']", 'hero preview badge'],

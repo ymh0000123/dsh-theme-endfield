@@ -1,39 +1,49 @@
 /**
- * settings-scope.js — canonical dsh settingsScope seam used by the theme tests.
+ * settings-scope.js — canonical DSH settings seams used by the theme tests.
  *
  * Migration (see docs/engineering-notes.md): the theme no longer persists to
- * localStorage. Its switches read/write a DSH settings namespace
- * (`dsh-theme-endfield`) through the browser `ctx.settingsScope` service — the
- * client mirror of the host `ctx.settings.register(ns, schema)` that index.js
- * declares, persisted by DSH to the profile's <dshHome>/settings.yaml.
+ * localStorage. Its switches read/write a DSH settings namespace and it has
+ * outlived two generations of that seam, so this file models BOTH:
  *
- * These unit tests therefore exercise the theme exactly the way a user's stored
- * preferences would, but through that same seam: they feed the plugin a fake
- * `ctx.settingsScope` binder (the precise contract the theme binds) whose
- * in-memory "section" plays the role that <settings.yaml> plays in production.
+ *   0.1.7-rc.1  `configFormsStub()` — the `ctx.configForms` service. A form is
+ *               keyed by the PROFILE ENTRY ID (`theme-endfield`, see
+ *               index.js SETTINGS_ENTRY); its `set()` returns
+ *               `Promise<boolean>`, where `false` means the Host refused or
+ *               skipped the write (memory mode on a non-loopback page). This is
+ *               what test/settings-config-forms.test.js drives.
+ *   <=0.1.5     `settingsScopeStub()` — the deprecated `ctx.settingsScope`
+ *               binder over namespace `dsh-theme-endfield`, whose host half was
+ *               `ctx.settings.register(ns, schema)` persisted by
+ *               `@deepseek-ai/dsh-settings-file` to `<dshHome>/settings.yaml`.
+ *               Every other settings test still drives this generation, which
+ *               is exactly why the client keeps the fallback.
  *
  * THE SECTION IS KEYED BY SCHEMA FIELD NAME, NOT BY UI KEY. This is the whole
  * point of these tests and it is worth stating explicitly, because getting it
- * wrong here hides the bug that shipped: the host registers camelCase fields
+ * wrong here hides the bug that shipped: the host declares camelCase fields
  * (`thunderAnim`, `contourFps`, …) in index.js FIELD_DEFAULTS, so a scope.set
- * can only ever store those names. An earlier version of this fixture stripped
- * the `dsh-theme-endfield-` prefix off the UI key instead — the same wrong
- * mapping the client had — so `setField('contour-fps', …)` and the client's
- * `prefsGet('dsh-theme-endfield-contour-fps')` agreed on a name that does not
- * exist in the schema, both sides passed, and every compound switch silently
- * reset on reload. KEY_TO_FIELD below is the fixture's copy of that mapping and
- * must stay in step with client.js PREFS_KEY_TO_FIELD.
+ * or form.set can only ever store those names. An earlier version of this
+ * fixture stripped the `dsh-theme-endfield-` prefix off the UI key instead —
+ * the same wrong mapping the client had — so `setField('contour-fps', …)` and
+ * the client's `prefsGet('dsh-theme-endfield-contour-fps')` agreed on a name
+ * that does not exist in the schema, both sides passed, and every compound
+ * switch silently reset on reload. KEY_TO_FIELD below is the fixture's copy of
+ * that mapping and must stay in step with client.js PREFS_KEY_TO_FIELD.
  *
- * Contract honoured (mirrors @deepseek-ai/dsh-client-ui-settings):
- *   binder.bind({ namespace, decode? }) -> scope
- *   scope.getSnapshot() -> { status, value, writable, mode, ... }
- *   scope.subscribe(listener) -> disposer
- *   scope.set(field, value); scope.unset(field)
+ * Contracts honoured (mirroring @deepseek-ai/dsh-client-ui-settings):
+ *   0.1.7       configForms.get(entryId) -> form
+ *               form.getSnapshot() -> { status, value, base, user, revision, writable, mode }
+ *               form.subscribe(listener) -> disposer
+ *               form.set(field, value) / form.unset(field) -> Promise<boolean>
+ *   legacy      binder.bind({ namespace, decode? }) -> scope
+ *               scope.getSnapshot() -> { status, value, writable, mode, ... }
+ *               scope.subscribe(listener) -> disposer
+ *               scope.set(field, value); scope.unset(field)
  *
  * The theme only trusts a `status === 'ready'` snapshot with a `value` object;
- * before that, and when no binder is present at all, it falls back to in-memory
- * schema defaults (enabled on, loader off, ...). All fields are stored as the
- * exact strings described in docs/features.md.
+ * before that, and when no transport is present at all, it falls back to
+ * in-memory schema defaults (enabled on, loader off, ...). All fields are
+ * stored as the exact strings described in docs/features.md.
  */
 'use strict'
 
@@ -154,4 +164,153 @@ function settingsScopeStub(initial = {}) {
   }
 }
 
-module.exports = { settingsScopeStub, FIELD_DEFAULTS, KEY_TO_FIELD, fieldName }
+/**
+ * Build a fake DSH 0.1.7 `configForms` service over per-namespace sections.
+ *
+ * The namespace is chosen by the CALLER (the theme asks for the profile entry
+ * id, index.js SETTINGS_ENTRY), and only namespaces listed in `served` answer
+ * `status:'ready'` — everything else reports `'unavailable'`, exactly like the
+ * Host's describe mirror does for a namespace it does not serve. That is what
+ * lets a test prove the theme prefers a served spelling, never persists anything
+ * through an unserved one, and re-selects once the real entry appears.
+ *
+ * @param initialSections - { [namespace]: { field: value } }; undeclared fields
+ *                          resolve to FIELD_DEFAULTS, like schema defaults.
+ * @param options.served    - namespaces the Host serves (default: none).
+ * @param options.accept    - (namespace, field, value) -> boolean. Return false
+ *                            to model a REFUSED write: the returned promise
+ *                            resolves false and the section does not change.
+ * @param options.mode      - 'host' (default) or 'memory' (non-loopback page;
+ *                            never persists).
+ * @param options.writable  - false models a read-only Host document.
+ * @param options.loading   - namespaces that report `status:'loading'` with
+ *                            `writable:false` and NO value, modelling the real
+ *                            boot window before the Host's describe view
+ *                            arrives. This is the state a real page load starts
+ *                            in, and the one an earlier stub could not produce
+ *                            at all — which is how a `loading -> ready`
+ *                            transition bug shipped with every test green.
+ *                            Call `settle(ns)` to move it to ready.
+ * @returns { service, writes, unsubscribed, sections, sectionOf, serve, settle,
+ *            touch, setAccept, writtenNamespaces }
+ */
+function configFormsStub(initialSections = {}, options = {}) {
+  const sections = {}
+  for (const ns of Object.keys(initialSections)) {
+    sections[ns] = Object.assign({}, FIELD_DEFAULTS, initialSections[ns])
+  }
+  const served = (options.served || []).slice()
+  // Namespaces still in flight: 'loading' now, ready once settle() is called.
+  const loading = (options.loading || []).slice()
+  const mode = options.mode || 'host'
+  const writable = options.writable !== false
+  // A mirror that answers without replacing any form's snapshot (models the
+  // worst case the theme's bounded settle watch exists for).
+  const quiet = options.quiet === true
+  let accept = options.accept || (() => true)
+
+  const listeners = {}
+  const forms = {}
+  const writes = []       // { ns, field, value } in call order, accepted or not
+  const unsubscribed = [] // namespaces whose subscription was disposed
+
+  // The describe mirror is SHARED: a Host document change (or a mirror reload)
+  // replaces every form's snapshot at once, so notifications are global. That is
+  // also what lets a form bound to the wrong entry spelling notice that another
+  // candidate became served.
+  const notify = () => {
+    for (const ns of Object.keys(listeners)) {
+      for (const l of (listeners[ns] || []).slice()) { try { l() } catch (e) { /* test safety */ } }
+    }
+  }
+  const sectionOf = (ns) => sections[ns] || (sections[ns] = Object.assign({}, FIELD_DEFAULTS))
+  const snapshotOf = (ns) => {
+    /* Still in flight: the Host has not sent its describe view yet. This is the
+       exact shape the live theme logs at boot — status 'loading', writable
+       false, no value — and a write issued here must NOT be treated as landed
+       (prefsDurablyServed requires status 'ready'). */
+    if (loading.indexOf(ns) >= 0) {
+      return { status: 'loading', value: undefined, base: undefined, user: undefined, revision: undefined, writable: false, mode }
+    }
+    if (served.indexOf(ns) < 0) {
+      return { status: 'unavailable', value: undefined, base: undefined, user: undefined, revision: undefined, writable, mode }
+    }
+    return {
+      status: 'ready',
+      value: Object.assign({}, sectionOf(ns)),
+      base: Object.assign({}, FIELD_DEFAULTS),
+      user: Object.assign({}, sectionOf(ns)),
+      revision: 1,
+      writable,
+      mode,
+    }
+  }
+  const formFor = (ns) => forms[ns] || (forms[ns] = {
+    getSnapshot: () => snapshotOf(ns),
+    subscribe(listener) {
+      (listeners[ns] = listeners[ns] || []).push(listener)
+      return () => {
+        unsubscribed.push(ns)
+        const list = listeners[ns] || []
+        const i = list.indexOf(listener)
+        if (i >= 0) list.splice(i, 1)
+      }
+    },
+    set(field, value) {
+      const encoded = String(value)
+      writes.push({ ns, field, value: encoded })
+      // A still-loading namespace must REFUSE: the Host document is not open
+      // (writable:false in the snapshot). Modelling this as an accepted write
+      // would hide the very gate prefsDurablyServed exists to enforce.
+      const ok = served.indexOf(ns) >= 0 && loading.indexOf(ns) < 0
+        && writable && accept(ns, field, encoded) !== false
+      if (ok) { sectionOf(ns)[field] = encoded; notify() }
+      return Promise.resolve(ok)
+    },
+    unset(field) {
+      sectionOf(ns)[field] = FIELD_DEFAULTS[field]
+      notify()
+      return Promise.resolve(true)
+    },
+  })
+
+  return {
+    service: { get: (ns) => formFor(ns) },
+    writes,
+    unsubscribed,
+    sections,
+    sectionOf,
+    /** Put a namespace into the Host's served list (mirror reload). `quiet`
+        suppresses the notification, leaving the theme's bounded settle watch as
+        the only thing that can notice. */
+    serve(ns) { if (served.indexOf(ns) < 0) { served.push(ns); if (!quiet) notify() } },
+    /** Finish a boot: the Host's describe view arrives, so the namespace serves
+        its section and accepts writes. This is the `loading -> ready`
+        transition the live theme waits for.
+
+        Wire fidelity, deliberately. The real client sees ONE event here: the
+        describe view lands, the shared mirror re-derives every form, and the
+        subscription fires once against a now-'ready' snapshot. There is no
+        separate synthetic `loading` notification followed by a `ready` one — and
+        modelling it that way is a trap: the extra `ready` event would rescue a
+        gate that wrongly rejected the transitional state, hiding exactly the
+        defect this fixture exists to expose. So `settle()` flips the state and
+        notifies exactly once. */
+    settle(ns) {
+      const i = loading.indexOf(ns)
+      if (i >= 0) loading.splice(i, 1)
+      if (served.indexOf(ns) < 0) served.push(ns)
+      if (!quiet) notify()
+    },
+    /** Model the mirror pushing a still-loading snapshot (the boot window the
+        live theme logs as `status= loading writable= false valueKeys= 0`).
+        Notifies without serving anything. */
+    notifyLoading() { if (!quiet) notify() },
+    /** Fire a snapshot replacement without changing the section. */
+    touch(ns) { if (!quiet) notify() },
+    setAccept(fn) { accept = fn || (() => true) },
+    writtenNamespaces: () => Array.from(new Set(writes.map((w) => w.ns))),
+  }
+}
+
+module.exports = { settingsScopeStub, configFormsStub, FIELD_DEFAULTS, KEY_TO_FIELD, fieldName }

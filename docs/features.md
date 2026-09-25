@@ -8,14 +8,16 @@
 
 历史内存风格：这些开关最初存浏览器 `localStorage`。由于浏览器存储按「协议 + 主机 + 端口」的 origin 隔离，而 DSH Desktop 每次启动都在 127.0.0.1 绑定一个**随机临时端口**，端口一变 origin 就变，上次保存的设置永远读不到，表现为「重启后恢复默认」。已改用 DSH 官方的用户设置命名空间：
 
-- **浏览器端（client.js）** 通过 `ctx.settingsScope` 服务绑定命名空间 `dsh-theme-endfield`，读取/写入并订阅变化；
-- **Host 端（index.js）** 通过 `ctx.settings.register('dsh-theme-endfield', schema)` 声明参数 schema，由 `@deepseek-ai/dsh-settings-file` 落到 `<dshHome>/settings.yaml`（DSH Desktop 的 profile 下同样适用）。
+- **DSH 0.1.7-rc.1（当前）**：**Host 端（index.js）** 导出 schemastery `Config`，16 个字段全部 `.volatile()`——0.1.7 只把 volatile 字段投影成可编辑表单；命名空间就是本插件在 `cordis.patch.yml` 里那一行的 profile entry id（`theme-endfield`）。**浏览器端（client.js）** 用 `ctx.configForms.get('theme-endfield')` 读/写/订阅，值由 DSH 的设置服务写进 profile patch `<profile>/cordis.patch.yml`。另外 Host 会调用 `ctx.settings.configure({ auto: false }, ctx.fiber)` 告诉 DSH 本插件自带设置页，不要再自动生成一份。
+- **≤ 0.1.5-rc.2（旧宿主，仍兼容）**：Host 通过 `ctx.settings.register('dsh-theme-endfield', schema)` 声明命名空间，由 `@deepseek-ai/dsh-settings-file` 落到 `<dshHome>/settings.yaml`；浏览器端用 `ctx.settingsScope` 的 `bind({ namespace, decode })` 读写。client 在找不到 `configForms` 时自动回落到这条路径。
 
-落盘位置由 DSH 决定（`$DSH_HOME` 或 `~/.dsh/...`），与浏览器 origin/端口无关，因此在 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 两种运行方式下设置都能正确持久化——它们跑的都是 127.0.0.1 loopback 页面，DSH 会把连接解析为 `host` 持久化模式。
+两代的落盘位置都由 DSH 决定（`$DSH_HOME` 或 `~/.dsh/...`），与浏览器 origin/端口无关，因此在 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 两种运行方式下设置都能正确持久化——它们跑的都是 127.0.0.1 loopback 页面，DSH 会把连接解析为 `host` 持久化模式。
 
-下表「字段」（缩写）就是命名空间里的存储字段，语义等价于旧 localStorage 键名的尾部。
+> **升级提示**：0.1.7-rc.1 废弃了 `settings.yaml`（启动时改名为 `settings.yaml.imported`），且其内置迁移只认少数几个段落名，旧的 `dsh-theme-endfield` 段落不在其中——**升级后请在「设置 › 终末地主题设置」里重设一次**。旧值仍可在 `settings.yaml.imported` 中手工对照。详见 [engineering-notes.md § DSH 0.1.7-rc.1 换掉了整套 settings API](engineering-notes.md#dsh-017-rc1-换掉了整套-settings-api-v110-已跟进)。
 
-> **字段名是 camelCase，且必须与 Host schema 逐字一致**（复合字段尤其：`contourAnim` 而非 `contour-anim`）。写错会**静默**落在一个未声明键上：`settings.yaml` 里多一行没人读的值，声明字段仍是默认——表现为「开关刷新后复位」。成因、影响面与旧存档的迁移见 [engineering-notes.md § 存储字段名](engineering-notes.md#存储字段名必须来自-schema不能用去掉前缀推出来issue-15)，回归测试见 [testing.md](testing.md#设置页)。
+下表「字段」（缩写）就是存储里的字段名：0.1.7-rc.1 起是 profile patch 里 Config 的 volatile 路径，旧世代是 `settings.yaml` 段落里的键，两者同名（都等价于旧 localStorage 键名的尾部）。
+
+> **字段名是 camelCase，且必须与 Host schema 逐字一致**（复合字段尤其：`contourAnim` 而非 `contour-anim`）。字段名对不上时，值会**静默**落在没人读的地方（旧世代是 `settings.yaml` 里多一行未声明键；0.1.7 起是对非 volatile/未声明路径的写入被 schema 拒绝），声明字段仍是默认——表现为「开关刷新后复位」。成因、影响面与旧存档的迁移见 [engineering-notes.md § 存储字段名](engineering-notes.md#存储字段名必须来自-schema不能用去掉前缀推出来issue-15)，回归测试见 [testing.md](testing.md#设置页)。
 
 ## 总览
 
@@ -24,11 +26,14 @@
 | 01 主题 | 终末地主题 | 开 | `enabled`（旧键 `dsh-theme-endfield-enabled`）|
 | | 主题配色 | 谷地黄 | `palette` |
 | | 主题圆角 | 直角 | `radius` |
+| | 磨砂玻璃 | 关 | `glass` |
 | 02 背景 | 等高线背景 | 关 | `contour` |
 | | 动态等高线 | 开 | `contourAnim` |
 | | 鼠标轨迹 | 关 | `contourTrail` |
+| | 等高线绘制 | Canvas | `contourRenderer` |
 | | 动态帧率 | 24 FPS | `contourFps` |
 | | 动态速度 | 标准 | `contourSpeed` |
+| | 滚动暂停 | 开 | `contourScrollPause` |
 | | 背景水印 | 开 | `watermark` |
 | | 水印保持显示 | 关 | `watermarkPersist` |
 | 03 动画 | 启动加载动画 | 关 | `loader` |
@@ -79,7 +84,7 @@
 
 ### 动态等高线（默认开启，需先开启等高线背景）
 
-等高线流动变形。动态帧率提供 `24 FPS`、`60 FPS`、`120 FPS` 三档，默认 `24 FPS`；动态速度提供 `1x`、`2x`、`4x` 三档，分别对应慢速、标准、快速，默认 `2x`。帧率写入 `dsh-theme-endfield-contour-fps`，速度写入 `dsh-theme-endfield-contour-speed`，非法值自动回退到默认值。关闭则为静态图案，不做任何逐帧计算。
+等高线流动变形。动态帧率提供 `24 FPS`、`60 FPS`、`120 FPS` 三档，默认 `24 FPS`；动态速度提供 `1x`、`2x`、`4x` 三档，分别对应慢速、标准、快速，默认 `2x`。两者写入 schema 字段 `contourFps` / `contourSpeed`（UI/存储键分别是 `dsh-theme-endfield-contour-fps` / `dsh-theme-endfield-contour-speed`，由 `PREFS_KEY_TO_FIELD` 映射；旧世代落盘时用的是 UI 键的尾部拼写），非法值自动回退到默认值。关闭则为静态图案，不做任何逐帧计算。
 
 **尊重系统「减少动态效果」**：`prefers-reduced-motion` 下图案照常渲染（静态纹理不算动效），但场变形不启动——即使开关是开的。此时设置行会说明是系统偏好在生效，而不是让开关看起来失灵。
 
@@ -187,5 +192,6 @@
 | 提问卡片「推荐」徽标 | 前景与背景令牌被映射成同一值，完全不可见 | 16.50:1 |
 | 提问卡片选项编号 | 暗色选中行上黑底黑字，1.25:1 | 11.69:1 |
 | 新建会话页背景光晕 | 写死的 `#6187D8` | 改强调色，按亮度对齐原强度 |
+| 会话头部预设徽章（agent preset，如「创造模式」） | 上游把徽章移进 `_headerActions` 插槽的包裹层里，主题的 `>` 选择器失配，退回默认灰胶囊 | 恢复强调色填充 + 黑字，**尺寸沿用上游**（不撑宽） |
 
 这些的成因分析见 [engineering-notes.md § 已修问题归档](engineering-notes.md#已修问题归档)。

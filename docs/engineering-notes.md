@@ -15,7 +15,7 @@
 - [等高线背景](#等高线背景)
 - [启动加载屏](#启动加载屏)
 - [设置页国际化](#设置页国际化)
-- [持久化说明（见下文正文）](#为什么设置必须落在-host-的设置命名空间不再用-localstorage)
+- [为什么设置必须落在 Host 的设置命名空间（不再用 localStorage）](#为什么设置必须落在-host-的设置命名空间不再用-localstorage)
 - [已修问题归档](#已修问题归档)
 - [验证方法论](#验证方法论)
 
@@ -33,17 +33,69 @@
 - `sessionStorage`——更糟，连同一会话的标签页都不共享。
 - IndexedDB——仍按 origin 分库，与 Desktop 随机端口的组合同样无法根治。
 
-正解是 DSH 自己的用户设置服务：**解析与落盘都由 Host 决定**（`ctx.settings.register` → `@deepseek-ai/dsh-settings-file` 写到 `<dshHome>/<…>/settings.yaml`），与页面 origin、端口完全无关。因此 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 走同一条路径：它们都是 `127.0.0.1` loopback 页面，DSH 把连接解析成 `host` 持久化模式，值写进 profile 落盘位置，换端口也能读回。
+正解是 DSH 自己的用户设置服务：**解析与落盘都由 Host 决定**，与页面 origin、端口完全无关。因此 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 走同一条路径：它们都是 `127.0.0.1` loopback 页面，DSH 把连接解析成 `host` 持久化模式，值写进 profile 落盘位置，换端口也能读回。
+
+### DSH 0.1.7-rc.1 换掉了整套 settings API（v1.1.0 已跟进）
+
+0.1.7-rc.1 移除了 `ctx.settings.register` / `settings.get` / `settings.watch`、`@deepseek-ai/dsh-settings-file` 这个包，以及浏览器侧 `ctx.settingsScope` 服务：
+
+| | ≤ 0.1.5-rc.2（旧） | 0.1.7-rc.1（新） |
+| --- | --- | --- |
+| Host 声明 | `ctx.settings.register('dsh-theme-endfield', schema)` | 模块导出 schemastery `Config`，每个字段 `.volatile()` |
+| 命名空间 | 插件自定义字符串 `dsh-theme-endfield` | **profile entry id** = 本包 `cordis.patch.yml` 中该行的 `id: theme-endfield`（`index.js` 的 `SETTINGS_ENTRY`） |
+| 落盘 | `@deepseek-ai/dsh-settings-file` → `<dshHome>/settings.yaml` | DSH 设置服务 → profile patch `<profile>/cordis.patch.yml`（`ctx.configEditor` 加文件锁 + 原子写 + 热重载） |
+| Client 读写 | `ctx.settingsScope` 的 `bind({ namespace, decode })` | `ctx.configForms.get(<entryId>)` |
+| `set()` 返回 | 无（fire-and-forget） | `Promise<boolean>`；`false` = Host 拒绝或**跳过**（非 loopback 页面是 memory 模式，永不下盘） |
+
+关键差异，逐条都有对应的防护：
+
+- **只有 `.volatile()` 字段可编辑。** `ctx.settings` 只把 volatile 路径投影成表单，写非 volatile 路径会直接报 `Config field "x" is not volatile`；整份 schema 一个 volatile 字段都没有时该条目**根本不出现**在设置里。所以 `index.js` 的 `Config` 16 个字段全部 `.volatile()`，`test/settings-config-forms.test.js` 会逐字段断言这一点（漏一个就是「设置保存不了」的现代写法）。
+- **两个 schemastery 必须区分。** DSH 同时装了带 `.volatile()` 的 `@deepseek-ai/schemastery`（3.18.4）和不带它的旧 `schemastery`（3.18.0）。`index.js` 的 `loadSchemastery(true)` 会逐个候选检查 `.volatile` 是否真的存在，找不到就返回 `undefined`（本插件退化成无需配置，而不是挂一个假表单）。
+- **命名空间是 entry id，不是包名。** `theme-endfield` 这个串同时出现在 `cordis.patch.yml` 的 `id:`、`index.js` 的 `SETTINGS_ENTRY` 和 client 的 `PREFS_ENTRY`；三者由新测试交叉校验。client 另外会依次尝试 `include:` 前缀等几种安装别名，优先选真正被 Host served（`status:'ready'`）的那个拼写；一个都没 served 时先绑定首选拼写（表单只是共享镜像的懒视图，早绑定才能等到迟到的 section）。此后每次镜像重载都会让每个表单重新派生，`unavailable`→`ready` 的转变会把「另一个拼写被 served」通知过来，此时自动切过去；万一镜像只更新却不通知（表单快照存储丢弃等价快照），还有**有界 settle watch**（20 × 500ms）自己轮询兜底。两种情况下切换期间 held 的编辑都会补写到新拼写上。
+- **`settings.yaml` 已废弃。** DSH 启动时把已有的 `settings.yaml` 改名为 `settings.yaml.imported`，并只迁移 `LEGACY_SECTION_ENTRIES` 里那几段。旧的主题段落名 `dsh-theme-endfield` 不等于 entry id `theme-endfield`，因此**不在迁移之列**，需要用户在设置页重设一次；这是 DSH 侧的行为，不是本插件丢的。旧值仍留在 `settings.yaml.imported` 里可手工对照。
+- **旧宿主仍然可用。** client 在找不到 `configForms` 时回落到 `ctx.settingsScope`（`binder.bind({ namespace: 'dsh-theme-endfield', decode })`），Host 在 `settings.register` 存在时才注册旧命名空间。两代 transport 的快照字段同名（`status` / `value` / `writable` / `mode`），所以除了「取句柄」和「写返回」之外整条存储逻辑是同一份。
 
 ### Host ↔ Client 数据流
 
-1. **声明**（Host `index.js`）：`ctx.inject(['settings'], sctx => sctx.settings.register('dsh-theme-endfield', schema, { applies:'live' }))`。schema 每个字段都是**字符串**字段并带 `.default(...)`：default-ON 存 `'1'`（读作 `!== '0'`），default-OFF 存 `'0'`（读作 `=== '1'`）；palette/radius/fps/speed 各存一个文档里写明的字面量。字符串化的好处：与旧的存盘点位完全一致，老的 `<settings.yaml>` 节无需迁移即可原样命中。
-2. **写**（浏览器 `client.js`）：设置面板每个 toggle 调用内部 `prefsSet(field, value)` → 只有当 scope 快照是 **durably served**（`mode:'host' && status:'ready' && writable`，即 Host 的 describe 视图已真正列出本命名空间）时才调用 `ctx.settingsScope` 的 `scope.set(field, value)`，Host 收到后原子写盘。只凭快照里的 `writable` 判写是一个坑：host 模式的 describe 视图即便本命名空间**尚未被注册**也会返回 `writable:true` 与 `status:'unavailable'`（`commit radius = round … status= unavailable` 就是这么打出来的）——旧代码照写不误、清了脏标记但什么都没落盘，刷新即丢。现在这种写被**拦下并标脏**（页面内仍生效），等快照在后续 ready 回相（Host `register` 提交文档、镜像重载）时由 subscription 自动补写；注册后仍迟迟不出现则说明 host 半部未挂载，属安装侧问题，前台不再假装写成功了。
-3. **读 / 生效**：同一段 scope 的 `getSnapshot().value` 就是已由 schema 校验并合并默认值的整段；主题层的 `isEnabled()` 与其它 getter 每次调用都 `prefsGet(field)` 现读本段，天然随值变化。
-4. **订阅同步**：`scope.subscribe(...)` 在每次落盘/镜像变化时唤醒，client 再跑一遍 `reconcileFromPrefs()`，把主题开关（enabled → mount/unmount token+样式表）、圆角/配色 class、水印、等高线、雷霆大字重新对齐。这样同 profile 里**另一个窗口/设备**编辑 `<settings.yaml>`（或本轮写入被 Host 回相确认）都不需要刷新即可热生效。
+1. **声明**（Host `index.js`）：0.1.7-rc.1 导出 `Config`（`z.object({ 每个字段: z.string().default(...).volatile() })`）；同时用 `ctx.inject(['settings'], sctx => sctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber)))` 关掉自动生成的设置页（本插件自带四组页面）。旧宿主则在 `settings.register` 存在时执行 `register('dsh-theme-endfield', schema, { applies:'live' })`。schema 每个字段都是**字符串**字段并带 `.default(...)`：default-ON 存 `'1'`（读作 `!== '0'`），default-OFF 存 `'0'`（读作 `=== '1'`）；palette/radius/fps/speed 各存一个文档里写明的字面量。字符串化让三代存盘点位的值模型完全一致，client 的键表、面板与测试都不必随 transport 改动。
+2. **写**（浏览器 `client.js`）：设置面板每个 toggle 调用内部 `prefsSet(field, value)` → 只有当快照是 **durably served**（`mode:'host' && status:'ready' && writable`）时才调用 transport 的 `set(field, value)`，Host 收到后原子写盘。只凭 `writable` 判写是一个坑：host 模式的快照即便本命名空间**尚未被 served** 也会返回 `writable:true` 与 `status:'unavailable'`（`commit radius = round … status= unavailable` 就是这么打出来的）——旧代码照写不误、清了脏标记但什么都没落盘，刷新即丢。现在这种写被**拦下并标脏**（页面内仍生效），等快照在后续 ready 回相（Host 文档提交、镜像重载）时由 subscription 自动补写；`configForms.set()` 明确返回 `false`（Host 拒绝/跳过）时同样重新标脏等待下次回相，而不是假装写成功。
+3. **读 / 生效**：transport 的 `getSnapshot().value` 就是已由 schema 校验并合并默认值的整段（client 再经 `prefsResolveSection()` 归一化到 16 个声明字段）；主题层的 `isEnabled()` 与其它 getter 每次调用都 `prefsGet(field)` 现读本段，天然随值变化。
+4. **订阅同步**：`form.subscribe(...)` / `scope.subscribe(...)` 在每次落盘/镜像变化时唤醒，client 再跑一遍 `reconcileFromPrefs()`，把主题开关（enabled → mount/unmount token+样式表）、圆角/配色 class、水印、等高线、雷霆大字重新对齐。这样同 profile 里**另一个窗口/设备**编辑落盘文件（或本轮写入被 Host 回相确认）都不需要刷新即可热生效。订阅返回的 disposer 现在会被保存并在 run 拆除时调用：`ConfigForm` 是 provider 拥有、跨插件共享的实例，漏掉它会把这一个监听器泄漏给同页面的下一次 run。
 5. **启动恢复**：`apply()` 早于 transport 就绪时，读 schema 默认值（内存镜像），一旦 `status:'ready'` 的第一个真值镜像到达就切换到持久值——即使 Desktop 在随机端口上启动，也能立刻恢复到上次的设置。
 
-防御性：若 ctx 里根本没有 `settingsScope` 服务（纯独立页/测试桩），则回落内存默认值 + 会话内本地覆盖，写不过盘但**不引入 localStorage**，也绝不 throw。
+防御性：若 ctx 里既没有 `configForms` 也没有 `settingsScope`（纯独立页/测试桩），则回落内存默认值 + 会话内本地覆盖，写不过盘但**不引入 localStorage**，也绝不 throw。
+
+### 加载期解析 schemastery：dev-link 安装必须显式去找（v1.1.1 起加固，v1.1.2 加自检报告，v1.1.3 改为结构化扫描）
+
+- **为什么只能在顶层解析。** loader 导入模块后立刻 `runtime.Config = plugin.Config`（`@deepseek-ai/cordis-plugin-loader` 的 `Entry._init` → `registry.plugin`），这发生在任何插件体运行之前，`Config` 因此必须是模块求值期的静态导出——不能延迟到 `apply()` 里再做（那里能拿到 `ctx`，但已经太晚了）。
+- **dev-link 安装为什么解析不到。** 本包在 profile 里是软链/junction（`<profile>/node_modules/dsh-theme-endfield` → 本仓库）。Node 的 ESM/CJS 解析都**先取真实路径**，于是本文件的 `require` 链从 `E:\…` 开始，profile 的 `node_modules` 根本不在链上：一句 `require('@deepseek-ai/schemastery')` 必然 `MODULE_NOT_FOUND`。发布版（真实目录安装）才走普通 require 链。
+- **怎么找。** `resolutionRoots()` 显式列出所有可能持有 schemastery 的目录，再用 `require.resolve(spec, { paths: [dir] })`（语义是「当作从该目录发起」）逐个尝试，按 **spec 分组、scoped 优先**（只要存在 `@deepseek-ai/schemastery`，那份一定胜出，不会被兄弟插件留在更早路径上的旧 `schemastery` 抢走）。候选根依次是：本模块自身目录 → `require.main` 的目录与 `require.main.path` → `process.cwd()` → 本模块的各级祖先目录 → `DSH_HOME` 与 `~/.dsh` 的布局 → **结构化扫描**（对 `__dirname` / cwd / `require.main` / `process.argv[1]` / `process.execPath` 的每一级祖先调用 `pushLayout`，即把 `<祖先>`、`<祖先>/node_modules`、`<祖先>/profiles/*` 及其 `node_modules` 全部纳入）→ `%APPDATA%\npm\node_modules` → `PATH` 的每个目录（上限 40 条）。最后两道兜底：`require.main.require(spec)`，以及**扫描本进程 `require.cache` 里已加载过的 schemastery**（DSH 自己的设置服务就 import 它，所以只要它在本进程里，就能按对象身份复用）。
+  **结构化扫描是这里的关键**：它不依赖 `DSH_HOME`、`homedir()` 或 cwd 取到任何特定值——只要进程还能说出自己从哪儿启动，就能顺着祖先目录找到 `<profile>/node_modules`。v1.1.1/1.1.2 只按环境变量拼路径，一旦启动器把 `DSH_HOME` 设成 profile 自身（或设成别的值）就会整条落空，这正是「Host 侧依旧 `absent`」的成因。
+- **失败长什么样。** 找不到时 `Config` 是 `undefined`：`Config.listConfigs`（cordis_inspect 的 host provider）对该 entry 报 **`absent`**，DSH 不为它投影任何表单，client 于是永远停在 session-local —— **面板照常打开、开关照常能拨、刷新即复位**。这条症状与主题其它功能是否正常无关，所以极易被误判成「主题坏了」或「存储又变了」。注意 `absent` 只表示「没有 Config」；有 Config 但字段不 volatile 会以 `unsupported`/整条不出现的形式表现，含义不同。
+- **不再静默。** Host 侧 `Config === undefined` 时 `apply()` 打 `ctx.logger.warn`（成功则 `debug` 一行写明从哪个根解析到）；client 侧把 Host 真正 served 的命名空间列表并进既有的 `dbg` 诊断（`hostServes=`），`settle watch` 放弃时也明确打一行（`boundNs=` / `status=` / `hostServes=`）。有这一行就能立刻区分「Host 半没导出 Config」与「client 绑错了 entry 拼写」——两者现象完全一样。
+- **自检报告（v1.1.2 起）。** 构建不出 `Config` 时，除日志外还会把一份 JSON 写到 **profile 目录**（`ctx.baseUrl` 可解析时）或 `$DSH_HOME`：`theme-endfield-diagnostic.json`。内容包含 `dshHomeDirs` / `homedir` / `cwd` / `mainModule` / `argv` / `baseUrl` / `loaderStartedAt`（本进程启动时刻，用来判断「到底有没有真的重启过」）/ `cachedSchemasteryModules`，以及**每个候选根 × 每个包名**的 `require.resolve` 结果（成功路径或错误码）。`Config` 一旦构建成功该文件会被自动删除（`clearStaleDiagnostic`）：所以它**存在**＝host 侧仍拿不到 schemastery，**不存在**＝host 侧已正常、问题在别处。它只是诊断，不参与任何运行逻辑。
+- **改 Host 半必须重启 DSH 进程。** 浏览器刷新只重新拉 `client.js`（client 模块由 host 按请求从磁盘读取，所以改了就生效）；而 **Host 半的模块只在 profile 启动时 import 一次**（`EntryTree.import` 走 Node 内部 ESM loader，命中 ESM 缓存，不做 cache-busting），`dsh-hmr` 的 watch glob 默认忽略 `**/node_modules`，软链到仓库的插件文件不在它的观察范围内。因此「改完 `index.js` → 刷新页面 → 设置仍然不保存」是预期现象：进程里跑的还是启动时那份旧模块（旧版没有 `Config` 导出 → `absent`）。排查持久化问题前，先整进程重启一次再看——重启后若 `theme-endfield-diagnostic.json` 仍出现，才说明是解析问题；若它消失且 `Config.listConfigs` 变成 `schema`，说明已修好。
+- **`Config` 必须是字面量属性（v1.1.4）。** 这条独立于「找不找得到 schemastery」：`index.js` 是 **CommonJS**，而 loader 用 Node 内部 **ESM** loader 导入 entry，CJS→ESM 的命名空间由 `cjs-module-lexer` 的**静态分析**决定。写成 `const exported = {...}; module.exports = exported; exported.Config = Config;`（赋值在字面量之外）时，lexer 可能只认得出字面量里的 `apply`/`name`，于是 `unwrapExports()` 拿到的对象**有 `apply`（entry 照常 active）却没有 `Config`** —— 表现与「解析不到 schemastery」完全一样（`absent`、无表单、刷新复位），但日志里既不会出现解析失败的 warn，也不会留下自检报告，因为那份 reporting 代码根本没被跑到。
+  **判据**：在普通 node 里 `require()` 这个包得到 `Config = true`，而宿主进程里 `Config.listConfigs` 仍报 `absent`，且重启后 `theme-endfield-diagnostic.json` **不出现** —— 三点同时成立就说明是这里，而不是路径解析。修法是把 `Config` 写成导出字面量的**静态属性**（值为 `undefined` 时表示「本机确实没有 schemastery，无需配置」，是合法状态而非法 schema）。
+
+### 找不到 `.volatile()` 也必须能存（v1.1.5）
+
+v1.1.4 之前的判据是「**必须**找到带 `.volatile()` 的 schemastery，否则不导出 `Config`」。这条判据把一个**可降级**的情况升级成了**完全不可用**：没有 `Config` 不是「主题少了个功能」，而是 DSH 不为该 entry 投影任何表单，于是**用户拨的每一个开关都只活在页面里，刷新即丢**——正是本文件反复记录的那个症状。
+
+实测成因（本机 web profile）：`@deepseek-ai/schemastery@3.18.4`（全机唯一带 `.volatile()` 的副本）**能 `require.resolve` 到，却 require 不进来**——自检报告 `resolution` 里那一行报 `resolved`，而 `cachedSchemasteryModules` 里根本没有它；同一轮扫描反而成功加载了 `xiaofeishu` profile 的 `3.18.1` 与无 scope 的 `3.18.0`，这两个都**没有** `.volatile()`。于是候选列表非空、却没有一个能过旧判据，`Config` 落到 `undefined`。
+
+关键事实是：**`.volatile()` 就是 `this.extra('volatile', true)`**（3.18.4 源码里只有这一行），而 `.extra()` 在 3.18.0 / 3.18.1 里都有。DSH 侧读的是**投影结果**（`meta.volatile`），不是那个方法本身，所以标记可以在没有该方法时**合成**：
+
+| 能力 | 3.18.4（DSH 自带） | 无 scope 3.18.0 | 3.18.1 |
+| --- | --- | --- | --- |
+| `.extra(key, value)` | ✓ | ✓ | ✓ |
+| `.volatile()` | ✓ | ✗ | ✗ |
+| 能否加载（本机 web profile） | **✗** | ✓ | ✓ |
+
+现在 `selectBuilder()` 分两轮挑：先要 `native`（真的 `.volatile()`，保真度最高），没有才退到只有 `.extra()` 的副本并**合成标记**（`mode: 'synthesized'`）；两者都没有才不导出 `Config`。两种模式下每个字段最终都带 `meta.volatile === true`，DSH 都投影出可编辑表单。
+
+- **判据写进自检报告**：新增 `schemaMode` 记录走了哪条路；`resolution` 每一行现在除 `resolved` / `error` 外还带 `loaded` / `loadError` / `volatile` / `marker`。「解析得到但加载失败」以前在报告里读起来像自相矛盾，现在是一行结论。
+- **不再有「默认跳过」的断言。** `settings-config-forms.test.js` 的 Host 侧断言在拿不到 schemastery 时**整段跳过**，而拿不到 schemastery 恰恰是它要守的那个场景——于是在唯一要紧的环境里它什么都没验。新的 `settings-config-fallback.test.js` 不依赖本机 schemastery：它把**显式 builder**（含「只有 `.extra()`」这一形状）交给 `buildSchemaWith()`，逐字段断言默认值与 `meta.volatile`，并断言选择顺序（native 优先、`.extra()` 兜底、两者皆无则不导出）。
 
 ### 存储字段名必须来自 schema，不能用「去掉前缀」推出来（issue #15）
 
@@ -399,11 +451,12 @@ background: var(--dsw-alias-interactive-bg-hover-solid);   /* :hover */
 
 武陵青下同一处是 2.61:1——也不合格，只是没那么刺眼，这正是它一直没被发现的原因。
 
-**选择器匹配的三条铁律**（0.1.2-rc.1 全量重哈希、33 个哈希选择器同日全灭之后总结，见 issue #17）：
+**选择器匹配的四条铁律**（前三条来自 0.1.2-rc.1 全量重哈希、33 个哈希选择器同日全灭，见 issue #17；第四条来自 0.1.5-rc.2 的 header 重构，见七类）：
 
 1. **禁止把模块哈希写进选择器。** CSS Module 类名是 `<hash>_<语义后缀>`，每次上游重新构建哈希全变，钉哈希的选择器**静默失效**。`test/selector-guard.test.js` 会在哈希重新出现时报警。
 2. **复合状态用子串匹配，不用 `[class$=]`。** 属性后缀选择器要求**整个 class 属性**以该串结尾，而元素常常还带第二个类（实测 `[class$='_inspectButton']` 在 `class="gNWCoW_inspectButton HOVERPROBE"` 上直接漏掉）。`[class*='_语义名']` 对拼接免疫；`_unselected` 因下划线断词不会误中 `_selected`。
 3. **泛化后缀必须加作用域。** 轨迹与工作区也有 `*_arrow` 类但**没有 hover 填充**，裸匹配会给它们强行刷墨色（暗色下黑-on-黑）。附件箭头按输入区容器（`_composerSeat`/`_composerHero`）限定；同理清等高线背景必须用 `_centerCol`/`_detailsCol` 限定 `_root`——当前构建 27 个 `*_root` 里有 6 个带不透明底。
+4. **子树位置不是语义，不要用 `>` 把中间层数写死。** 语义后缀能扛住重新哈希，却扛不住上游**插入一层包裹元素**：`A > B` 在 `A > C > B` 上直接失配，同样静默。这条 bug 在一次会话里被犯了**两次**（见七类）：先是把徽章当成 header 的直系子节点，改成 `_headerActions >` 之后又漏掉了**插槽自己那层没有 class 的包裹 div**。层级要么用后代组合器表达，要么更好——**改用元素自身的特征**把目标锁定（不依赖任何一层的位置）。新增或调整这类选择器时，必须对着**真实 DOM**（浏览器里量出来，或从上游渲染代码读出来）验一遍，而不是对着测试夹具。
 
 ### 二类：前景与背景被映射成同一个值
 
@@ -478,6 +531,43 @@ background: var(--dsw-alias-interactive-bg-hover-solid);   /* :hover */
 | 武陵青 亮色 | `#14d0d07a`（α 0.48） | 1.288:1 | **−0.2%** |
 
 亮色青色无需像黄色那样另配一个压暗值（`#beaf00`），因为 `#14d0d0` 并不接近纸白。
+
+### 七类：语义后缀对了，子树位置却变了（同一个 bug 犯了两次）
+
+会话头部的 agent-preset 徽章（「创造模式」）在 0.1.5-rc.2 上悄悄退回上游的灰色胶囊——没有任何报错，因为**匹配不到任何元素的选择器不会报错**。
+
+旧规则 `[class$='_centerCol'] [class$='_header'] > [class*='_label']` 的后缀全对、哈希也没钉，前三条铁律条条满足，它错在**位置**：`>` 要求这个标签是 header 行的直系子节点，而真实 DOM 里它深在四层之下。第一次修复把 `>` 下移一层到 `_headerActions`——**还是错的**，因为 header 渲染插槽时，插槽会给**每一个条目再包一层没有 class 的 div**：
+
+```
+div.pI_x6G_centerCol
+  > header.wSkVaW_header
+      > div.wSkVaW_titleRow
+        > div.wSkVaW_titleCluster
+          > div.wSkVaW_headerActions
+            > div                     ← 插槽的条目包裹层，className 为空字符串
+              > span.SVAs4q_label     ← 徽章
+                > svg.SVAs4q_icon
+```
+
+也就是说：**凡是靠 `>` 数层数的写法，都在赌上游渲染几层包裹；上游这一版加了两层。** 而包裹层本身没有 class，连"点它的名"这条退路都没有。
+
+**为什么第一次"修完"看起来像没生效。** 在浏览器控制台里量了一次真实 DOM，得到的三个值把三种可能一次分清了：`HASNEW true`（我改的规则**已经到页面**，所以不是缓存/没刷新）、`ACCENT #fff500`（变量有值，不是变量问题）、`BG rgb(36, 38, 36)`（最终仍是上游灰底）＋祖先链里那个 `DIV.`。**一条"已经生效但什么都没匹配到"的规则，和一条"根本没送到浏览器"的规则，症状完全一样**；不先在页面里量这三个值，只会在"是不是缓存"和"选择器又写错了"之间来回猜——本次就是这样多花了一整轮。
+
+**为什么整套验证都没发现。** `test/shoot.js` 的截图夹具先后把标签直接挂在 `.wSkVaW_header` 和 `.wSkVaW_headerActions` 底下，**两次都是照着当时的选择器搭的**；`test/preset-chip.test.js` 的夹具也一样漏了那层无 class 包裹层。于是选择器在夹具上命中、截图正常、测试全绿，而真实页面一个元素都没匹配到。这是本次最值得记的教训：**夹具一旦是为了"让选择器通过"而搭的，它就从验证退化成了同义反复。**
+
+**最终修法：不再数层数，改用徽章自身的特征。**
+
+```
+[class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg)
+```
+
+作用域停在 `_headerActions`，目标由徽章**自己**的性质确定——它是该插槽里唯一带图标的 `_label`。这条判据是有依据的：同一插槽里 jobs 渲染出的是 `_root` / `_trigger` 根，它那些 `_label` 出现在下拉菜单**深处**且**只有文字**；schedule 模块里根本没有 `_label` 这个局部名。**把裸后代匹配当反例做了变异验证**（去掉图标判据）——jobs 的行标签立刻被刷成强调色，说明这条判据不是装饰。
+
+另外一处不是选择器问题，而是**越界**：主题在这里的职责是**配色**，不是几何。第一次修好选择器时，我顺手按旧注释里的"撑满动作行"意图把包裹层压平（`display:contents`）并让 `_headerActions` 增长（`flex:1 1 auto`），结果在真实头部上变成一条**横贯整个会话列的黄色长条**（实测 976px 的行里占了 923px），被原样反馈回来（"现在变成一个长条了"）。那套几何是 0.1.2-rc.1 时代为"徽章是 header 行直系子节点"写的，骨架变了以后照搬只会得到另一个坏结果。**结论：只改颜色，尺寸与命中区域沿上游**（高度、180px 上限、超长省略号全部保留）。这条也写进了代码注释，防止下次又被人按旧注释"还原"回去。
+
+**变异验证 5 类，全部报错**：换回第一次修完的那版选择器（漏包裹层）→ 2 条断言红（背景正是线上看到的灰底）；把图标判据换成裸后代 → jobs 标签与"容器外 `_label`"两条反向断言红；重新加回压平 + 增长 → 两条"变成长条"断言红。
+
+`test/preset-chip.test.js` 现在按**量出来的**骨架搭夹具（含那层无 class 包裹层，以及一个"根带 class、`_label` 藏在菜单里"的 jobs 式兄弟条目），断言**结果**而不是选择器文本，并且**同时守住两侧**：既不能没上色，也不能被拉成长条。
 
 ---
 

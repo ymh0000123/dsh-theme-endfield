@@ -54,7 +54,18 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
     height:100%;display:flex}
   .wSkVaW_header{padding:12px 18px;border-bottom:1px solid var(--dsw-alias-border-l1);
     font-size:13px;color:var(--dsw-alias-label-secondary);flex:none;
-    display:flex;gap:10px;align-items:center}
+    min-height:76px;box-sizing:border-box}
+  /* The real 0.1.5-rc.2 header skeleton, which the theme's chip selector has to
+     walk — measured off the running GUI, not guessed:
+       wSkVaW_header > titleRow > titleCluster > headerActions
+         > (class-less slot entry wrapper) > label > svg icon
+     Mirror it here or the shots validate a fiction. This fixture has been wrong
+     twice: it first hung .x_label straight off .wSkVaW_header, then off
+     .wSkVaW_headerActions, both times matching a selector that matched NOTHING on
+     the real page — so the shots looked correct while the chip stayed stock grey. */
+  .wSkVaW_titleRow{display:flex;align-items:center;gap:0;min-height:30px}
+  .wSkVaW_titleCluster{flex:1;display:flex;align-items:center;gap:10px;min-width:0}
+  .wSkVaW_headerActions{flex:none;display:flex;align-items:center;gap:8px}
   .wSkVaW_viewArea{flex:1 1 auto;padding:26px 0;overflow:hidden}
   .col{max-width:748px;margin:0 auto;padding:0 16px}
   .turn{margin-bottom:22px}
@@ -71,10 +82,14 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
   .x_newSession{display:block;width:100%;padding:8px 10px;margin-bottom:12px;
     font:600 12px Arial;border:1px solid var(--dsw-alias-border-l2);cursor:pointer}
   /* Header chip label. The theme styles it via
-     [class$='_centerCol'] [class$='_header'] > [class*='_label'] (hash-free since
-     the 0.1.2-rc.1 rehash killed the pinned .SVAs4q_* names). */
-  .x_label{display:inline-flex;align-items:center;padding:3px 10px;
+     [class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg)
+     (hash-free since the 0.1.2-rc.1 rehash killed the pinned .SVAs4q_* names). The
+     icon is not decoration for this fixture: it is the chip's own identifying
+     feature, because neither the depth (slot wraps the entry in a class-less div)
+     nor the wrapper itself can be named — see the markup below. */
+  .x_label{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;
     font:600 11px Arial}
+  .x_labelIcon{flex:none;opacity:.7}
   table{border-collapse:collapse;width:100%;margin-top:12px;font-size:12px}
   th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--dsw-alias-border-l1)}
   .wSkVaW_composerSeat{background:linear-gradient(180deg,
@@ -102,8 +117,12 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
     </div></div>
     <div class="pI_x6G_centerCol"><div class="wSkVaW_root">
       <div class="wSkVaW_header">
-        <span class="x_label">cordis</span>
-        <span class="Md3f7G_turnStatus">Deep diving...</span>
+        <div class="wSkVaW_titleRow">
+          <div class="wSkVaW_titleCluster">
+            <div class="wSkVaW_headerActions"><div><span class="x_label"><svg class="x_labelIcon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="4" r="2"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="12" r="2"/></svg>cordis</span></div></div>
+            <span class="Md3f7G_turnStatus">Deep diving...</span>
+          </div>
+        </div>
       </div>
       <div class="wSkVaW_viewArea"><div class="col">
         <div class="turn"><div class="who">User</div>
