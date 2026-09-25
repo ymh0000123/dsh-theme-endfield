@@ -5,10 +5,11 @@ const root=path.resolve(__dirname,'..')
  const browser=await launch()
  try {
   await boot(browser,root,{contour:'1',contourRenderer:'worker-webgl'},`
-    window.__workers=[];window.__frames=0;window.__live=0;
+    window.__workers=[];window.__frames=0;window.__painted=0;window.__live=0;
     const NativeWorker=Worker;
     window.Worker=class extends NativeWorker {
-      constructor(...args){super(...args);__workers.push(this);__live++;this.alive=true}
+      constructor(...args){super(...args);__workers.push(this);__live++;this.alive=true;
+        this.addEventListener('message',e=>{if(e.data?.type==='painted')__painted++})}
       postMessage(...args){if(args[0]?.type==='frame')__frames++;return super.postMessage(...args)}
       terminate(){if(this.alive){this.alive=false;__live--}return super.terminate()}
     }`)
@@ -18,7 +19,16 @@ const root=path.resolve(__dirname,'..')
   console.log('Actual renderer:',backend)
   // A static preference stops new frame jobs after the last update settles.
   await browser.evaluate('__prefs.setItem("dsh-theme-endfield-contour-anim","0")')
-  await browser.sleep(400)
+  /* Switching off still submits ONE redraw, so the static sheet is a complete
+     picture rather than a half-updated frame. When a job is already in flight
+     that redraw waits in pending until the worker reports painted, so a fixed
+     settle window is a bet on the round trip: on a slow runner the extra frame
+     lands after any window we could pick, which is how this test used to fail.
+     Wait for the worker to fall idle — every submitted job painted — because that
+     is the moment the update has actually settled, then require the count to
+     hold. The assertion itself is unchanged: once settled, no new job appears. */
+  await browser.until('__frames === __painted')
+  await browser.sleep(100)
   const staticCount=await browser.evaluate('__frames')
   await browser.sleep(300);assert.equal(await browser.evaluate('__frames'),staticCount)
   await browser.evaluate('__prefs.setItem("dsh-theme-endfield-contour-anim","1")')
