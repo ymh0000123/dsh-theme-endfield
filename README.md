@@ -76,3 +76,13 @@ docs/              设计、功能、工程与测试文档
 ## 许可证
 
 MIT，仅覆盖本项目的原创代码；第三方素材的归属见[素材归属](#素材归属)。
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=ymh0000123%2Fdsh-theme-endfield&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ymh0000123/dsh-theme-endfield&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ymh0000123/dsh-theme-endfield&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ymh0000123/dsh-theme-endfield&type=date&legend=top-left" />
+ </picture>
+</a>
