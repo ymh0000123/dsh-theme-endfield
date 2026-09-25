@@ -330,7 +330,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
   }
 
   /* --- the "still speaking" gate: duration-matched, not a fixed window ---
-  
+
      A real voice line is not a chime. The user's generated Endfield lines run
      2.9-4.7 seconds, so a fixed 2.5 s debounce alone would let one announcement
      start on top of another. `soundDurationMs()` derives the window from the file
@@ -460,13 +460,13 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
   }
 
   /* --- the tools/execute seam must stay untouched ---
-  
+
      This plugin must NOT listen on `tools/execute`. That event is a waterfall
      whose contract is "call next() and return its result"; a listener that
      inspects the call and returns without calling `next()` reports "no result",
      so the tool never executes and EVERY later tool call in the session fails.
      That regression is what these assertions exist to prevent from coming back.
-  
+
      The fake host records which events were subscribed, so this is a direct
      structural check rather than a behavioural one. */
   {

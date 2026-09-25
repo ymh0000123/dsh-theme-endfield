@@ -308,15 +308,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        host half's counter stayed at 0 — because `ask_user_question` in this
        composition is provided outside the profile's plugin stack, so
        `dsh-tool-ask-user` never runs and the waterfall is never raised.
-  
+
        The UI is therefore the only place where "a human must act" is always real.
        The host still owns the sound (switch, volume, debounce) — the page only
        reports that a confirmation box appeared. The host-side listeners stay in
        place for compositions where they DO fire; both paths end at the same slot
        and the host's debounce collapses a double report into one sound.
-  
+
        ANCHORS: only the per-panel DATA ATTRIBUTES, never a class name.
-  
+
        A class-based first attempt was tried and it mis-fired in the field:
        `[class*='_card']` matches 15 different components across the installed
        client packages (model selector, agent-preset picker, …) and
@@ -327,7 +327,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          approval panel    <div data-approval-key="…">
          plan review panel <div data-plan-review-key="…">
          question dialog   <div data-question-key="…">
-  
+
        A marker that disappears in a future UI release silences this feature
        without breaking anything — hence the counter in the settings page, which
        is the only way to notice that the anchors stopped matching. */

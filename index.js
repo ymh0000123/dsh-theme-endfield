@@ -779,12 +779,12 @@ function installAudio(ctx, settingsScope) {
 
   /* The two "a human has to do something" triggers, and the ONLY things that
      sound besides the boot plate and a finished answer.
-  
+
      A turn that fails on its own is deliberately NOT one of them: the user's
      rule is that an error needing no human decision should stay silent, so
      `agent/error` is not wired to any slot. The `turn-fail` sound still ships
      and can still be previewed, but nothing fires it.
-  
+
      Each handler keeps a counter so the settings bridge can answer "did the host
      actually receive this request?" — the failure mode where the event exists
      but never reaches a host listener is otherwise invisible from the outside. */
@@ -803,7 +803,7 @@ function installAudio(ctx, settingsScope) {
   });
 
   /* There is deliberately NO `tools/execute` handler here.
-  
+
      An earlier version added one as a redundant second trigger for
      `ask_user_question`. It was wrong and it was destructive: `tools/execute` is
      a WATERFALL (`dsh-tools`: `await this.ctx.waterfall(carrier, 'tools/execute',
@@ -813,7 +813,7 @@ function installAudio(ctx, settingsScope) {
      every subsequent call in the session (observed as every tool returning
      `Cannot read properties of undefined (reading 'isError')` while this plugin
      was mounted, and the tool chain recovering the moment it was removed).
-  
+
      The attention slot does not need it: `approval/request` and
      `user-questions/request` are the two moments that need a human, and both are
      already wired above to the same slot. A redundant path is not worth a seam
@@ -900,7 +900,7 @@ function installAudio(ctx, settingsScope) {
               return send(res, result.played ? 200 : 409, result);
             }
             /* The page reports "a confirmation box is on screen".
-  
+
                This route exists because the two host-side seams that would
                normally carry this moment (`approval/request`,
                `user-questions/request`) do not fire in every composition: in this
@@ -908,7 +908,7 @@ function installAudio(ctx, settingsScope) {
                plugin stack, so `dsh-tool-ask-user` never runs and the waterfall is
                never raised — measured directly as a zero counter while a question
                was on screen. The UI is the one place the moment is always real.
-  
+
                It deliberately does NOT force: unlike a settings preview, a real
                notification must respect the switch, the volume and the per-slot
                debounce, all of which stay owned by the host. `force` is what makes
