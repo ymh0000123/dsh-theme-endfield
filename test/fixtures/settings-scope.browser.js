@@ -37,7 +37,10 @@ const BROWSER_SETTINGS_SCOPE_SNIPPET = `
 var __endfieldFieldDefaults = {
   enabled:'1', palette:'valley', radius:'square', glass:'off', contour:'0', contourAnim:'1',
   contourTrail:'0', contourFps:'24', contourSpeed:'2', contourRenderer:'canvas', contourScrollPause:'1', watermark:'1',
-  watermarkPersist:'0', loader:'0', thunder:'0', thunderAnim:'0'
+  watermarkPersist:'0', loader:'0', thunder:'0', thunderAnim:'0',
+  audioEnabled:'1', audioVolume:'100', audioBoot:'1', audioTurnStart:'1', audioTurnDone:'1',
+  audioAttention:'1', audioTurnFail:'1', audioDebounceMs:'2500', audioSoundDir:'',
+  audioHumanOnly:'1', audioDiag:'0'
 };
 var __endfieldKeyToField = {
   'dsh-theme-endfield-enabled':'enabled', 'dsh-theme-endfield-palette':'palette',
@@ -48,11 +51,18 @@ var __endfieldKeyToField = {
   'dsh-theme-endfield-contour-fps':'contourFps',
   'dsh-theme-endfield-contour-speed':'contourSpeed',
   'dsh-theme-endfield-contour-renderer':'contourRenderer',
+  'contourRenderer':'contourRenderer',
   'dsh-theme-endfield-contour-scroll-pause':'contourScrollPause',
   'dsh-theme-endfield-watermark':'watermark',
   'dsh-theme-endfield-watermark-persist':'watermarkPersist',
   'dsh-theme-endfield-loader':'loader', 'dsh-theme-endfield-thunder':'thunder',
-  'dsh-theme-endfield-thunder-anim':'thunderAnim'
+  'dsh-theme-endfield-thunder-anim':'thunderAnim',
+  'dsh-theme-endfield-audio-enabled':'audioEnabled', 'dsh-theme-endfield-audio-volume':'audioVolume',
+  'dsh-theme-endfield-audio-boot':'audioBoot',
+  'dsh-theme-endfield-audio-turn-start':'audioTurnStart', 'dsh-theme-endfield-audio-turn-done':'audioTurnDone',
+  'dsh-theme-endfield-audio-attention':'audioAttention', 'dsh-theme-endfield-audio-turn-fail':'audioTurnFail',
+  'dsh-theme-endfield-audio-debounce-ms':'audioDebounceMs', 'dsh-theme-endfield-audio-sound-dir':'audioSoundDir',
+  'dsh-theme-endfield-audio-human-only':'audioHumanOnly', 'dsh-theme-endfield-audio-diag':'audioDiag'
 };
 /* UI key -> schema field, mirroring client.js PREFS_KEY_TO_FIELD, plus the
    namespaced schema-field spelling ('dsh-theme-endfield-contourAnim') the
