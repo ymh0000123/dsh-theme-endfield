@@ -54,11 +54,14 @@
 
 ## 4. 配置
 
-设置页 **设置 › 终末地主题设置 › 05 音频**（字段在 `dsh-theme-endfield` 命名空间，持久化在 `<dshHome>/settings.yaml`）：
+设置页 **设置 › 终末地主题设置 › 05 音频**（字段在 `dsh-theme-endfield` 命名空间；0.1.7 起持久化在 profile 的 `cordis.patch.yml`，旧版宿主回落 `<dshHome>/settings.yaml`）：
+
+**总开关 `audioEnabled` 默认关闭**：音效是选择加入（opt-in）的功能，升级到带本功能的版本不会自己开始出声。
+总开关打开后，下面的槽位开关（默认开启）决定具体哪几种情形响。
 
 | 字段 | 默认 | 含义 |
 | --- | --- | --- |
-| `audioEnabled` | `'1'` | 总开关 |
+| `audioEnabled` | `'0'` | 总开关（**默认关闭**，需手动开启） |
 | `audioVolume` | `'100'` | 音量，对 PCM 采样缩放，**不改系统音量** |
 | `audioBoot` | `'1'` | 启动加载动画音 |
 | `audioTurnStart` | `'1'` | 任务开始音 |

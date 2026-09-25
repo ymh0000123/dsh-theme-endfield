@@ -38,7 +38,7 @@ var __endfieldFieldDefaults = {
   enabled:'1', palette:'valley', radius:'square', glass:'off', contour:'0', contourAnim:'1',
   contourTrail:'0', contourFps:'24', contourSpeed:'2', contourRenderer:'canvas', contourScrollPause:'1', watermark:'1',
   watermarkPersist:'0', loader:'0', thunder:'0', thunderAnim:'0',
-  audioEnabled:'1', audioVolume:'100', audioBoot:'1', audioTurnStart:'1', audioTurnDone:'1',
+  audioEnabled:'0', audioVolume:'100', audioBoot:'1', audioTurnStart:'1', audioTurnDone:'1',
   audioAttention:'1', audioTurnFail:'1', audioDebounceMs:'2500', audioSoundDir:'',
   audioHumanOnly:'1', audioDiag:'0'
 };

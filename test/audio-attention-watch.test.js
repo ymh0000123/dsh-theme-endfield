@@ -113,7 +113,10 @@ try {
   process.exit(1)
 }
 
-const prefStore = settingsScopeStub()
+/* The shipped master switch is OFF (sound is opt-in), so the page that wants the
+   watcher running has to opt in — exactly as a user does in 设置 › 05 音频. The
+   off-path is asserted further down by flipping the same field back to '0'. */
+const prefStore = settingsScopeStub({ audioEnabled: '1' })
 const slots = { inject(_n, fn) { fn() }, register() { return () => {} } }
 const mod = loaded.factory(() => null)
 const ctx = {

@@ -67,8 +67,8 @@ const FIELD_DEFAULTS = {
   /* 音频通知 — same defaults as index.js FIELD_DEFAULTS. These names are already
      camelCase schema fields, so they pass through fieldName() unchanged; they are
      listed here so the fixture stays a faithful projection of the host schema
-     (settings-namespace.test.js diffs the two). */
-  audioEnabled: '1',
+     (settings-namespace.test.js diffs the two). The master switch ships OFF. */
+  audioEnabled: '0',
   audioVolume: '100',
   audioBoot: '1',
   audioTurnStart: '1',

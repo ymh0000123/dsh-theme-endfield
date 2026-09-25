@@ -144,8 +144,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       /* 音频通知 (host half: lib/audio.js). Two live slots — the prompt that
          starts a turn and the final answer that ends one. `audioAttention` and
          `audioTurnFail` are 预留: the sounds and switches ship, the triggers do
-         not, and the settings rows say so. */
-      audioEnabled: '1',
+         not, and the settings rows say so.
+
+         The MASTER switch ships OFF (opt-in), mirroring index.js FIELD_DEFAULTS
+         and lib/audio.js FALLBACK: an install that upgrades into this feature
+         must not start making noise by itself. The per-slot switches stay ON, so
+         turning the master on is what starts the sound. */
+      audioEnabled: '0',
       audioVolume: '100',
       audioBoot: '1',
       audioTurnStart: '1',
@@ -1041,38 +1046,6 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // After the mirror has had a fair chance to answer (the settle watch's own
       // budget), state the outcome once whether or not it worked.
       setTimeout(prefsReportBoot, PREFS_SETTLE_LIMIT * 500 + 500)
-      /* DIAG-ROUND6: stop inferring and MEASURE. Ask the bound form to write a
-         value the profile patch already holds, then re-read the served section.
-         That separates the two remaining possibilities exactly:
-           A) value follows the write  -> the boot state was stale; a write fixes it
-           B) value ignores the write  -> the resolver never picks palette up
-         Runs on the transport this page already bound, so no guessing about
-         globals, and it restores whatever it changed. Removed once confirmed. */
-      setTimeout(async () => {
-        try {
-          const scope = prefsScope
-          if (!scope || typeof scope.set !== 'function') { dbg('DIAG6 no bound transport'); return }
-          const before = prefsSnapshotOf(scope)
-          const bv = before && before.value ? before.value : {}
-          const bu = before && before.user ? before.user : {}
-          dbg('DIAG6 BEFORE value.palette=', String(bv.palette), 'user.palette=', String(bu.palette),
-            'value.radius=', String(bv.radius), 'user.radius=', String(bu.radius), 'revision=', before && before.revision)
-          // Write the value the patch row ALREADY holds. If the resolver works,
-          // value.palette must become 'wuling'; the document does not change.
-          const want = bu.palette !== undefined ? String(bu.palette) : 'wuling'
-          let ok = null
-          try { ok = await scope.set('palette', want) } catch (e) { dbg('DIAG6 set threw', String(e && e.message || e)) }
-          dbg('DIAG6 set palette=', want, 'resolved=', ok)
-          if (typeof setTimeout === 'function') {
-            setTimeout(() => {
-              const after = prefsSnapshotOf(scope)
-              const av = after && after.value ? after.value : {}
-              dbg('DIAG6 AFTER value.palette=', String(av.palette), 'revision=', after && after.revision,
-                'FOLLOWED=', String(av.palette) === want)
-            }, 1200)
-          }
-        } catch (e) { dbg('DIAG6 threw', String(e && e.message || e)) }
-      }, PREFS_SETTLE_LIMIT * 500 + 1500)
     }
     if (typeof setTimeout === 'function') {
       /* DIAG-ROUND5: the one comparison the previous rounds could not make.
@@ -5560,7 +5533,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       audioOn: '开启提示音',
       audioOff: '关闭提示音',
       audioHintOn: '由宿主进程播放，页面最小化或切到别的应用时同样能听到',
-      audioHintOff: '默认开启；关闭后所有场景都不出声',
+      audioHintOff: '默认关闭；开启后按下面的开关出声（也可以只留想要的几个）',
       audioBootRow: '启动加载动画音',
       audioBootOn: '开启',
       audioBootOff: '关闭',
@@ -5703,7 +5676,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       audioOn: 'Turn on',
       audioOff: 'Turn off',
       audioHintOn: 'Played by the host process, so a minimized page or another app in front still gets the sound',
-      audioHintOff: 'On by default; with this off nothing plays at all',
+      audioHintOff: 'Off by default; turning it on enables the slots below (keep only the ones you want)',
       audioBootRow: 'Boot animation sound',
       audioBootOn: 'Turn on',
       audioBootOff: 'Turn off',

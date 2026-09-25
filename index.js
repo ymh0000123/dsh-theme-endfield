@@ -126,7 +126,12 @@ const FIELD_DEFAULTS = {
   // need a human (an approval request and my own question). `turn-fail` ships as
   // a sound and a switch but is wired to nothing on purpose: an error that needs
   // no human decision must stay silent.
-  audioEnabled: '1',        // 音频通知总开关 —— default on
+  //
+  // The MASTER switch ships OFF: sound is opt-in, so an install that upgrades
+  // into this feature never starts making noise on its own. The per-slot
+  // switches stay ON, which is why flipping the master on is enough to hear the
+  // live slots; each one can then be silenced individually.
+  audioEnabled: '0',        // 音频通知总开关 —— default OFF（默认不出声，需手动开启）
   audioVolume: '100',        // 音量 0-100 —— rescaled PCM, not system volume
   audioBoot: '1',           // 启动加载动画音 —— 页面加载播放加载板时响一次
   audioTurnStart: '1',      // 任务开始音 —— 会话框提交后播放

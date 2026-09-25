@@ -8,7 +8,7 @@
 
 历史内存风格：这些开关最初存浏览器 `localStorage`。由于浏览器存储按「协议 + 主机 + 端口」的 origin 隔离，而 DSH Desktop 每次启动都在 127.0.0.1 绑定一个**随机临时端口**，端口一变 origin 就变，上次保存的设置永远读不到，表现为「重启后恢复默认」。已改用 DSH 官方的用户设置命名空间：
 
-- **DSH 0.1.7-rc.1（当前）**：**Host 端（index.js）** 导出 schemastery `Config`，16 个字段全部 `.volatile()`——0.1.7 只把 volatile 字段投影成可编辑表单；命名空间就是本插件在 `cordis.patch.yml` 里那一行的 profile entry id（`theme-endfield`）。**浏览器端（client.js）** 用 `ctx.configForms.get('theme-endfield')` 读/写/订阅，值由 DSH 的设置服务写进 profile patch `<profile>/cordis.patch.yml`。另外 Host 会调用 `ctx.settings.configure({ auto: false }, ctx.fiber)` 告诉 DSH 本插件自带设置页，不要再自动生成一份。
+- **DSH 0.1.7-rc.1（当前）**：**Host 端（index.js）** 导出 schemastery `Config`，27 个字段全部 `.volatile()`——0.1.7 只把 volatile 字段投影成可编辑表单；命名空间就是本插件在 `cordis.patch.yml` 里那一行的 profile entry id（`theme-endfield`）。**浏览器端（client.js）** 用 `ctx.configForms.get('theme-endfield')` 读/写/订阅，值由 DSH 的设置服务写进 profile patch `<profile>/cordis.patch.yml`。另外 Host 会调用 `ctx.settings.configure({ auto: false }, ctx.fiber)` 告诉 DSH 本插件自带设置页，不要再自动生成一份。
 - **≤ 0.1.5-rc.2（旧宿主，仍兼容）**：Host 通过 `ctx.settings.register('dsh-theme-endfield', schema)` 声明命名空间，由 `@deepseek-ai/dsh-settings-file` 落到 `<dshHome>/settings.yaml`；浏览器端用 `ctx.settingsScope` 的 `bind({ namespace, decode })` 读写。client 在找不到 `configForms` 时自动回落到这条路径。
 
 两代的落盘位置都由 DSH 决定（`$DSH_HOME` 或 `~/.dsh/...`），与浏览器 origin/端口无关，因此在 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 两种运行方式下设置都能正确持久化——它们跑的都是 127.0.0.1 loopback 页面，DSH 会把连接解析为 `host` 持久化模式。
@@ -39,6 +39,16 @@
 | 03 动画 | 启动加载动画 | 关 | `loader` |
 | 04 娱乐 | 雷霆大字 | 关 | `thunder` |
 | | 大字入场动画 | 关 | `thunderAnim` |
+| 05 音频 | 音频通知 | **关** | `audioEnabled` |
+| | 启动加载动画音 | 开 | `audioBoot` |
+| | 任务开始音 | 开 | `audioTurnStart` |
+| | 任务结束音 | 开 | `audioTurnDone` |
+| | 需要你回应 | 开 | `audioAttention` |
+| | 出错提示音 | 开 | `audioTurnFail` |
+| | 音量 | 100 | `audioVolume` |
+| | 开始音仅认会话框 | 开 | `audioHumanOnly` |
+| | 自定义音效目录 | （空） | `audioSoundDir` |
+| | 诊断日志 | 关 | `audioDiag` |
 
 取值约定（与 localStorage 时代的极性完全一致，现在由 schema 默认值保证）：**默认开启**的开关在该 schema 里默认存 `'1'`，客户端读作 `!== '0'`；**默认关闭**的存 `'0'`，读作 `=== '1'`。回滚/清除字段时客户端回到 schema 默认值；异常存储值被 schema 校验拒绝，不会悄悄改变出厂观感。
 
@@ -175,6 +185,24 @@
 - **子开关只改入场表现，不改时长。** 3 秒由 JS 定时器持有，不挂在动画结束事件上——否则开关动画会顺带改掉停留时间。
 - **未开启动画时，主开关关闭时该行为 disabled。** 一个对当前状态无意义的控件应该看起来就是不可用的。
 - **系统「减少动态效果」仍然压过这个开关。** 两个独立原因（开关关闭、系统偏好）汇合到同一条静态分支；此时设置行会说明是系统偏好在生效。
+
+---
+
+## 05 音频（默认关闭）
+
+四种提示音，**由宿主进程播放**而不是浏览器：页面最小化、切到别的应用时同样能听到——那恰好是最需要提示的场合。
+完整文档见 [audio-notifications.md](audio-notifications.md)。
+
+| 槽位 | 触发时机 |
+| --- | --- |
+| `audioBoot` 启动加载动画音 | 播放 ENDFIELD 加载板时响一次（只认真正的页面加载，点「预览」重播不响） |
+| `audioTurnStart` 任务开始音 | 从会话框提交指令后 |
+| `audioTurnDone` 任务结束音 | 我产出最终结果后（中途报错、等待审批不响） |
+| `audioAttention` 需要你回应 | 审批请求 / 我的提问 / 计划求批；锚点为面板自己的 `data-*` 属性 |
+| `audioTurnFail` 出错提示音 | **不接事件**：不需要人工干预的错误保持静音，音效与开关只是预留 |
+
+**总开关 `audioEnabled` 默认关闭**：音效是选择加入（opt-in）的功能，升级到带本功能的版本不会自己开始出声；
+打开总开关后，各槽位开关（默认开启）决定具体哪几种情形响，音量只缩放提示音本身、不改系统音量。
 
 ---
 

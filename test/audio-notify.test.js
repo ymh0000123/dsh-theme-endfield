@@ -112,11 +112,17 @@ for (const id of SLOT_IDS) {
  * 4. Wiring: what actually plays for an event sequence
  * ------------------------------------------------------------------ */
 
-/** A fake host context recording spawns, with an in-memory settings section. */
+/** A fake host context recording spawns, with an in-memory settings section.
+ *
+ *  The section starts from the host's own FIELD_DEFAULTS, then opts into the
+ *  feature: the shipped master switch is OFF (sound is opt-in), and these wiring
+ *  checks are about what plays once it is on. `audioEnabled: '0'` is passed
+ *  explicitly by the cases that assert silence, and one case below reads the
+ *  shipped default straight off FIELD_DEFAULTS to pin it. */
 function makeHost(initial) {
   const spawns = [];
   const listeners = new Map();
-  const section = Object.assign({}, host.FIELD_DEFAULTS, initial || {});
+  const section = Object.assign({}, host.FIELD_DEFAULTS, { audioEnabled: '1' }, initial || {});
   const scope = {
     get: () => Object.assign({}, section),
     watch: () => () => {},
@@ -210,6 +216,31 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     h.emit('agent/turn-stopping', { agent: childAgent, turn: 1 });
     await settle();
     check(h.spawns.length === 1, 'a subagent turn-ending plays nothing');
+  }
+
+  // --- the shipped default: sound is opt-in ---
+  {
+    /* The declaration the settings schema, the panel and the runtime all read: a
+       fresh install is SILENT until the user turns the feature on. Asserted
+       against the host's own tables (not a literal copied here), so the default
+       lives in index.js FIELD_DEFAULTS and lib/audio.js FALLBACK — and this is
+       what fails if either drifts back to on-by-default. */
+    check(host.FIELD_DEFAULTS.audioEnabled === '0',
+      'the shipped master switch is OFF (sound is opt-in)');
+    check(host.AUDIO_PREF_DEFAULTS[PREF.enabled] === '0',
+      'the audio runtime fallback agrees with the declared default');
+
+    const h = makeHost({ audioEnabled: host.FIELD_DEFAULTS.audioEnabled });
+    h.roots.push(rootAgent);
+    const audio = host.installAudio(h.ctx, h.scope);
+    check(audio.snapshot().enabled === false,
+      'the diagnostics read-out reports the default as off');
+    h.emit('agent/inbox/claimed', { agent: rootAgent, message: composerPrompt, turn: 1 });
+    h.emit('session/event', { id: 'session-1' }, { type: 'assistant/message', data: { turn: 1, message: { content: [textBlock] } } });
+    h.emit('agent/turn-stopping', { agent: rootAgent, turn: 1 });
+    h.emit('approval/request', { kind: 'exec' }, () => undefined);
+    await settle();
+    check(h.spawns.length === 0, 'a fresh install (shipped default) plays nothing at all');
   }
 
   // --- switches actually gate playback ---
