@@ -300,6 +300,34 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     // a fast network; MAX is the cap when nothing ever answers.
     const BALANCE_BOOT_MIN_MS = 900
     const BALANCE_BOOT_MAX_MS = 5000
+    /* ---------- 渠道额度 (dsh-codearts-auth / jet-hub) ----------
+       When the session's model directory names one of the providers the
+       dsh-codearts-auth plugin serves, the capsule swaps the DeepSeek wallet
+       read for that channel's remaining credits. The numbers come over the
+       same management RPC the plugin's own client uses —
+       connection.rpc.call('/api', 'jet-hub', { method: 'usage.badge', ... }) —
+       so session credentials and the host-side badge cache (TTL 120s, failure
+       TTL 15s) come for free; the page only ever names the provider.
+       The id table IS the plugin's contract: usage.badge answers for these
+       twelve, and anything else — notably the built-in DeepSeek models — keeps
+       the wallet display, so an absent plugin can never blank the capsule. */
+    const JET_HUB_RPC_SCOPE = '/api'
+    const JET_HUB_RPC_CHANNEL = 'jet-hub'
+    const JET_HUB_PROVIDER_LABELS = {
+      codearts: 'CodeArts',
+      buddy: 'CodeBuddy',
+      workbuddy: 'WorkBuddy',
+      lobsterai: 'LobsterAI',
+      qoder: 'Qoder',
+      qodercn: 'Qoder CN',
+      trae: 'TRAE',
+      cline: 'Cline',
+      loomy: 'Loomy',
+      raccoon: 'Raccoon',
+      minimax: 'MiniMax',
+      zcode: 'ZCode',
+      opencode: 'OpenCode',
+    }
     // Default ON for the master switch and both live slots; default OFF for the
     // diagnostics switch, so the host console stays quiet unless asked.
     const isAudioOn = () => prefsGet(AUDIO_ENABLED_KEY) !== '0'
@@ -3907,6 +3935,20 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     let balanceBootAt = 0
     // Set by the first completed fetch, answer or not.
     let balanceBootAnswered = false
+    /* Channel-credit state. `provider` is the provider the LAST successful
+       directory read named (null = DeepSeek / unknown -> wallet display);
+       `creditsBusy` guards the usage.badge round-trip the way balanceBusy
+       guards the wallet fetch; `creditsUnsub` detaches the model-directory
+       subscription on destroy. */
+    let creditProvider = null
+    let creditProviderResolved = false
+    let creditsBusy = false
+    let creditsUnsub = null
+    let creditsRebindTimer = null
+    let creditsRebindAttempts = 0
+    // The directory store currently subscribed; a new session hands us a new
+    // store, which is what re-arms the watch in creditsRefresh.
+    let creditsWatchedStore = null
 
     /* Whether the brand pose plays at all. Reduced motion gets the settled
        capsule immediately — the animation is decoration, the balance is not. */
@@ -3924,6 +3966,20 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         clearInterval(balancePollTimer)
         balancePollTimer = null
       }
+      // Detach the model-directory watch, too: a stale subscriber would keep
+      // firing creditsRefresh into a capsule that no longer exists.
+      if (typeof creditsUnsub === 'function') {
+        try { creditsUnsub() } catch (e) { /* store already gone */ }
+      }
+      creditsUnsub = null
+      if (creditsRebindTimer !== null && typeof clearTimeout === 'function') {
+        clearTimeout(creditsRebindTimer)
+        creditsRebindTimer = null
+      }
+      creditProvider = null
+      creditProviderResolved = false
+      creditsRebindAttempts = 0
+      creditsWatchedStore = null
       if (balanceEl !== null && balanceEl.parentNode) {
         try { balanceEl.parentNode.removeChild(balanceEl) } catch (e) { /* already gone */ }
       }
@@ -3962,6 +4018,268 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       setText('data-endfield-balance-int', data.int)
       setText('data-endfield-balance-frac', data.frac === '' ? '' : '.' + data.frac)
       setText('data-endfield-balance-currency', data.currency === 'USD' ? '$' : '¥')
+    }
+
+    /* ---------- 渠道额度渲染 (dsh-codearts-auth / jet-hub) ----------
+       Two display modes share one capsule. The wallet read above is the
+       DeepSeek mode; when the session's model directory names a jet-hub
+       provider, the money group swaps to that channel's remaining credits.
+
+       Numbers mirror the plugin's own badge formatting: credits are integers
+       or two decimals, token-quantity units compact past 1e3/1e6 (12.34K /
+       1.20M), and the unit tag reads 积分 or Token. A FAILED answer paints --
+       rather than 0 — a zero would read as "out of quota" and that is a lie
+       the user may act on. The badge response carries `provider` back; a
+       stale reply for a channel the user already left is dropped, which is
+       the only thing keeping a channel switch and an in-flight fetch from
+       crossing wires. */
+    const creditFormatTokens = (value) => {
+      const abs = Math.abs(value)
+      if (abs >= 1e6) return (value / 1e6).toFixed(2) + 'M'
+      if (abs >= 1e3) return (value / 1e3).toFixed(2) + 'K'
+      return String(Math.round(value))
+    }
+    const creditFormatValue = (value, unit) =>
+      (unit === 'token' ? creditFormatTokens(value)
+        : (Number.isInteger(value) ? String(value) : value.toFixed(2)))
+    const creditUnitLabel = (unit) => (unit === 'token' ? 'Token' : '积分')
+
+    /* The unit tag rides the packages (the account total carries none); any
+       package's unit answers for the row. 'credits' normalizes to 'credit' so
+       one spelling owns the 积分 branch. */
+    const creditPickUnit = (packages) => {
+      if (Array.isArray(packages)) {
+        for (const pkg of packages) {
+          if (pkg && pkg.unit) return (pkg.unit === 'credits' ? 'credit' : pkg.unit)
+        }
+      }
+      return 'credit'
+    }
+
+    /* RpcCreditsBalanceAccount[] -> one glanceable number PLUS the consumption
+       ratio the right-hand dial shows in credits mode. usage.badge answers one
+       row per enabled account; the read is the FIRST account without an
+       error. Active packages carry remaining/total/used, so they are summed
+       into { total (剩余), quotaTotal (总额度), used (已用), unit } — the
+       account-level balance.total is only the fallback when no usable package
+       exists, and it carries no quota, so the dial reads no consumption from
+       it (an invented percentage would be a lie). */
+    const creditPickAccount = (accounts) => {
+      if (!Array.isArray(accounts)) return null
+      for (const account of accounts) {
+        if (!account || typeof account !== 'object' || account.error) continue
+        const bal = account.balance
+        if (!bal || typeof bal !== 'object') continue
+        if (Array.isArray(bal.packages) && bal.packages.length > 0) {
+          let total = 0
+          let quotaTotal = 0
+          let used = 0
+          let any = false
+          let unit = 'credit'
+          for (const pkg of bal.packages) {
+            if (!pkg || pkg.active !== true || !Number.isFinite(pkg.remaining)) continue
+            any = true
+            unit = pkg.unit === 'credits' ? 'credit' : pkg.unit
+            total += pkg.remaining
+            if (Number.isFinite(pkg.total)) quotaTotal += pkg.total
+            if (Number.isFinite(pkg.used)) used += pkg.used
+          }
+          if (any) return { total, quotaTotal, used, unit }
+        }
+        if (Number.isFinite(bal.total)) {
+          return { total: bal.total, quotaTotal: 0, used: 0, unit: creditPickUnit(bal.packages) }
+        }
+      }
+      return null
+    }
+
+    const creditPaint = (paint) => {
+      if (balanceEl === null || typeof document === 'undefined') return
+      const setText = (attr, text) => {
+        const node = balanceEl.querySelector('[' + attr + ']')
+        if (node) node.textContent = text
+      }
+      setText('data-endfield-credit-int', paint.int)
+      setText('data-endfield-credit-unit', paint.unitText)
+      setText('data-endfield-credit-channel', paint.channel)
+      // Consumption read for the right-hand slot in credits mode. The dial's
+      // share rides the same --endfield-balance-sweep custom property the
+      // pricing clock uses, so mode switches never re-layout the pill: the
+      // value just changes meaning. No quota (quotaTotal 0) keeps the sweep
+      // empty rather than inventing a percentage.
+      setText('data-endfield-credit-pct', paint.pctText || '')
+      if (typeof balanceEl.style?.setProperty === 'function') {
+        balanceEl.style.setProperty(
+          '--endfield-balance-sweep',
+          (Number.isFinite(paint.usedPct) ? paint.usedPct * 3.6 : 0) + 'deg',
+        )
+      }
+      // The two modes are mutually exclusive DOM states driven by one attribute
+      // the stylesheet keys off — no inline style writes, no per-poll churn.
+      balanceEl.setAttribute('data-endfield-credit-mode', paint.mode)
+    }
+
+    /* The capsule paints ONE mode at a time. 'wallet' keeps the DeepSeek
+       money group; 'credits' swaps in the channel read; while a jet-hub
+       provider is live but has not answered yet the capsule shows the channel
+       name with -- rather than yesterday's wallet number under a different
+       channel's name. Consumption reads need a quota: without one the pct
+       slot stays empty and the dial sweep is zeroed, never guessed. */
+    const creditPaintIdle = () => {
+      if (creditProvider === null) {
+        creditPaint({ mode: 'wallet', int: '', unitText: '', channel: '', pctText: '', usedPct: NaN })
+        return
+      }
+      creditPaint({
+        mode: 'credits',
+        int: '--',
+        unitText: '',
+        channel: JET_HUB_PROVIDER_LABELS[creditProvider] || creditProvider,
+        pctText: '',
+        usedPct: NaN,
+      })
+    }
+
+    /* Fetch the badge for `provider` and paint it, unless the user has switched
+       channels in the meantime (the reply's provider echo guards the race the
+       same way the plugin's own badge does). The consumption share for the
+       right-hand dial is used/quota of the SAME account the number comes from;
+       with no quota the pct slot stays empty and the sweep zeroes. */
+    const creditsApply = async (provider, force) => {
+      if (creditsBusy) return
+      let connection = null
+      try { connection = ctx.get('connection') } catch (e) { connection = null }
+      if (!connection || !connection.rpc || typeof connection.rpc.call !== 'function') return
+      creditsBusy = true
+      try {
+        const payload = force === true ? { provider, force: true } : { provider }
+        const reply = await connection.rpc.call(JET_HUB_RPC_SCOPE, JET_HUB_RPC_CHANNEL, {
+          method: 'usage.badge',
+          payload,
+        })
+        // Stale reply: the channel moved on while this was in flight.
+        if (creditProvider !== provider) return
+        if (!reply || reply.ok !== true) throw new Error('usage.badge not ok')
+        const value = reply.value && typeof reply.value === 'object' ? reply.value : reply
+        if (value.provider !== provider) return
+        const picked = creditPickAccount(value.accounts)
+        // Consumption: 已用 / 总额度, from the summed active packages. Both
+        // bounds must be sane or the dial refuses to speak (0 quota, more used
+        // than granted, negative anything -> no invented percentage).
+        let usedPct = NaN
+        if (picked && picked.quotaTotal > 0 && picked.used >= 0
+          && picked.used <= picked.quotaTotal) {
+          usedPct = Math.min(100, Math.round((picked.used / picked.quotaTotal) * 100))
+        }
+        creditPaint({
+          mode: 'credits',
+          int: picked ? creditFormatValue(picked.total, picked.unit) : '--',
+          unitText: picked ? creditUnitLabel(picked.unit) : '',
+          channel: JET_HUB_PROVIDER_LABELS[provider] || provider,
+          pctText: Number.isFinite(usedPct) ? '已用' + usedPct + '%' : '',
+          usedPct,
+        })
+      } catch (e) {
+        // Plugin absent, not logged in, or channel down: -- is the honest read.
+        if (creditProvider === provider) {
+          creditPaint({
+            mode: 'credits',
+            int: '--',
+            unitText: '',
+            channel: JET_HUB_PROVIDER_LABELS[provider] || provider,
+            pctText: '',
+            usedPct: NaN,
+          })
+        }
+      } finally {
+        creditsBusy = false
+      }
+    }
+
+    /* Which jet-hub provider the CURRENT session is on, if any. Same lazy
+       resolution contract as thunder: the theme declares no inject, so every
+       service arrives late and each read must re-get it. The model directory
+       is resolved per session id (directoryFor), loaded once (a directory that
+       has never been loaded carries no `current`), and subscribed so a channel
+       switch mid-session repaints the capsule without waiting for the poll. */
+    const creditsRefresh = async () => {
+      if (balanceEl === null) return
+      let sessions = null
+      try { sessions = ctx.get('sessions') } catch (e) { sessions = null }
+      if (!sessions || !sessions.list || typeof sessions.list.getSnapshot !== 'function') return
+      let snap = null
+      try { snap = sessions.list.getSnapshot() } catch (e) { snap = null }
+      const id = snap ? thunderCurrentId(snap) : undefined
+      if (id === undefined || id === null) {
+        if (creditProvider !== null) { creditProvider = null; creditPaintIdle() }
+        return
+      }
+      let directories = null
+      try { directories = ctx.get('modelDirectories') } catch (e) { directories = null }
+      if (!directories || typeof directories.directoryFor !== 'function') return
+      let directory = null
+      try { directory = directories.directoryFor(id) } catch (e) { directory = null }
+      if (!directory || !directory.store) return
+      // Watch each directory's store exactly once: a session switch hands us a
+      // new directory object, which is what re-arms the subscription here.
+      if (creditsWatchedStore !== directory.store) {
+        if (typeof creditsUnsub === 'function') { try { creditsUnsub() } catch (e) { /* gone */ } }
+        creditsUnsub = null
+        creditsWatchedStore = directory.store
+        if (typeof directory.store.subscribe === 'function') {
+          try {
+            creditsUnsub = directory.store.subscribe(() => { creditsRebind() })
+          } catch (e) { creditsUnsub = null }
+        }
+      }
+      if (typeof directory.load === 'function') {
+        try { await directory.load() } catch (e) { /* unreadable: fall through to snapshot */ }
+      }
+      let state = null
+      try { state = directory.store.getSnapshot() } catch (e) { state = null }
+      const provider = state && state.current ? state.current.provider : undefined
+      const next = (typeof provider === 'string' && JET_HUB_PROVIDER_LABELS[provider] !== undefined)
+        ? provider
+        : null
+      if (next !== creditProvider || (next !== null && !creditProviderResolved)) {
+        creditProvider = next
+        creditProviderResolved = next !== null
+        creditPaintIdle()
+      }
+      if (next !== null) await creditsApply(next, false)
+    }
+
+    /* Store events land here; a channel flip re-reads the directory and
+       repaints. Debounced so a burst of publishes collapses into one read. */
+    const creditsRebind = () => {
+      if (balanceEl === null) return
+      if (creditsRebindTimer !== null && typeof clearTimeout === 'function') clearTimeout(creditsRebindTimer)
+      creditsRebindTimer = null
+      if (typeof setTimeout !== 'function') { creditsRefresh(); return }
+      creditsRebindTimer = setTimeout(() => {
+        creditsRebindTimer = null
+        creditsRefresh()
+      }, 150)
+    }
+
+    /* First resolve races the boot pose; a bounded retry covers the model
+       service arriving late, mirroring the thunder budget. */
+    const creditsStart = () => {
+      creditsRebindAttempts = 0
+      const attempt = () => {
+        if (balanceEl === null) return
+        let sessions = null
+        try { sessions = ctx.get('sessions') } catch (e) { sessions = null }
+        if (sessions === undefined || sessions === null) {
+          creditsRebindAttempts += 1
+          if (creditsRebindAttempts <= 100 && typeof setTimeout === 'function') {
+            creditsRebindTimer = setTimeout(attempt, 120)
+          }
+          return
+        }
+        creditsRefresh()
+      }
+      attempt()
     }
 
     /* ---------- 峰谷定价窗口（本地计算） ----------
@@ -4152,6 +4470,26 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        --endfield-balance-sweep, so progress never re-lays-out the pill. */
     const balancePaintWindow = () => {
       if (balanceEl === null || typeof document === 'undefined') return
+      // Credits mode owns the right-hand dial (consumption share) and has no
+      // pricing window: the peak/off-peak clock is a DeepSeek API concept, so
+      // a jet-hub channel must not have the next tick overwrite the sweep or
+      // resurrect the countdown text. The 1s interval keeps running for the
+      // wallet mode's collapse bookkeeping; this early return is the whole
+      // mode handoff.
+      if (creditProvider !== null) {
+        if (balanceBootAt !== 0) {
+          const waited = Date.now() - balanceBootAt
+          const ready = balanceBootAnswered || waited >= BALANCE_BOOT_MAX_MS
+          if (waited >= BALANCE_BOOT_MIN_MS && ready && loaderEl === null) {
+            balanceBootAt = 0
+            balanceEl.removeAttribute('data-endfield-balance-boot')
+            if (typeof balanceEl.style?.setProperty === 'function') {
+              balanceEl.style.setProperty('border-radius', '999px', 'important')
+            }
+          }
+        }
+        return
+      }
       let win
       try {
         win = balancePricingWindow(new Date())
@@ -4208,7 +4546,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       try {
         const res = await fetch(BALANCE_URL, { method: 'GET' })
         const payload = await res.json().catch(() => null)
-        if (payload && payload.ok) {
+        // A wallet answer never overwrites the channel read: while a jet-hub
+        // provider is live the money group belongs to it, so the DeepSeek
+        // poll only refreshes the numbers the wallet mode will show when the
+        // user switches back.
+        if (payload && payload.ok && creditProvider === null) {
           const wallet = balancePickWallet(payload.wallets)
           if (wallet) balancePaint(wallet)
         }
@@ -4250,11 +4592,25 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         '<span data-endfield-balance-int>--</span>' +
         '<span data-endfield-balance-frac></span>' +
         '</span>' +
+        // The channel read lives in its own group and swaps with the wallet via
+        // the pill's data-endfield-credit-mode attribute (wallet | credits).
+        '<span data-endfield-credit-money>' +
+        '<span data-endfield-credit-channel></span>' +
+        '<span data-endfield-credit-int>--</span>' +
+        '<span data-endfield-credit-unit></span>' +
+        '</span>' +
+        // The pricing countdown is the wallet mode's middle read only — peak/
+        // off-peak windows are a DeepSeek API concept, so the credits mode
+        // hides the whole run via the same mode attribute.
         '<span data-endfield-balance-window>' +
         '<span data-endfield-balance-phase>低谷</span>时段剩余' +
         '<span data-endfield-balance-remain></span>' +
         '</span>' +
+        // The right-hand slot carries one read per mode: the elapsed pricing
+        // share (wallet) or the channel's consumption share (credits). Two
+        // exclusive nodes, swapped by the same attribute.
         '<span data-endfield-balance-pct></span>' +
+        '<span data-endfield-credit-pct></span>' +
         '<span data-endfield-balance-badge>' +
         '<span data-endfield-balance-ring></span>' +
         '<span data-endfield-balance-clock></span>' +
@@ -4279,11 +4635,23 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       } else {
         balanceBootAt = 0
       }
+      // Wallet mode is the seed: an absent model service or a DeepSeek session
+      // must never leave the channel group blanking the money read.
+      el.setAttribute('data-endfield-credit-mode', 'wallet')
+      creditPaintIdle()
       balanceFetch()
+      creditsStart()
       balancePaintWindow()
       if (typeof setInterval === 'function') {
         balanceTimer = setInterval(balancePaintWindow, BALANCE_TICK_MS)
-        balancePollTimer = setInterval(balanceFetch, BALANCE_POLL_MS)
+        // One poll heartbeat drives both reads: the wallet fetch and a channel
+        // re-resolve. creditsRefresh() is a no-op while no jet-hub provider is
+        // live (and while the capsule is gone), so the cost is one cheap local
+        // lookup per minute either way.
+        balancePollTimer = setInterval(() => {
+          balanceFetch()
+          creditsRefresh()
+        }, BALANCE_POLL_MS)
       }
     }
 
@@ -6361,6 +6729,61 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         font-weight: 600;
         color: #a2a1a2;
         font-variant-numeric: tabular-nums;
+      }
+      /* ---------- 渠道额度 group (dsh-codearts-auth) ----------
+         The wallet and the channel read occupy the same visual slot, so they
+         are two exclusive states of one pill, switched by the
+         data-endfield-credit-mode attribute: 'wallet' (default — DeepSeek
+         numbers) hides the channel group, 'credits' hides the wallet group.
+         Attribute-driven, not class-driven, so no per-poll class churn and
+         the markup owns both halves up front. The pricing window and the
+         elapsed-pct read are wallet-only for the same reason the money group
+         is: peak/off-peak is a DeepSeek API concept, and in credits mode the
+         right-hand slot shows the channel's consumption share instead. */
+      [data-endfield-balance] [data-endfield-credit-money] {
+        display: none;
+        align-items: baseline;
+        flex: none;
+      }
+      [data-endfield-balance] [data-endfield-credit-pct] {
+        display: none;
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f1f1ec;
+        font-variant-numeric: tabular-nums;
+      }
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-balance-money],
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-balance-window],
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-balance-pct] {
+        display: none;
+      }
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-credit-money] {
+        display: inline-flex;
+      }
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-credit-pct] {
+        display: inline;
+      }
+      [data-endfield-balance] [data-endfield-credit-channel] {
+        margin-right: 5px;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: #8d8c88;
+        white-space: nowrap;
+      }
+      [data-endfield-balance] [data-endfield-credit-int] {
+        font-size: 14px;
+        font-weight: 700;
+        color: #f1f1ec;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1, 'ss01' 1;
+      }
+      [data-endfield-balance] [data-endfield-credit-unit] {
+        margin-left: 3px;
+        font-size: 9px;
+        font-weight: 600;
+        color: #a2a1a2;
       }
       /* 低谷时段剩余hh:mm:ss — one grey caption, not three tokens. */
       [data-endfield-balance] [data-endfield-balance-window] {
