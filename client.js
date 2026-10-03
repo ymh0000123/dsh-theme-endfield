@@ -146,9 +146,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          /theme-endfield/balance route. Ships OFF so an upgrade never adds a
          floating element the user did not ask for. */
       balanceCapsule: '0',
-      /* 渠道额度胶囊的主读数选「剩余」还是「已用」——两个值都有真实语义，
-         不存在默认就错的答案，所以默认 remaining（与插件自身徽章一致的读法）。
-         仅影响 credits 模式的 money 组；右侧消耗百分比与圆环两种读法下不变。 */
+      /* 渠道额度胶囊的右侧百分比读数选「已用」还是「剩余」——两个值都有真实语义，
+         不存在默认就错的答案，所以默认 used（与插件自身徽章一致的读法）。
+         仅影响 credits 模式的右侧百分比槽位；左侧主数字始终为剩余额度。 */
       creditDisplay: 'remaining',
       /* 音频通知 (host half: lib/audio.js). Two live slots — the prompt that
          starts a turn and the final answer that ends one. `audioAttention` and
@@ -3932,9 +3932,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        thunder plate, so it can never eat a click aimed at the header behind it. */
     const BALANCE_KEY = 'balanceCapsule'
     const isBalanceCapsuleOn = () => prefsGet(BALANCE_KEY) === '1'
-    /* Which number the credits money group leads with. Anything other than
-       'used' reads as 'remaining' — the preference is a two-literal choice,
-       stored as exactly one of them, and the tolerant default mirrors how
+    /* What the credits mode's RIGHT-hand percentage slot reads: 已用xx% (the
+       plugin's own badge reading) or 剩余xx%. Anything other than 'remaining'
+       reads as 'used' — the preference is a two-literal choice, stored as
+       exactly one of them, and the tolerant default mirrors how
        readContourRenderer treats its own select. */
     const CREDIT_DISPLAY_KEY = 'creditDisplay'
     const readCreditDisplay = () => (prefsGet(CREDIT_DISPLAY_KEY) === 'used' ? 'used' : 'remaining')
@@ -4131,10 +4132,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // value just changes meaning. No quota (quotaTotal 0) keeps the sweep
       // empty rather than inventing a percentage.
       setText('data-endfield-credit-pct', paint.pctText || '')
+      // The ring sweep follows the slot's meaning: 已用xx% sweeps the consumed
+      // share, 剩余xx% sweeps the remaining share — dial and readout always
+      // tell the same story. (The wallet pricing clock early-returns in
+      // credits mode, so this property is ours to write here.)
       if (typeof balanceEl.style?.setProperty === 'function') {
         balanceEl.style.setProperty(
           '--endfield-balance-sweep',
-          (Number.isFinite(paint.usedPct) ? paint.usedPct * 3.6 : 0) + 'deg',
+          (Number.isFinite(paint.sweepPct) ? paint.sweepPct * 3.6 : 0) + 'deg',
         )
       }
       // The two modes are mutually exclusive DOM states driven by one attribute
@@ -4150,7 +4155,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        slot stays empty and the dial sweep is zeroed, never guessed. */
     const creditPaintIdle = () => {
       if (creditProvider === null) {
-        creditPaint({ mode: 'wallet', int: '', unitText: '', channel: '', pctText: '', usedPct: NaN })
+        creditPaint({ mode: 'wallet', int: '', unitText: '', channel: '', pctText: '', usedPct: NaN, sweepPct: NaN })
         return
       }
       creditPaint({
@@ -4160,6 +4165,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         channel: JET_HUB_PROVIDER_LABELS[creditProvider] || creditProvider,
         pctText: '',
         usedPct: NaN,
+        sweepPct: NaN,
       })
     }
 
@@ -4210,24 +4216,28 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           && picked.used <= picked.quotaTotal) {
           usedPct = Math.min(100, Math.round((picked.used / picked.quotaTotal) * 100))
         }
-        // The user chooses which figure LEADS the money group: 剩余 (the
-        // plugin's own badge reading) or 已用. 'used' is only honest when a
-        // quota was actually reported — without one the used number is a
-        // bare consumption total against nothing, so the read falls back to
-        // remaining rather than showing a number the user cannot judge.
-        // Both figures come from the SAME summed account; the right-hand
-        // dial keeps showing the consumption share either way.
-        const displayUsed = readCreditDisplay() === 'used' && picked !== null && picked.quotaTotal > 0
-        const leadValue = displayUsed ? picked.used : (picked ? picked.total : NaN)
+        // Remaining share for the right-hand slot's 剩余xx% read: the same
+        // sanity bounds, mirrored — the share of quota still left.
+        let remainingPct = NaN
+        if (usedPct === usedPct) remainingPct = 100 - usedPct
+        // The RIGHT-hand slot is what the user chooses: 已用xx% (the plugin's
+        // own badge reading) or 剩余xx% (remaining share of the quota). Both
+        // come from the SAME summed account; the lead figure on the left
+        // always stays the remaining balance. The dial sweeps the SAME share
+        // the slot reads, so ring and number never disagree. 'remaining'
+        // needs a quota too — a share of nothing is not a number — so without
+        // one the slot stays empty and the sweep zeroes either way.
+        const displayUsed = readCreditDisplay() === 'used'
         creditPaint({
           mode: 'credits',
-          int: Number.isFinite(leadValue)
-            ? creditFormatValue(leadValue, picked.unit)
-            : '--',
+          int: picked ? creditFormatValue(picked.total, picked.unit) : '--',
           unitText: picked ? creditUnitLabel(picked.unit) : '',
           channel: JET_HUB_PROVIDER_LABELS[provider] || provider,
-          pctText: Number.isFinite(usedPct) ? '已用' + usedPct + '%' : '',
+          pctText: Number.isFinite(displayUsed ? usedPct : remainingPct)
+            ? (displayUsed ? '已用' : '剩余') + (displayUsed ? usedPct : remainingPct) + '%'
+            : '',
           usedPct,
+          sweepPct: displayUsed ? usedPct : remainingPct,
         })
       } catch (e) {
         failed = true
@@ -4240,6 +4250,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             channel: JET_HUB_PROVIDER_LABELS[provider] || provider,
             pctText: '',
             usedPct: NaN,
+            sweepPct: NaN,
           })
         }
       } finally {
@@ -7175,8 +7186,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       creditDisplayRow: '渠道额度读数',
       creditDisplayRemaining: '剩余',
       creditDisplayUsed: '已用',
-      creditDisplayHintRemaining: '渠道模式主数字显示剩余额度（与插件徽章一致）；切换后下次取数生效，右侧「已用xx%」不受影响',
-      creditDisplayHintUsed: '渠道模式主数字显示已用额度（需渠道报出总额度，否则退回剩余）；右侧「已用xx%」不受影响',
+      creditDisplayHintRemaining: '渠道模式右侧百分比显示「剩余xx%」（剩余/总额度），圆环同步走剩余份额；主数字始终为剩余额度。需渠道报出总额度，否则右侧留空。切换后下次取数生效',
+      creditDisplayHintUsed: '渠道模式右侧百分比显示「已用xx%」（已用/总额度），圆环同步走已用份额；主数字始终为剩余额度。需渠道报出总额度，否则右侧留空。切换后下次取数生效',
       /* 音频通知：播放发生在宿主进程（lib/audio.js），所以这里的每一行都在
          说明「什么时候响」而不是「怎么响」；试听按钮走宿主真实播放链路。 */
       groupAudio: '音频',
@@ -7331,8 +7342,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       creditDisplayRow: 'Channel credits readout',
       creditDisplayRemaining: 'Remaining',
       creditDisplayUsed: 'Used',
-      creditDisplayHintRemaining: 'In credits mode the main figure shows the remaining balance (as the plugin badge does); the change applies at the next fetch, and the right-hand consumption dial is unaffected',
-      creditDisplayHintUsed: 'In credits mode the main figure shows the used amount (falls back to remaining when the channel reports no quota); the right-hand dial is unaffected',
+      creditDisplayHintRemaining: 'In credits mode the right-hand percentage shows the remaining share (of the reported quota) and the ring sweeps that same remaining share; the lead figure always stays the remaining balance. The slot stays empty when the channel reports no quota; the change applies at the next fetch',
+      creditDisplayHintUsed: 'In credits mode the right-hand percentage shows the used share (of the reported quota) and the ring sweeps that same used share; the lead figure always stays the remaining balance. The slot stays empty when the channel reports no quota; the change applies at the next fetch',
       groupAudio: 'AUDIO',
       audioRow: 'Audio notifications',
       audioOn: 'Turn on',
@@ -7745,13 +7756,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                one round-trip instead of after an arbitrary delay. */
             syncBalanceCapsule()
           }
-          /* 剩余 / 已用 is a select, not a toggle: the two values are answers to
-             "what does the lead number mean", not polarities of one switch, and a
-             two-state toggle button cannot show which side is live the way the
-             row's 状态 label does. Mirrors setGlassValue: validate, persist, then
-             mirror into React state. The capsule repaints on the NEXT fetch —
-             creditsApply reads the pref store per answer, so no forced RPC is
-             spent on a cosmetic re-read (the 5-min floor stays honest). */
+          /* 已用 / 剩余 is a select, not a toggle: the two values are answers to
+             "what does the right-hand percentage read", not polarities of one
+             switch, and a two-state toggle button cannot show which side is
+             live the way the row's 状态 label does. Mirrors setGlassValue:
+             validate, persist, then mirror into React state. The capsule
+             repaints on the NEXT fetch — creditsApply reads the pref store per
+             answer, so no forced RPC is spent on a cosmetic re-read (the 5-min
+             floor stays honest). */
           const CREDIT_DISPLAY_OPTIONS = ['remaining', 'used']
           const setCreditDisplayValue = (value) => {
             if (CREDIT_DISPLAY_OPTIONS.indexOf(value) === -1) return
@@ -8203,11 +8215,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   }, t(balanceOn ? 'balanceOff' : 'balanceOn'))
                 )
               ]),
-              /* --- 渠道额度读数：剩余 or 已用 ---
+              /* --- 渠道额度读数：右侧百分比显示已用 or 剩余 ---
                  The row lives directly under the capsule switch because it only
                  describes that capsule's credits mode; the select mirrors the
                  glass/renderer rows rather than a toggle, and the hint states
-                 what changes and what does not (the dial keeps showing 已用%). */
+                 what changes (the right-hand slot) and what does not (the lead
+                 figure always stays the remaining balance). */
               row('credit-display', false, [
                 R.createElement('span', { style: labelStyle },
                   t('creditDisplayRow') + t('sep') + t(creditDisplay === 'used' ? 'creditDisplayUsed' : 'creditDisplayRemaining'),

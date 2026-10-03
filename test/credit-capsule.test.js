@@ -166,13 +166,24 @@ check('dial: the sweep rides the shared --endfield-balance-sweep property',
   paint.indexOf("setProperty(\n          '--endfield-balance-sweep',") > -1 ||
   paint.indexOf("'--endfield-balance-sweep',") > -1)
 check('dial: usedPct drives the sweep (NaN sweeps to zero, never a stale window)',
-  /Number\.isFinite\(paint\.usedPct\) \? paint\.usedPct \* 3\.6 : 0/.test(paint))
+  /Number\.isFinite\(paint\.sweepPct\) \? paint\.sweepPct \* 3\.6 : 0/.test(paint))
+check('dial: the sweep follows the slot meaning (已用 sweeps used, 剩余 sweeps remaining)',
+  /sweepPct: displayUsed \? usedPct : remainingPct/.test(paint))
 check('dial: the consumption pct is used/quota, bounded, and refuses to invent one',
   /quotaTotal > 0 && picked\.used >= 0\s*&& picked\.used <= picked\.quotaTotal/.test(paint) &&
   /Math\.min\(100, Math\.round\(\(picked\.used \/ picked\.quotaTotal\) \* 100\)\)/.test(paint))
 check('dial: the pct slot is a separate credit node (the wallet pct is never overwritten)',
   paint.indexOf("'data-endfield-credit-pct'") > -1 &&
   markup.indexOf('data-endfield-credit-pct') > -1)
+check('dial: the lead figure is ALWAYS the remaining balance (the pref never moves the left number)',
+  /int: picked \? creditFormatValue\(picked\.total, picked\.unit\) : '--'/.test(paint))
+check('dial: the right-hand slot reads 已用 or 剩余 per the creditDisplay pref',
+  /const displayUsed = readCreditDisplay\(\) === 'used'/.test(paint) &&
+  /displayUsed \? '已用' : '剩余'/.test(paint) &&
+  /displayUsed \? usedPct : remainingPct/.test(paint))
+check('dial: the remaining share mirrors the used share (100 - usedPct, NaN stays NaN)',
+  /let remainingPct = NaN/.test(paint) &&
+  /if \(usedPct === usedPct\) remainingPct = 100 - usedPct/.test(paint))
 check('dial: credits mode hides the pricing window (peak/off-peak is DeepSeek-only)',
   /\[data-endfield-balance\]\[data-endfield-credit-mode='credits'\] \[data-endfield-balance-window\]/.test(css))
 check('dial: the window tick early-returns in credits mode (the clock never overwrites the sweep)',
