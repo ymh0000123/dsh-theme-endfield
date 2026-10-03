@@ -369,7 +369,27 @@ function volatileField(leaf) {
 /** Every reachable schemastery builder, closest require path first.
  *  @returns `{ z, source }` records; `source` names the root that answered, for
  *    the diagnostics apply() logs when nothing usable was found. */
+/* WHY a fast path AND a cache: the full scan below (resolutionRoots +
+   require.resolve across every root) costs ~80ms of module-evaluation time on a
+   real install. That window is not free — the host half must finish evaluating
+   before its loader entry activates, and a web page that boots while it runs
+   picks up a boot graph without this theme's row ("import failed (see
+   console)"). Heavy sibling plugins (e.g. dsh-codearts-auth) widen that window
+   further, so every millisecond shaved here narrows the race. The fast path
+   answers from the two require chains — a handful of stats — and short-circuits
+   ONLY on a native-volatile builder, the top preference of selectBuilder, so it
+   can never choose worse than the scan would. The cache key is a registry
+   Symbol so re-evaluation of this module in the SAME process (plugin reload,
+   dual require/import) reuses the first scan with zero filesystem access. */
+const SCHEMA_SCAN_CACHE = Symbol.for('dsh-theme-endfield.schemastery.scan');
+
 function schemasteryCandidates() {
+  /* Same-process re-evaluation: the first scan's answer is still this
+     process's answer. */
+  try {
+    const cached = globalThis[SCHEMA_SCAN_CACHE];
+    if (Array.isArray(cached)) return cached;
+  } catch (e) { /* fall through to a fresh scan */ }
   const out = [];
   const seenBuilders = [];
   const take = (found, source) => {
@@ -379,6 +399,33 @@ function schemasteryCandidates() {
     seenBuilders.push(builder);
     out.push({ z: builder, source });
   };
+  /* FAST PATH — scoped spec first, plain require chain then require.main's, the
+     two shapes a real install answers through (published profile installs
+     resolve from this package's own chain; dev-link installs from the host
+     process's). Each miss is a failed resolve against a short ancestor chain,
+     i.e. microseconds. A hit is accepted only when it carries schemastery's
+     OWN .volatile(): that is selectBuilder's highest preference, so skipping
+     the scan cannot demote the choice. A marker-only builder (.extra(), no
+     .volatile()) deliberately falls through — the scan's candidate order still
+     decides between it and a native copy found elsewhere. */
+  for (const spec of SCHEMA_SPECS) {
+    const attempts = [[spec, () => require(spec)]];
+    try {
+      if (require.main && typeof require.main.require === 'function') {
+        attempts.push([spec + ' via require.main', () => require.main.require(spec)]);
+      }
+    } catch (e) { /* no main module to ask */ }
+    for (const [source, attempt] of attempts) {
+      try {
+        const builder = normalizeSchemastery(attempt());
+        if (builder && typeof builder.object === 'function' && typeof builder.string === 'function' && hasVolatile(builder)) {
+          out.push({ z: builder, source });
+          try { globalThis[SCHEMA_SCAN_CACHE] = out; } catch (e) { /* cache is best-effort */ }
+          return out;
+        }
+      } catch (e) { /* keep trying */ }
+    }
+  }
   // Roots are computed once: the scan touches the filesystem.
   const roots = resolutionRoots();
   /* Spec-major, SCOPED FIRST: `@deepseek-ai/schemastery` is the builder DSH's
@@ -416,6 +463,7 @@ function schemasteryCandidates() {
       take(exported, id + ' (already loaded in this process)');
     }
   } catch (e) { /* no module cache to read */ }
+  try { globalThis[SCHEMA_SCAN_CACHE] = out; } catch (e) { /* cache is best-effort */ }
   return out;
 }
 

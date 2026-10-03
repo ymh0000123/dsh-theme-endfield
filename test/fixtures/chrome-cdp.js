@@ -74,7 +74,7 @@ td{padding:12px}[data-composer-card]{position:absolute;bottom:30px;left:260px;wi
 [data-sidebar-right-panel]{position:absolute;right:0;top:0;width:120px;height:100%;background:#eee}
 </style></head><body><div class="app_frame"><div class="app_sidebarCol" data-slot="sidebar"><div>Sidebar</div></div>
 <div class="app_centerCol"><div class="wSkVaW_root"><table class="test_tableScroll"><tbody><tr><td id="cell">Selected text inside a hovered row</td></tr></tbody></table></div></div>
-<div data-composer-card>Composer</div><div data-sidebar-right-panel="push">Docked panel</div></div></body></html>`
+<div data-composer-card>Composer</div><div data-sidebar-right-panel="push" data-sidebar-right-open><div data-dockkit-host="dock">Docked panel</div></div></body></html>`
 async function boot(browser,root,values={},prefix='') {
   await browser.send('Page.navigate',{url:'data:text/html,'+encodeURIComponent(HTML)})
   await browser.until('document.querySelector("#cell") !== null')

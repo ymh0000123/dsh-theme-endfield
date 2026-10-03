@@ -4275,7 +4275,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body[data-endfield-glass='strong'] { --edge-glass-alpha: .9; --edge-glass-blur: 22px; }
       body[data-endfield-glass='subtle'][data-ds-dark-theme] { --edge-glass-alpha: .64; }
       body[data-endfield-glass='strong'][data-ds-dark-theme] { --edge-glass-alpha: .88; }
-      body[data-endfield-glass] :is([data-composer-card], [data-sidebar-right-panel='push']) {
+      /* WHY [data-sidebar-right-open]: the docked right panel div (SidebarPanel)
+         is position:absolute; top:0;bottom:0;right:0 and stays in the DOM even
+         when collapsed — only its inner [data-dockkit-host=dock] child is slid
+         off-screen with visibility:hidden. Frosting the bare 'push' panel would
+         leave an opaque glass rectangle covering the right half of the screen
+         while collapsed, so frost it only when the panel is expanded. */
+      body[data-endfield-glass]
+        :is([data-composer-card], [data-sidebar-right-panel='push'][data-sidebar-right-open]) {
         background-color: rgb(var(--edge-glass-fill) / var(--edge-glass-alpha)) !important;
         background-image: linear-gradient(145deg, var(--edge-glass-sheen), transparent 58%),
           radial-gradient(ellipse at 0% 0%, color-mix(in srgb, var(--edge-accent) 10%, transparent), transparent 75%) !important;
@@ -4289,12 +4296,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         box-shadow: inset -1px 0 0 var(--edge-glass-edge);
       }
       @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-        body[data-endfield-glass] :is([data-composer-card], [data-sidebar-right-panel='push']) {
+        body[data-endfield-glass]
+          :is([data-composer-card], [data-sidebar-right-panel='push'][data-sidebar-right-open]) {
           background-color: rgb(var(--edge-glass-fill) / .96) !important;
         }
       }
       @media (prefers-reduced-transparency: reduce) {
-        body[data-endfield-glass] :is([data-composer-card], [data-sidebar-right-panel='push']) {
+        body[data-endfield-glass]
+          :is([data-composer-card], [data-sidebar-right-panel='push'][data-sidebar-right-open]) {
           background-color: rgb(var(--edge-glass-fill)) !important;
           -webkit-backdrop-filter: none; backdrop-filter: none;
         }
@@ -4523,8 +4532,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
         background: var(--edge-accent) !important;
       }
-      body[data-ds-dark-theme] [class*='badge' i]:hover,
-      body[data-ds-dark-theme] [class*='badge' i][data-active] {
+      /* WHY '_badge' not bare 'badge': app CSS-module badges are '<hash>_badge'
+         (zf92ZW_badge footer, dlU_AG_badge …), but third-party plugins name
+         their own widgets without the underscore word boundary —
+         dsh-codearts-auth paints a 280px .dim-jh-badgePop account card whose
+         EVERY class contains 'badge', so the bare substring hover turned the
+         whole popup solid yellow. Same lesson as the '_add' hook (see
+         selector-guard part 3). */
+      body[data-ds-dark-theme] [class*='_badge' i]:hover,
+      body[data-ds-dark-theme] [class*='_badge' i][data-active] {
         background: var(--edge-accent) !important;
       }
       /* ---------- Dark mode: icon buttons (plus / ellipsis / stop / actions) ---------- */
@@ -4627,10 +4643,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         color: #000 !important;
       }
       /* ---------- Badge hover: signal-yellow inversion (reference .kpi:hover) ---------- */
-      [class*='badge' i]:hover,
-      [class*='badge' i]:hover *,
-      [class*='badge' i][data-active],
-      [class*='badge' i][data-active] * {
+      /* '_badge' (underscore word boundary) for the same reason as the dark-mode
+         rule above: bare 'badge' substring-matches third-party plugin classes
+         (dsh-codearts-auth .dim-jh-badgePop popup + all its children). */
+      [class*='_badge' i]:hover,
+      [class*='_badge' i]:hover *,
+      [class*='_badge' i][data-active],
+      [class*='_badge' i][data-active] * {
         color: #000 !important;
       }
       /* ---------- Cordis action buttons (run/stop) ---------- */

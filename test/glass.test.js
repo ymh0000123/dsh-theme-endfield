@@ -14,6 +14,12 @@ const {launch,boot}=require('./fixtures/chrome-cdp.js')
       assert.match(material.filter,new RegExp('blur\\('+radius+'px\\)'))
       assert.match(material.background,new RegExp(String(alpha).replace('.','\\.')))
       assert.equal(material.box,original)
+      // Expanded docked panel is frosted; the collapsed one (no data-sidebar-right-open)
+      // must stay unfrosted — it remains in the DOM parked off-screen when collapsed.
+      await browser.evaluate('document.querySelector("[data-sidebar-right-panel]").removeAttribute("data-sidebar-right-open")')
+      assert.equal(await browser.evaluate('getComputedStyle(document.querySelector("[data-sidebar-right-panel]")).backdropFilter'),'none')
+      await browser.evaluate('document.querySelector("[data-sidebar-right-panel]").setAttribute("data-sidebar-right-open","")')
+      assert.match(await browser.evaluate('getComputedStyle(document.querySelector("[data-sidebar-right-panel]")).backdropFilter'),new RegExp('blur\\('+radius+'px\\)'))
     }
     const pos=await browser.evaluate('(()=>{const r=document.querySelector("#cell").getBoundingClientRect();return{x:r.x+20,y:r.y+10}})()')
     await browser.send('Input.dispatchMouseEvent',{type:'mouseMoved',...pos})
@@ -33,11 +39,15 @@ const {launch,boot}=require('./fixtures/chrome-cdp.js')
   }
   await browser.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-transparency',value:'reduce'}]})
   assert.equal(await browser.evaluate('getComputedStyle(document.querySelector("[data-composer-card]")).backdropFilter'),'none')
+  // Collapsed docked panel: React only writes data-sidebar-right-open when expanded,
+  // so removing it must un-frost the panel even while it keeps data-sidebar-right-panel="push".
+  await browser.evaluate('document.querySelector("[data-sidebar-right-panel]").removeAttribute("data-sidebar-right-open")')
+  assert.equal(await browser.evaluate('getComputedStyle(document.querySelector("[data-sidebar-right-panel]")).backdropFilter'),'none')
   await browser.evaluate('document.querySelector("[data-sidebar-right-panel]").setAttribute("data-sidebar-right-panel","fullscreen")')
   assert.equal(await browser.evaluate('getComputedStyle(document.querySelector("[data-sidebar-right-panel]")).backdropFilter'),'none')
   await browser.evaluate('__prefs.setItem("dsh-theme-endfield-enabled","0")')
   assert.equal(await browser.evaluate('document.body.hasAttribute("data-endfield-glass")'),false)
   assert.deepEqual(browser.errors,[])
-  console.log('PASS: reduced-transparency, fullscreen exclusion and theme teardown')
+  console.log('PASS: reduced-transparency, collapsed/fullscreen exclusion and theme teardown')
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1})
