@@ -639,10 +639,11 @@ async function main() {
     // be confused by anything in the render helper.
     const hooks = client.hooks()
     /* 0-indexed: the 14th useState used to be `palette`. The panel has since
-       grown the balanceCapsule switch (inserted right after thunderAnim), so
+       grown the balanceCapsule switch (inserted right after thunderAnim) and
+       then the creditDisplay select (inserted right after balanceCapsule), so
        palette moved to the 15th slot — the index tracks the panel's hook order,
        and this assertion is exactly why a silent reorder must not pass. */
-    const paletteSlot = hooks[14]
+    const paletteSlot = hooks[15]
     if (paletteSlot === 'wuling') {
       pass('panel hook state adopted the served palette (slot moved off its default)')
     } else {

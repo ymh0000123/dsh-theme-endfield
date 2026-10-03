@@ -146,6 +146,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          /theme-endfield/balance route. Ships OFF so an upgrade never adds a
          floating element the user did not ask for. */
       balanceCapsule: '0',
+      /* 渠道额度胶囊的主读数选「剩余」还是「已用」——两个值都有真实语义，
+         不存在默认就错的答案，所以默认 remaining（与插件自身徽章一致的读法）。
+         仅影响 credits 模式的 money 组；右侧消耗百分比与圆环两种读法下不变。 */
+      creditDisplay: 'remaining',
       /* 音频通知 (host half: lib/audio.js). Two live slots — the prompt that
          starts a turn and the final answer that ends one. `audioAttention` and
          `audioTurnFail` are 预留: the sounds and switches ship, the triggers do
@@ -221,6 +225,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       'dsh-theme-endfield-thunder': 'thunder',
       'dsh-theme-endfield-thunder-anim': 'thunderAnim',
       'dsh-theme-endfield-balance-capsule': 'balanceCapsule',
+      'dsh-theme-endfield-credit-display': 'creditDisplay',
       /* 音频通知. These tails happen to equal their schema fields, so every one of
          them would also resolve correctly through the prefix-strip fallback — they
          are listed explicitly because test/settings-namespace.test.js asserts that
@@ -3927,6 +3932,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        thunder plate, so it can never eat a click aimed at the header behind it. */
     const BALANCE_KEY = 'balanceCapsule'
     const isBalanceCapsuleOn = () => prefsGet(BALANCE_KEY) === '1'
+    /* Which number the credits money group leads with. Anything other than
+       'used' reads as 'remaining' — the preference is a two-literal choice,
+       stored as exactly one of them, and the tolerant default mirrors how
+       readContourRenderer treats its own select. */
+    const CREDIT_DISPLAY_KEY = 'creditDisplay'
+    const readCreditDisplay = () => (prefsGet(CREDIT_DISPLAY_KEY) === 'used' ? 'used' : 'remaining')
     let balanceEl = null
     let balanceTimer = null
     let balancePollTimer = null
@@ -4199,9 +4210,20 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           && picked.used <= picked.quotaTotal) {
           usedPct = Math.min(100, Math.round((picked.used / picked.quotaTotal) * 100))
         }
+        // The user chooses which figure LEADS the money group: 剩余 (the
+        // plugin's own badge reading) or 已用. 'used' is only honest when a
+        // quota was actually reported — without one the used number is a
+        // bare consumption total against nothing, so the read falls back to
+        // remaining rather than showing a number the user cannot judge.
+        // Both figures come from the SAME summed account; the right-hand
+        // dial keeps showing the consumption share either way.
+        const displayUsed = readCreditDisplay() === 'used' && picked !== null && picked.quotaTotal > 0
+        const leadValue = displayUsed ? picked.used : (picked ? picked.total : NaN)
         creditPaint({
           mode: 'credits',
-          int: picked ? creditFormatValue(picked.total, picked.unit) : '--',
+          int: Number.isFinite(leadValue)
+            ? creditFormatValue(leadValue, picked.unit)
+            : '--',
           unitText: picked ? creditUnitLabel(picked.unit) : '',
           channel: JET_HUB_PROVIDER_LABELS[provider] || provider,
           pctText: Number.isFinite(usedPct) ? '已用' + usedPct + '%' : '',
@@ -7150,6 +7172,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       balanceHintOn: '在页面顶部中间悬浮显示账户余额与峰谷定价时段（每分钟刷新余额，时段倒计时每秒走字；右侧「预览」可重播开场动画）',
       balanceHintOff: '默认关闭；开启后悬浮显示余额与峰谷时段（高峰为工作日 9-12 点、14-18 点；周末、法定节假日全天、以及落在周末的调休上班日都按低谷半价）',
       balanceNeed: '请先开启顶部余额胶囊',
+      creditDisplayRow: '渠道额度读数',
+      creditDisplayRemaining: '剩余',
+      creditDisplayUsed: '已用',
+      creditDisplayHintRemaining: '渠道模式主数字显示剩余额度（与插件徽章一致）；切换后下次取数生效，右侧「已用xx%」不受影响',
+      creditDisplayHintUsed: '渠道模式主数字显示已用额度（需渠道报出总额度，否则退回剩余）；右侧「已用xx%」不受影响',
       /* 音频通知：播放发生在宿主进程（lib/audio.js），所以这里的每一行都在
          说明「什么时候响」而不是「怎么响」；试听按钮走宿主真实播放链路。 */
       groupAudio: '音频',
@@ -7301,6 +7328,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       balanceHintOn: 'Floats a capsule at the top centre of the page showing your account balance and the API peak/off-peak pricing window (balance every minute, window countdown every second; Preview on the right replays the opening animation)',
       balanceHintOff: 'Off by default; floats a balance + pricing-window capsule (peak = weekdays 9-12 & 14-18 Beijing; weekends, Chinese statutory holidays and make-up workdays that land on a weekend are off-peak, half price)',
       balanceNeed: 'Turn on the balance capsule first',
+      creditDisplayRow: 'Channel credits readout',
+      creditDisplayRemaining: 'Remaining',
+      creditDisplayUsed: 'Used',
+      creditDisplayHintRemaining: 'In credits mode the main figure shows the remaining balance (as the plugin badge does); the change applies at the next fetch, and the right-hand consumption dial is unaffected',
+      creditDisplayHintUsed: 'In credits mode the main figure shows the used amount (falls back to remaining when the channel reports no quota); the right-hand dial is unaffected',
       groupAudio: 'AUDIO',
       audioRow: 'Audio notifications',
       audioOn: 'Turn on',
@@ -7421,6 +7453,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [balanceOn, setBalanceOn] = R.useState(isBalanceCapsuleOn())
+          const [creditDisplay, setCreditDisplay] = R.useState(readCreditDisplay())
           const [palette, setPalette] = R.useState(readPalette())
           const [glass, setGlass] = R.useState(readGlass())
           const [mode, setMode] = R.useState(prefsGet(RADIUS_KEY) || 'square')
@@ -7489,6 +7522,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
               setThunderOn(isThunderOn())
               setThunderAnim(isThunderAnimOn())
               setBalanceOn(isBalanceCapsuleOn())
+              setCreditDisplay(readCreditDisplay())
               setPalette(readPalette())
               setGlass(readGlass())
               setMode(prefsGet(RADIUS_KEY) || 'square')
@@ -7710,6 +7744,19 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                fetch fires inside showBalanceCapsule, so the numbers appear within
                one round-trip instead of after an arbitrary delay. */
             syncBalanceCapsule()
+          }
+          /* 剩余 / 已用 is a select, not a toggle: the two values are answers to
+             "what does the lead number mean", not polarities of one switch, and a
+             two-state toggle button cannot show which side is live the way the
+             row's 状态 label does. Mirrors setGlassValue: validate, persist, then
+             mirror into React state. The capsule repaints on the NEXT fetch —
+             creditsApply reads the pref store per answer, so no forced RPC is
+             spent on a cosmetic re-read (the 5-min floor stays honest). */
+          const CREDIT_DISPLAY_OPTIONS = ['remaining', 'used']
+          const setCreditDisplayValue = (value) => {
+            if (CREDIT_DISPLAY_OPTIONS.indexOf(value) === -1) return
+            prefsSet(CREDIT_DISPLAY_KEY, value)
+            setCreditDisplay(value)
           }
           /* 预览: the opening pose is a one-shot moment — a real load shows it once
              and there is no reload button on the settings page. Remounting the
@@ -8155,6 +8202,26 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                     style: btnStyleFor(balanceOn),
                   }, t(balanceOn ? 'balanceOff' : 'balanceOn'))
                 )
+              ]),
+              /* --- 渠道额度读数：剩余 or 已用 ---
+                 The row lives directly under the capsule switch because it only
+                 describes that capsule's credits mode; the select mirrors the
+                 glass/renderer rows rather than a toggle, and the hint states
+                 what changes and what does not (the dial keeps showing 已用%). */
+              row('credit-display', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('creditDisplayRow') + t('sep') + t(creditDisplay === 'used' ? 'creditDisplayUsed' : 'creditDisplayRemaining'),
+                  R.createElement('span', { style: hintStyle },
+                    t(creditDisplay === 'used' ? 'creditDisplayHintUsed' : 'creditDisplayHintRemaining')
+                  )
+                ),
+                R.createElement('select', {
+                  'aria-label': t('creditDisplayRow'), value: creditDisplay,
+                  onChange: (event) => setCreditDisplayValue(event.target.value),
+                  style: { color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)',
+                    border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 10px' },
+                }, CREDIT_DISPLAY_OPTIONS.map((value) => R.createElement('option', { key: value, value },
+                  t(value === 'used' ? 'creditDisplayUsed' : 'creditDisplayRemaining'))))
               ]),
             ]),
             /* --- 05 音频：两个生效槽位 + 两个预留槽位 ---
