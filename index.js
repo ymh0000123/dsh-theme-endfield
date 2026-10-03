@@ -120,6 +120,7 @@ const FIELD_DEFAULTS = {
   loader: '0',              // 启动加载动画 —— default off
   thunder: '0',             // 雷霆大字 —— default off
   thunderAnim: '0',         // 大字入场动画 —— default off
+  balanceCapsule: '0',      // 顶部余额胶囊 —— default off
   // --- 音频通知 ---------------------------------------------------------
   // Four live slots: the boot plate, the prompt that starts a turn, the final
   // answer that ends one, and `attention` for the two moments that actually
@@ -1013,6 +1014,69 @@ function installAudio(ctx, settingsScope) {
   return audio;
 }
 
+/* ---------------------------------------------------------------------------
+ * Balance bridge — GET /theme-endfield/balance
+ *
+ * The browser half cannot reach the account balance itself: only Host
+ * consumers can obtain the request credential the account service needs, so
+ * the capsule in the page asks THIS route instead. The handler mirrors the
+ * account service's own client-metadata shape (version/locale/timezone) and
+ * returns the balance payload verbatim; a failure is reported as
+ * { ok: false } rather than a thrown 500 so the page can keep the last known
+ * numbers on screen instead of flickering an error state.
+ * ------------------------------------------------------------------------ */
+const DSH_CLIENT_VERSION_FALLBACK = '0.2.0-rc.2';
+
+function registerBalanceBridge(ctx) {
+  const webServer = serviceOf(ctx, 'webServer');
+  const mount = (webServer) => {
+    if (webServer === undefined || typeof webServer.register !== 'function') return;
+    const send = (res, code, payload) => {
+      res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(payload));
+    };
+    try {
+      webServer.register({
+        kind: 'prefix',
+        path: '/theme-endfield/balance',
+        handler: async (req, res) => {
+          const pathname = String(req.url || '').split('?')[0];
+          if (req.method !== 'GET' || pathname !== '/theme-endfield/balance') {
+            return send(res, 404, { error: 'not found' });
+          }
+          try {
+            const account = serviceOf(ctx, 'deepseekAccount');
+            if (!account || typeof account.getBalance !== 'function') {
+              return send(res, 200, { ok: false, why: 'account service absent' });
+            }
+            const client = {
+              version: DSH_CLIENT_VERSION_FALLBACK,
+              locale: 'zh-CN',
+              timezoneOffsetSeconds: -(new Date()).getTimezoneOffset() * 60,
+            };
+            const balance = await account.getBalance(client);
+            if (!balance || balance.status !== 'ready') {
+              return send(res, 200, { ok: false, why: balance && balance.status ? String(balance.status) : 'null' });
+            }
+            return send(res, 200, {
+              ok: true,
+              wallets: balance.value || [],
+              bonusWallets: balance.bonusWallets || [],
+              at: Date.now(),
+            });
+          } catch (error) {
+            return send(res, 200, { ok: false, why: String(error && error.message ? error.message : error) });
+          }
+        },
+      });
+    } catch (error) {
+      console.error(`${LOG_TAG} balance bridge failed: ${error && error.message ? error.message : error}`);
+    }
+  };
+  if (webServer !== undefined) mount(webServer);
+  else if (typeof ctx.inject === 'function') ctx.inject(['webServer'], (scope) => mount(scope.webServer));
+}
+
 /**
  * A `get()` / `watch()` view over this plugin's OWN resolved Config.
  *
@@ -1079,6 +1143,10 @@ function apply(ctx, config) {
      bridge mounted together with it) never comes up. No known DSH generation
      behaves that way. The guard keeps the two in-apply paths from installing
      two engines on one context. */
+  // The balance capsule route mounts unconditionally: the page polls it only
+  // when its own switch is on, so the route itself costs nothing at rest.
+  try { registerBalanceBridge(ctx); } catch (e) { /* never load-bearing */ }
+
   let audioInstalled = false;
   const startAudio = (settingsScope) => {
     if (audioInstalled) return;
@@ -1188,5 +1256,6 @@ module.exports = {
   classifyPrompt,
   hasVisibleText,
   installAudio,
+  registerBalanceBridge,
   configPrefScope,
 };

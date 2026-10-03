@@ -15,6 +15,7 @@
 - [等高线背景](#等高线背景)
 - [启动加载屏](#启动加载屏)
 - [设置页国际化](#设置页国际化)
+- [峰谷定价窗口与法定节假日](#峰谷定价窗口与法定节假日)
 - [为什么设置必须落在 Host 的设置命名空间（不再用 localStorage）](#为什么设置必须落在-host-的设置命名空间不再用-localstorage)
 - [已修问题归档](#已修问题归档)
 - [验证方法论](#验证方法论)
@@ -470,6 +471,35 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 
 ---
 
+## 峰谷定价窗口与法定节假日
+
+顶部余额胶囊要在本地算出「现在是高峰还是低谷」——Host 没有任何服务携带这份排班表，主题只能自己推算、自己保管日历。规则的两次修订都必须进代码：
+
+- **2026-09-10 起** flash 系列改为峰谷分时计费：**北京时间周一至周五 9:00-12:00、14:00-18:00 为高峰**，价格是空闲时段的 2 倍（api-docs.deepseek.com pricing）。
+- **2026-09-19 的「API 峰谷时间补充说明」** 补上了两条从主规则里读不出来的边界：中国**法定节假日全天**按空闲计费；**调休上班的周末仍按周末计费**（「只要是周末，就按空闲价执行」）。
+
+第二条推论出本节最重要的决定：既然官方把调休日直接归进周末规则，代码就**不需要**任何调休例外表——周末分支天然把它们算成低谷。代价是这条推理必须被机器守住：`check.js` 第 7 段要求**每一条 `makeup` 日期都真的是周六或周日**，一旦将来某份通知把普通工作日调去上班，守卫立刻失败，逼着重新审视模型，而不是继续默默按高峰计价。
+
+### 日历是数据，不是逻辑
+
+`BALANCE_HOLIDAY_NOTICES` 按年抄录国务院的放假安排通知（2026 年 = **国办发明电〔2025〕7号**，https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm ），`from` / `to` 是**含端点的 MM-DD**，`makeup` 存调休日——它不只是给人看的，也是上面那条推理的证据。启动时逐日展开成 `BALANCE_HOLIDAY_DATES`（`'YYYY-MM-DD' → 节日名`），再由此得出 `balanceHolidayName` 与 `balanceDayIsOffPeak`。
+
+**没有收录的年份回退到普通工作日规则**，也就是一个未录入的节假日会被算成高峰。这是刻意的：宁可把假期显示成高峰（用户读到的只是「现在贵」），也不猜一个假的半价读数。代价是这份数据会随时间失效，而且失效是**静默**的——所以 `check.js` 在「当前北京年份不在表里」时响亮失败，作为每年 11 月（通知发布月）的提醒。
+
+### 窗口是「最长同价连续段」，不是日历天
+
+旧实现把窗口限制在**当天 00:00-24:00**，于是周五 18:00 到周一 09:00 这段连续 63 小时的低谷被切成三块，周六上午的读数变成「剩余 14:20:00（到周日 24:00）」——一个与价格无关的数字。午夜不是价格边界，现在窗口是**同价连续块的最长游程**：7 天国庆读成一段 183 小时，跨节、跨周末自然合并。
+
+实现上 `blocksAt(day)` 给出当天的块序列（整天谷 / 工作日五块），非高峰时从当前块向两侧逐块走，遇到高峰块即停；步数上限 `BALANCE_WINDOW_WALK_CAP = 4096` 只作防呆（9 天春节连周末约 20 块，实际不可达）。顺带把 `BALANCE_PEAK_WINDOWS` 从**死常量**改造成块序列的推导来源：此前它在声明后从未被使用，函数里另写死了一份 `edges`，两者随时可能漂移。
+
+### 节假日名只出现在开场 pose
+
+胶囊宽 300px，窄屏断点 316px 正是按它推出的，所以 **settled 行的文案一个字都不能加**。「今天是国庆节」只在开场品牌 pose 的标题里体现（`DeepSeek 国庆节低谷`，普通日子仍是 `DeepSeek 当前低谷`）；`test/balance-capsule.test.js` 直接断言 `win.holiday` 只被**一行**读取、且那一行在 brand-title 块内，防止它以后爬进 settled 行把胶囊撑宽。
+
+算术本身（节假日 / 周末 / 工作日各读到什么窗口、倒计时多少）钉在 `test/balance-window.test.js`；守卫与注入用例见 [testing.md](testing.md#顶部余额胶囊)。
+
+---
+
 ## 已修问题归档
 
 按成因分类。共同点：**都是量出来的，不是读代码读出来的。**
@@ -559,6 +589,18 @@ background: var(--dsw-alias-interactive-bg-hover-solid);   /* :hover */
 - **`sessions` 服务迟到导致功能永久失效。** Web 启动是 `Promise.all` 并发挂载所有插件行，而本主题**不声明 `inject`**，所以 `apply()` 完全可能跑在 `dsh-client-runtime` 提供 `sessions` 之前。初版在 `apply()` 里缓存了一次 `ctx.get('sessions')`，于是在这类加载顺序下雷霆大字会**永久失效**——只在慢速 / 冷启动时偶发。现在改为**惰性解析 + 120ms 重试**。
 
   之所以不用 `inject: ['sessions']`：那会让**整个主题**进入 cordis 的 pending 态，把令牌与样式表的挂载一起推迟——主题必须先能上色，即使这个娱乐功能永远拿不到服务。
+
+- **列表快照里的 `current` 字段消失，把「暂时没有当前会话」写成了终态。** 上一个 bug 修的是**服务迟到**，这一个修的是**契约变化**：上游把 `SessionListState` 收窄成 `{ ids, byId, phase, projectionsBySession }`，`current` 整个没了（view selection 早在 `service.d.ts` 里就被注明「remains outside the Controller」）。旧代码 `snap.current` 于是恒为 `undefined`，而它落进的分支是 `thunderDetach(); return`——**没有订阅、没有定时器、没有任何后续推送能再进来**，功能在新版本上静默失效，而测试全绿：假 `sessions` 服务当时也按同一份旧形状造形，等于把 bug 一起固化了。
+
+  现在的权威答案是 **mainView retention**，而不是某个字段：workspace 面板用 `this.sessions.retain(target, { source: 'mainView' })`（`@deepseek-ai/dsh-client-ui-workspace`）标记「用户正在看这个会话」，行上体现为 `retainedBy.mainView > 0`；全应用统一读法是
+
+  ```js
+  Object.values(state.byId).find((row) => (row.retainedBy?.mainView ?? 0) > 0)?.id
+  ```
+
+  7 个官方包（`ui-layout` 的文档标题、`ui-cordis`、`ui-open-in-app`、`ui-settings-general`、`ui-agent-preset`、`ui-session`、`ui-workspace`）与第三方 `@nanmicoder/dsh-agent-teams` 都用的这一式。**注意 `mainView` 并不在 `SessionReferenceSourceMap` 的声明联合里**（那里只有 `controllerOperation` / `gateway`），它是运行时扩展——只能按运行时行为读，不能照 d.ts 穷举。
+
+  修法分三层：`thunderCurrentId(snap)` 先扫 `byId` 的 mainView 保留、再退回旧的 `snap.current`（兼容旧宿主）；列表快照读不到时**保留旧 watch**，不把「读不到」当「用户离开了」；id 解析不到时不再当终态——`list.subscribe` 还在就等下一次 publish（`publishRetention()` 会把新的 `retainedBy` 推进列表，所以切换会话照样能驱动重绑），只有连 `list.subscribe` 都拿不到才走 120ms 有界重试。上一版的教训在这里再次成立：**主题不声明 `inject`，所以「服务/字段暂时拿不到」必须永远留在等待态，而不是终态。**
 
 - **子开关在已挂载时失效。** 为避免每个流式 token 触发重排而加的快速返回，把开关协调代码一起跳过了。
 
@@ -743,6 +785,18 @@ fO69Vq_addButton / _3nPmjq_addButton    （旧 `:not()` 排除的两个）
 `selftest.js` 会把真实 bug 注入 `client.js` 的**副本**并断言 `check.js` 确实失败——同时断言注入本身生效，避免「测试其实什么都没改」的空跑。
 
 这条护栏当场发挥过作用：调色板重构把渐变色标从字面量换成了 `var(--edge-status-*)`，于是针对 `#6b5d00` / `#fff500` 的注入不再匹配、变成空跑，脚本立刻报「INJECTION DID NOT APPLY (test is vacuous)」而不是假装通过。另外两个坑也是这样暴露的：`--edge-accent-deep` 两套配色各定义一次，只删一处不算删掉；本仓库是 **CRLF**，注入模式里写字面 `\n` 永远匹配不上（改用 `\r?\n`）。
+
+### 上游把菜单改成半透明材质后，「不透明」就成了主题的责任
+
+0.2 起菜单不再自己上色。`MenuSurface` 原语在面板背后挂一层 `_material`，值是 `background: var(--dsw-menu-surface-fill)`（亮 `#f8f9fa94` 58% / 暗 `#43454a73` 45%）加 `backdrop-filter: var(--dsw-menu-backdrop-filter)`（默认 `blur(40px) saturate(150%)`）。在纯色底上模糊兜住了透明度；在本主题的等高线底上，合成值与页面底色只差几个 RGB 步进（暗色实测 `rgb(38,40,41)` vs 页面 `rgb(16,17,16)`，面板内部 904 种颜色），面板就读成「没有背景」——用户报的是「菜单的背景没了」。
+
+这类失效最难定性：不报错、不写日志，主题里也没有任何「写错」的选择器——**变的是上游默认值的语义**。修法是认领令牌（`--dsw-menu-surface-fill` = 本主题的 `--dsw-alias-bg-overlay`，一个令牌同时覆盖 `--dsw-specific-menu` 与全部菜单），而不是给上游的哈希类名补一条选择器（那也过不了 `selector-guard`）。
+
+反方向的坑同样要防：把令牌钉成页面底色（`--dsw-alias-bg-base`）也是「没有背景」，只是换成了看不见的实心块——应用自己在 macOS 上的菜单 backing 用的就是 `--dsw-alias-bg-base`，所以这不是假想。测试因此**同时**断言「不透明」与「与页面底色不同」，并用像素证明菜单矩形内没有任何东西透出来。
+
+### JS 块注释里出现 `*/` 会让整个 bundle 静默不注册
+
+给令牌写说明时顺手把平台默认值写成 CSS 风格的行内注释（`/* light, 58% alpha */`），其中的 `*/` 提前闭合了外层 JS 块注释，于是剩下的文字落进代码——`client.js` 抛 `SyntaxError: Unexpected token '--'`，整个模块无法注册（`__ModuleLoader__` 拿到的模块是 `undefined`），而主题只是「没生效」，页面看起来像主题关着。`check.js` 的 `vm.Script` 编译检查能在进程内抓到它，所以**任何一次 `client.js` 改动之后都要先跑 `node check.js`**，再去跑浏览器测试。
 
 ### 无头环境的 rAF 不能用来采样性能
 

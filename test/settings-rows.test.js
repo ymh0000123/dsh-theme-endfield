@@ -161,12 +161,12 @@ const buttons = nodes.filter((n) => n.type === 'button')
    contour-renderer rows (16) plus this branch's 11 audio rows. The count is
    asserted below against the rendered tree as well, so a row that exists in the
    page but not in this list still fails. */
-const ROW_KEYS = ['theme', 'palette', 'glass', 'radius', 'contour', 'contour-anim', 'contour-trail', 'contour-renderer', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim', 'audio', 'audio-boot', 'audio-start', 'audio-done', 'audio-volume', 'audio-attention', 'audio-fail', 'audio-source', 'audio-dir', 'audio-human', 'audio-diag']
+const ROW_KEYS = ['theme', 'palette', 'glass', 'radius', 'contour', 'contour-anim', 'contour-trail', 'contour-renderer', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim', 'balance-capsule', 'audio', 'audio-boot', 'audio-start', 'audio-done', 'audio-volume', 'audio-attention', 'audio-fail', 'audio-source', 'audio-dir', 'audio-human', 'audio-diag']
 const rows = nodes.filter((n) => n.type === 'div' && n.props && ROW_KEYS.includes(n.props.key))
 const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.props && /^group-/.test(c.props.key))
 
-if (rows.length === 27) pass('panel has all 27 setting rows')
-else fail('expected 27 rows, found ' + rows.length)
+if (rows.length === 28) pass('panel has all 28 setting rows')
+else fail('expected 28 rows, found ' + rows.length)
 
 /* Count the rows the way the PAGE defines them — every direct child of a group
    container — so an unlisted new row shows up as a mismatch instead of vanishing. */
@@ -422,6 +422,35 @@ if (thunderBtn && typeof thunderBtn.props.onClick === 'function') {
   if (prefStore.get('thunder') === '1') pass('雷霆大字 toggle writes thunder=1')
   else fail('雷霆大字 toggle wrote ' + JSON.stringify(prefStore.get('thunder')) + ', expected "1"')
 } else fail('雷霆大字 toggle has no onClick handler')
+
+/* --- 顶部余额胶囊: 预览 replays the opening pose, gated on the switch ------
+   The pose is a one-shot moment on a real load, so the row needs its own replay
+   button; it must be inert until the capsule (and the theme) is on. */
+prefStore.setField('balanceCapsule', '0')
+let treeBOff
+try { treeBOff = rendered() } catch (e) { fail('re-render (balance off) threw: ' + e.message); process.exit(1) }
+const balRowOff = walk(treeBOff).find((n) => n.type === 'div' && n.props && n.props.key === 'balance-capsule')
+const balBtnsOff = balRowOff ? walk(balRowOff).filter((n) => n.type === 'button') : []
+const balPreviewOff = balBtnsOff.find((b) => /预览/.test(textOf(b)))
+if (balPreviewOff && balPreviewOff.props.disabled) pass('余额胶囊 预览 disabled while the capsule is off')
+else fail('余额胶囊 预览 should be disabled while the capsule is off')
+
+prefStore.setField('balanceCapsule', '1')
+let treeBOn
+try { treeBOn = rendered() } catch (e) { fail('re-render (balance on) threw: ' + e.message); process.exit(1) }
+const balRowOn = walk(treeBOn).find((n) => n.type === 'div' && n.props && n.props.key === 'balance-capsule')
+const balBtnsOn = balRowOn ? walk(balRowOn).filter((n) => n.type === 'button') : []
+const balPreviewOn = balBtnsOn.find((b) => /预览/.test(textOf(b)))
+if (balPreviewOn && !balPreviewOn.props.disabled) pass('余额胶囊 预览 enabled once switched on')
+else fail('余额胶囊 预览 should be enabled once the capsule is on')
+if (balPreviewOn && typeof balPreviewOn.props.onClick === 'function') {
+  // Replaying must never throw and must leave the switch itself untouched.
+  try { balPreviewOn.props.onClick() } catch (e) { fail('余额胶囊 预览 threw: ' + e.message) }
+  pass('余额胶囊 预览 replays without throwing')
+  if (prefStore.get('balanceCapsule') === '1') pass('余额胶囊 预览 does not write the switch')
+  else fail('余额胶囊 预览 changed the stored switch: ' + JSON.stringify(prefStore.get('balanceCapsule')))
+} else fail('余额胶囊 预览 button has no onClick handler')
+prefStore.setField('balanceCapsule', '0')
 
 if (!/(typeof\s+localStorage|localStorage\.(getItem|setItem|removeItem))/.test(src)) pass('client.js has no localStorage storage-API calls')
 else fail('client.js still calls the localStorage storage API — migration incomplete')

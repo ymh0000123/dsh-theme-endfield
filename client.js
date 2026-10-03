@@ -141,6 +141,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       loader: '0',
       thunder: '0',
       thunderAnim: '0',
+      /* 顶部余额胶囊 — opt-in, like thunder: a fixed capsule at the top center
+         of the frame showing the account balance, fed by the host-side
+         /theme-endfield/balance route. Ships OFF so an upgrade never adds a
+         floating element the user did not ask for. */
+      balanceCapsule: '0',
       /* 音频通知 (host half: lib/audio.js). Two live slots — the prompt that
          starts a turn and the final answer that ends one. `audioAttention` and
          `audioTurnFail` are 预留: the sounds and switches ship, the triggers do
@@ -215,6 +220,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       'dsh-theme-endfield-loader': 'loader',
       'dsh-theme-endfield-thunder': 'thunder',
       'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+      'dsh-theme-endfield-balance-capsule': 'balanceCapsule',
       /* 音频通知. These tails happen to equal their schema fields, so every one of
          them would also resolve correctly through the prefix-strip fallback — they
          are listed explicitly because test/settings-namespace.test.js asserts that
@@ -280,6 +286,20 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     const AUDIO_STATE_URL = '/theme-endfield/audio/state'
     const AUDIO_PREVIEW_URL = '/theme-endfield/audio/preview'
     const AUDIO_ATTENTION_URL = '/theme-endfield/audio/attention'
+    /* ---------- 顶部余额胶囊 (host half owns the balance query) ----------
+       The page cannot reach the account service itself — only Host consumers
+       can obtain the request credential — so the capsule polls the host-side
+       route below and renders whatever it returns. */
+    const BALANCE_URL = '/theme-endfield/balance'
+    const BALANCE_POLL_MS = 60000
+    // The pricing window ticks every second (countdown to the next edge).
+    const BALANCE_TICK_MS = 1000
+    // The capsule opens as the brand panel and collapses into the balance row
+    // once the first account answer lands (success or failure — an offline host
+    // must not leave the brand pose up forever). MIN keeps the brand readable on
+    // a fast network; MAX is the cap when nothing ever answers.
+    const BALANCE_BOOT_MIN_MS = 900
+    const BALANCE_BOOT_MAX_MS = 5000
     // Default ON for the master switch and both live slots; default OFF for the
     // diagnostics switch, so the host console stays quiet unless asked.
     const isAudioOn = () => prefsGet(AUDIO_ENABLED_KEY) !== '0'
@@ -3592,6 +3612,39 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       try { unsub = sessions.list.subscribe(() => { thunderRebind() }) } catch (e) { unsub = null }
       thunderUnsubList = (typeof unsub === 'function') ? unsub : null
     }
+    /* WHICH session the user is looking at.
+       The list snapshot used to carry a `current` session id, and this file read it.
+       Newer Controllers deliberately moved view selection out of themselves — the
+       list state is { ids, byId, phase, projectionsBySession } and the contract says
+       outright that "view selection remains outside the Controller" — so `current`
+       is simply gone there. The old read therefore resolved to undefined, the watch
+       bailed out, and the announcement went permanently silent: the whole feature
+       looked switched on in settings while nothing ever fired.
+       The runtime's own answer is the `mainView` retention count. The workspace main
+       view retains whatever it displays with
+       `sessions.retain(target, { source: 'mainView' })`, and every shipped package
+       that needs "the current session" resolves it with exactly this scan
+       (ui-session, ui-layout, ui-workspace, ui-settings-general, ui-cordis,
+       ui-agent-preset, ui-open-in-app). Selection changes reach us as ordinary list
+       publishes — the Controller copies the retention record onto the row
+       (`publishRetention` -> `list.set`), so switching sessions re-runs this scan
+       through the subscription below, with no polling of our own.
+       `snap.current` is kept as a fallback so a host that still publishes it keeps
+       working; both shapes are covered by test/thunder-edges.test.js. */
+    const thunderCurrentId = (snap) => {
+      const byId = snap.byId
+      if (byId !== null && typeof byId === 'object') {
+        const ids = Object.keys(byId)
+        for (let i = 0; i < ids.length; i += 1) {
+          const row = byId[ids[i]]
+          if (row === null || typeof row !== 'object') continue
+          const kept = row.retainedBy
+          if (kept !== null && typeof kept === 'object' && (kept.mainView ?? 0) > 0) return ids[i]
+        }
+      }
+      const legacy = snap.current
+      return (typeof legacy === 'string' || typeof legacy === 'number') ? legacy : undefined
+    }
     /* Follow the CURRENT session. `sessions.list` publishes the selection, and the
        runtime's own list subscriber (registered at construction, so it runs first)
        stages the session that makes binding() resolve. A miss here is therefore
@@ -3617,15 +3670,33 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // The list subscription may have been skipped earlier (no service then), so
       // attach it as soon as one exists.
       thunderSubscribeList(sessions)
-      let id
+      let snap = null
       try {
-        const snap = sessions.list.getSnapshot()
-        id = (snap === null || typeof snap !== 'object') ? undefined : snap.current
+        snap = sessions.list.getSnapshot()
       } catch (e) {
+        // Unreadable list: leave the previous watch exactly as it is. A flaky read
+        // must not be mistaken for "the user left this session".
         return
       }
+      const id = (snap === null || typeof snap !== 'object') ? undefined : thunderCurrentId(snap)
       if (id === undefined || id === null) {
+        /* Nothing on screen to announce. This is a WAITING state rather than a
+           failure, and the difference matters: the old code treated it as final, so
+           a list that had no current session at boot never recovered. The main view
+           retains its session when it gets one, that retention lands in the list, and
+           the subscription attached above comes straight back here — so we simply
+           wait, keeping no timer. The one case that needs the timer is a list
+           subscription that could not be attached at all, because then no future
+           publish can ever reach us. */
         thunderDetach()
+        if (thunderUnsubList === null) {
+          if (thunderRebindAttempts >= 100) {
+            dbg('thunder rebind gave up: no current session and no list subscription')
+            return
+          }
+          thunderRebindAttempts += 1
+          if (typeof setTimeout === 'function') thunderRebindTimer = setTimeout(thunderRebind, 120)
+        }
         return
       }
       /* Already watching this one: skip the detach/resubscribe churn. `sessions.list`
@@ -3793,6 +3864,439 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     module.exports.__attentionCheck = audioAttentionTick
     module.exports.__attentionSchedule = audioAttentionSchedule
 
+    /* ---------- 顶部余额胶囊 ----------
+       A fixed capsule at the top center of the frame showing the account
+       balance AND the API's peak/off-peak pricing window, styled after the
+       Endfield HUD plate: dark pill, currency + big tnum number, a small
+       countdown to the next window edge, the elapsed-window percentage pushed
+       to the right, and the accent-yellow round badge.
+
+       WHY A HOST ROUTE. Only Host consumers can obtain the request credential
+       the account service needs, so the page cannot query the balance itself —
+       it polls /theme-endfield/balance (index.js registerBalanceBridge) and
+       renders whatever arrives. A failed or empty answer keeps the last known
+       numbers on screen instead of flashing an error state; a 60s poll keeps a
+       drifted display within a minute of the truth at the cost of one cheap
+       local request.
+
+       WHY THE PRICING WINDOW IS COMPUTED LOCALLY. No host service exposes the
+       schedule (deepseekAccount carries balance only), and the published rule
+       is fixed wall-clock: Beijing time Mon-Fri 9:00-12:00 and 14:00-18:00 are
+       PEAK (高峰), everything else — evenings, nights, weekends, statutory
+       holidays — is OFF-PEAK (低谷) at half price. The holiday half of that
+       sentence needs a calendar, so this file carries one transcribed from the
+       State Council notices (BALANCE_HOLIDAY_NOTICES) instead of guessing; the
+       capsule says "已过/剩余", not "what you will pay". A 1s tick keeps the
+       countdown honest to the second.
+
+       WHY RAW DOM, NOT A SLOT COMPONENT. Every other floating surface in this
+       theme (thunder plate, watermark) is a plain fixed element owned by
+       lifecycle code this file already has — mount/unmount/sync/reconcile —
+       and a slot registration would hand the frame's React tree a component
+       that must survive re-roots this theme does not control. The capsule is
+       static once painted (only text nodes change), so raw DOM loses nothing.
+       It is NOT clickable and NOT interactive: pointer-events:none, like the
+       thunder plate, so it can never eat a click aimed at the header behind it. */
+    const BALANCE_KEY = 'balanceCapsule'
+    const isBalanceCapsuleOn = () => prefsGet(BALANCE_KEY) === '1'
+    let balanceEl = null
+    let balanceTimer = null
+    let balancePollTimer = null
+    let balanceBusy = false
+    // Non-zero while the brand pose is up: the wall-clock moment it was raised.
+    let balanceBootAt = 0
+    // Set by the first completed fetch, answer or not.
+    let balanceBootAnswered = false
+
+    /* Whether the brand pose plays at all. Reduced motion gets the settled
+       capsule immediately — the animation is decoration, the balance is not. */
+    const isBalanceBootAnimated = () =>
+      typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    const destroyBalanceCapsule = () => {
+      if (balanceTimer !== null && typeof clearInterval === 'function') {
+        clearInterval(balanceTimer)
+        balanceTimer = null
+      }
+      if (balancePollTimer !== null && typeof clearInterval === 'function') {
+        clearInterval(balancePollTimer)
+        balancePollTimer = null
+      }
+      if (balanceEl !== null && balanceEl.parentNode) {
+        try { balanceEl.parentNode.removeChild(balanceEl) } catch (e) { /* already gone */ }
+      }
+      balanceEl = null
+      balanceBootAt = 0
+      balanceBootAnswered = false
+    }
+
+    /* One wallet pair -> the capsule's three text values. The balance arrives as
+       strings ("12.34"), so the integer part is sliced out of the text rather
+       than parsed: parsing would round a partial yuan amount into a lie about
+       the user's money, and the screenshot style wants the big integer anyway.
+       The fraction is capped at TWO digits — the source can carry more (or the
+       bonus split can produce long tails), and a capsule is a glanceable read,
+       not a ledger: it shows 29.35, not 29.354285714285714. */
+    const balancePickWallet = (wallets) => {
+      if (!Array.isArray(wallets) || wallets.length === 0) return null
+      const preferred = wallets.find((w) => w && w.currency === 'CNY') || wallets[0]
+      const raw = String((preferred && preferred.balance) || '0')
+      const num = Number.parseFloat(raw)
+      if (!Number.isFinite(num)) return null
+      const [intPart, fracPart = ''] = raw.split('.')
+      return {
+        currency: (preferred && preferred.currency) || '',
+        int: intPart || '0',
+        frac: fracPart.slice(0, 2),
+      }
+    }
+
+    const balancePaint = (data) => {
+      if (balanceEl === null || typeof document === 'undefined') return
+      const setText = (attr, text) => {
+        const node = balanceEl.querySelector('[' + attr + ']')
+        if (node) node.textContent = text
+      }
+      setText('data-endfield-balance-int', data.int)
+      setText('data-endfield-balance-frac', data.frac === '' ? '' : '.' + data.frac)
+      setText('data-endfield-balance-currency', data.currency === 'USD' ? '$' : '¥')
+    }
+
+    /* ---------- 峰谷定价窗口（本地计算） ----------
+       The published rule (api-docs.deepseek.com pricing): Beijing time Mon-Fri
+       9:00-12:00 and 14:00-18:00 are PEAK; everything else — nights, weekends,
+       statutory holidays — is OFF-PEAK at half price. Two cases the summary
+       rule leaves open are settled by DeepSeek's own 「API 峰谷时间补充说明」
+       (2026-09-19): a Chinese statutory holiday is off-peak ALL DAY, and a
+       调休 make-up workday that lands on a weekend is still billed as a weekend,
+       i.e. off-peak all day as well. The second ruling is why the weekend test
+       below needs no exception list — every 调休 day in the notices is a
+       Saturday or Sunday (check.js enforces exactly that), so "weekend =>
+       valley" already bills them off-peak.
+
+       Everything is computed against UTC+8 directly (a fixed offset zone, no
+       DST), so the result is exact regardless of the viewer's machine zone:
+       shifting a Date by +8h and reading its UTC fields yields the Beijing
+       wall clock.
+
+       The window is the longest run of CONSECUTIVE EQUAL-PRICE blocks, not the
+       calendar day. Midnight is not a price edge, so Friday's evening valley
+       runs on through the weekend into Monday 09:00, and a 7-day national
+       holiday reads as ONE valley rather than resetting every midnight. Peak
+       blocks stay 3h/4h, so a peak read is identical to the old day-scoped one.
+
+       Returns { peak, holiday, elapsedMs, totalMs, remainingMs, elapsedPct } —
+       elapsed/total drive the 「低谷已过33%」 read, remainingMs the
+       「剩余42:29:37」 countdown, peak the 高峰/低谷 label and holiday the name
+       of the statutory holiday the day sits in ('' otherwise). Only the brand
+       pose names the holiday: the settled row must not grow a character, or it
+       would push the pill past the width its breakpoint was derived from. */
+
+    /* Statutory-holiday calendar, transcribed from the State Council's yearly
+       放假安排 notice. `from`/`to` are INCLUSIVE Beijing dates (MM-DD); `makeup`
+       lists the weekend days worked to make the span and is kept as evidence
+       for the ruling above (the code bills them as weekends, like any other
+       Saturday). A year WITHOUT an entry falls back to the plain weekday/weekend
+       rule — an unlisted holiday would be billed as peak — so check.js fails
+       when the CURRENT Beijing year is missing, which is the reminder to add the
+       next notice (published each November). Pure data, no logic: safe to
+       evaluate on its own by the guard. */
+    const BALANCE_HOLIDAY_NOTICES = {
+      2026: {
+        notice: '国办发明电〔2025〕7号',
+        spans: [
+          { name: '元旦', from: '01-01', to: '01-03', makeup: ['01-04'] },
+          { name: '春节', from: '02-15', to: '02-23', makeup: ['02-14', '02-28'] },
+          { name: '清明节', from: '04-04', to: '04-06', makeup: [] },
+          { name: '劳动节', from: '05-01', to: '05-05', makeup: ['05-09'] },
+          { name: '端午节', from: '06-19', to: '06-21', makeup: [] },
+          { name: '中秋节', from: '09-25', to: '09-27', makeup: [] },
+          { name: '国庆节', from: '10-01', to: '10-07', makeup: ['09-20', '10-10'] },
+        ],
+      },
+    }
+
+    /* 'YYYY-MM-DD' -> holiday name, expanded once from the spans above. */
+    const BALANCE_HOLIDAY_DATES = new Map()
+    const balanceBeijingKey = (ms) => {
+      const d = new Date(ms + 8 * 3600 * 1000) // Beijing wall clock, read as UTC
+      const mo = d.getUTCMonth() + 1
+      const day = d.getUTCDate()
+      return d.getUTCFullYear() + '-' + (mo < 10 ? '0' : '') + mo + '-' + (day < 10 ? '0' : '') + day
+    }
+    for (const year of Object.keys(BALANCE_HOLIDAY_NOTICES)) {
+      for (const span of BALANCE_HOLIDAY_NOTICES[year].spans) {
+        const from = span.from.split('-').map(Number)
+        const to = span.to.split('-').map(Number)
+        const last = Date.UTC(Number(year), to[0] - 1, to[1])
+        for (let at = Date.UTC(Number(year), from[0] - 1, from[1]); at <= last; at += 24 * 3600 * 1000) {
+          BALANCE_HOLIDAY_DATES.set(balanceBeijingKey(at), span.name)
+        }
+      }
+    }
+
+    /* Statutory holiday covering the Beijing day of `ms`, '' on ordinary days. */
+    const balanceHolidayName = (ms) => BALANCE_HOLIDAY_DATES.get(balanceBeijingKey(ms)) || ''
+
+    /* True when the WHOLE Beijing day containing `ms` is off-peak: a weekend
+       (including the 调休 workdays that fall on one) or a statutory holiday. */
+    const balanceDayIsOffPeak = (ms) => {
+      const weekday = new Date(ms + 8 * 3600 * 1000).getUTCDay()
+      return weekday === 0 || weekday === 6 || BALANCE_HOLIDAY_DATES.has(balanceBeijingKey(ms))
+    }
+
+    const BALANCE_PEAK_WINDOWS = [[9 * 60, 12 * 60], [14 * 60, 18 * 60]] // minutes-of-day
+    /* One ordinary weekday as valley/peak blocks, derived from the peak windows
+       above so the two can never disagree: valley, peak, valley, peak, valley. */
+    const balanceWeekdayBlocks = () => {
+      const blocks = []
+      let at = 0
+      for (const win of BALANCE_PEAK_WINDOWS) {
+        if (win[0] > at) blocks.push([at, win[0], false])
+        blocks.push([win[0], win[1], true])
+        at = win[1]
+      }
+      if (at < 24 * 60) blocks.push([at, 24 * 60, false])
+      return blocks
+    }
+    const BALANCE_WEEKDAY_BLOCKS = balanceWeekdayBlocks()
+    const BALANCE_OFF_PEAK_DAY_BLOCKS = [[0, 24 * 60, false]]
+    /* Ceiling on the equal-price walk. A 9-day 春节 plus its weekends is ~20
+       blocks, so this is unreachable in practice; it only stops a broken table
+       from walking for a whole second inside a 1s tick. */
+    const BALANCE_WINDOW_WALK_CAP = 4096
+    const balancePricingWindow = (now) => {
+      const t = now.getTime()
+      const shift = new Date(t + 8 * 3600 * 1000)
+      const minute = shift.getUTCHours() * 60 + shift.getUTCMinutes()
+      const secOfDay = minute * 60 + shift.getUTCSeconds()
+      const dayMs = 24 * 3600 * 1000
+      const dayStart = t - secOfDay * 1000 // Beijing midnight, absolute time
+      const blocksAt = (dayOffset) =>
+        (balanceDayIsOffPeak(dayStart + dayOffset * dayMs)
+          ? BALANCE_OFF_PEAK_DAY_BLOCKS
+          : BALANCE_WEEKDAY_BLOCKS)
+      const blocks = blocksAt(0)
+      let slot = 0
+      for (let i = 0; i < blocks.length; i += 1) {
+        if (minute >= blocks[i][0] && minute < blocks[i][1]) {
+          slot = i
+          break
+        }
+      }
+      const peak = blocks[slot][2]
+      let windowStart = dayStart + blocks[slot][0] * 60 * 1000
+      let windowEnd = dayStart + blocks[slot][1] * 60 * 1000
+      if (!peak) {
+        /* Walk the flat block sequence outwards from today's block while the
+           neighbour stays a valley; the first peak block is the edge. Midnight
+           needs no special case because it is not a price edge, which is what
+           makes a weekend (or a whole national holiday) one contiguous valley. */
+        let day = 0
+        let i = slot
+        for (let step = 0; step < BALANCE_WINDOW_WALK_CAP; step += 1) {
+          if (i > 0) {
+            i -= 1
+          } else {
+            day -= 1
+            i = blocksAt(day).length - 1
+          }
+          const back = blocksAt(day)[i]
+          if (back[2]) break
+          windowStart = dayStart + day * dayMs + back[0] * 60 * 1000
+        }
+        day = 0
+        i = slot
+        for (let step = 0; step < BALANCE_WINDOW_WALK_CAP; step += 1) {
+          if (i + 1 < blocksAt(day).length) {
+            i += 1
+          } else {
+            day += 1
+            i = 0
+          }
+          const next = blocksAt(day)[i]
+          if (next[2]) break
+          windowEnd = dayStart + day * dayMs + next[1] * 60 * 1000
+        }
+      }
+      const elapsedMs = Math.max(0, t - windowStart)
+      const totalMs = Math.max(1, windowEnd - windowStart)
+      return {
+        peak,
+        holiday: peak ? '' : balanceHolidayName(dayStart),
+        elapsedMs,
+        totalMs,
+        remainingMs: Math.max(0, windowEnd - t),
+        elapsedPct: Math.min(100, Math.round((elapsedMs / totalMs) * 100)),
+      }
+    }
+
+    /* hh:mm:ss with hours unclamped — a weekend valley legitimately runs past
+       a day boundary in feel, and the reference screenshot shows exactly that
+       shape ("剩余42:29:37"). */
+    const balanceFormatCountdown = (ms) => {
+      const total = Math.max(0, Math.floor(ms / 1000))
+      const h = Math.floor(total / 3600)
+      const m = Math.floor((total % 3600) / 60)
+      const s = total % 60
+      const pad = (n) => (n < 10 ? '0' + String(n) : String(n))
+      return String(h) + ':' + pad(m) + ':' + pad(s)
+    }
+
+    /* Re-derive the window from wall clock and repaint the pricing half. Runs
+       every tick; before the first balance answer arrives the money half still
+       shows its 待机 (¥--) seed, so the capsule never renders an empty slot.
+       The dial is driven by ONE custom property: the ring's conic-gradient reads
+       --endfield-balance-sweep, so progress never re-lays-out the pill. */
+    const balancePaintWindow = () => {
+      if (balanceEl === null || typeof document === 'undefined') return
+      let win
+      try {
+        win = balancePricingWindow(new Date())
+      } catch (e) {
+        return
+      }
+      const setText = (attr, text) => {
+        const node = balanceEl.querySelector('[' + attr + ']')
+        if (node) node.textContent = text
+      }
+      const phase = balanceEl.querySelector('[data-endfield-balance-phase]')
+      if (phase) {
+        phase.textContent = win.peak ? '高峰' : '低谷'
+        phase.setAttribute('data-endfield-balance-phase-peak', win.peak ? '1' : '0')
+      }
+      setText('data-endfield-balance-remain', balanceFormatCountdown(win.remainingMs))
+      setText('data-endfield-balance-pct', (win.peak ? '高峰已过' : '低谷已过') + win.elapsedPct + '%')
+      // The brand pose names the window it opens onto, so the panel never claims
+      // 低谷 while the clock has already crossed into 高峰.
+      const brandTitle = balanceEl.querySelector('[data-endfield-balance-brand-title]')
+      if (brandTitle) {
+        // The pose names the window it opens onto; on a statutory holiday it
+        // names the holiday, because 低谷 alone would read as an ordinary night.
+        const label = win.peak
+          ? 'DeepSeek 当前高峰'
+          : 'DeepSeek ' + (win.holiday === '' ? '当前低谷' : win.holiday + '低谷')
+        if (brandTitle.textContent !== label) brandTitle.textContent = label
+      }
+      if (typeof balanceEl.style?.setProperty === 'function') {
+        balanceEl.style.setProperty('--endfield-balance-sweep', win.elapsedPct * 3.6 + 'deg')
+      }
+      /* Collapse the brand pose: held for at least MIN so the brand is readable,
+         released by the first answer, capped by MAX when the host never replies,
+         and never released while the boot plate is up — the two overlays sit at
+         the same point on screen and would cross-fade over each other. Writing
+         the stadium radius inline here is what hands the shape back to the pill
+         after the pose; the transition interpolates 14px -> 999px. */
+      if (balanceBootAt !== 0) {
+        const waited = Date.now() - balanceBootAt
+        const ready = balanceBootAnswered || waited >= BALANCE_BOOT_MAX_MS
+        if (waited >= BALANCE_BOOT_MIN_MS && ready && loaderEl === null) {
+          balanceBootAt = 0
+          balanceEl.removeAttribute('data-endfield-balance-boot')
+          if (typeof balanceEl.style?.setProperty === 'function') {
+            balanceEl.style.setProperty('border-radius', '999px', 'important')
+          }
+        }
+      }
+    }
+
+    const balanceFetch = async () => {
+      if (balanceBusy || typeof fetch !== 'function') return
+      balanceBusy = true
+      try {
+        const res = await fetch(BALANCE_URL, { method: 'GET' })
+        const payload = await res.json().catch(() => null)
+        if (payload && payload.ok) {
+          const wallet = balancePickWallet(payload.wallets)
+          if (wallet) balancePaint(wallet)
+        }
+      } catch (e) { /* keep last known values; the next poll retries */ } finally {
+        balanceBusy = false
+        // "Answered" covers a failed request too: the brand pose is a waiting
+        // room, not a promise that money is on the way.
+        balanceBootAnswered = true
+      }
+    }
+
+    /* `forceBoot` replays the opening pose for the settings 预览 button. It is
+       the one caller allowed to override the OS reduced-motion preference: the
+       user asked for this animation by name, and without the override the button
+       would look broken to exactly the people who turn motion down. */
+    const showBalanceCapsule = (forceBoot) => {
+      if (!isEnabled() || !isBalanceCapsuleOn()) return
+      if (typeof document === 'undefined' || !document.body) return
+      if (balanceEl !== null) return
+      const el = document.createElement('div')
+      el.setAttribute('data-endfield-balance', '')
+      // The theme's zero-radius pass is `body:not(.theme-endfield-round) [class]
+      // { border-radius: 0 !important }`, and a host style could add one more
+      // layer on top. The capsule is a stadium by design, so its radius is
+      // written inline with priority where nothing applied later can flatten it.
+      // The boot pose borrows the brand panel's 14px first; the collapse writes
+      // the stadium value back. Guarded because a jsdom-ish host hands back a
+      // createElement() node whose style object carries no setProperty.
+      const bootAnimated = forceBoot === true || isBalanceBootAnimated()
+      if (el.style && typeof el.style.setProperty === 'function') {
+        el.style.setProperty('border-radius', bootAnimated ? '14px' : '999px', 'important')
+      }
+      // Informational overlay over navigation: never announced, never hit-tested.
+      el.setAttribute('aria-hidden', 'true')
+      el.innerHTML =
+        '<span data-endfield-balance-icon></span>' +
+        '<span data-endfield-balance-money>' +
+        '<span data-endfield-balance-currency>¥</span>' +
+        '<span data-endfield-balance-int>--</span>' +
+        '<span data-endfield-balance-frac></span>' +
+        '</span>' +
+        '<span data-endfield-balance-window>' +
+        '<span data-endfield-balance-phase>低谷</span>时段剩余' +
+        '<span data-endfield-balance-remain></span>' +
+        '</span>' +
+        '<span data-endfield-balance-pct></span>' +
+        '<span data-endfield-balance-badge>' +
+        '<span data-endfield-balance-ring></span>' +
+        '<span data-endfield-balance-clock></span>' +
+        '</span>' +
+        // The brand pose lives in the same box, absolutely placed over the row:
+        // it is inert when the attribute is off (opacity 0, pointer-events none).
+        '<span data-endfield-balance-brand>' +
+        '<span data-endfield-balance-brand-mark></span>' +
+        '<span data-endfield-balance-brand-copy>' +
+        '<span data-endfield-balance-brand-kicker>/// DEEPSEEK API</span>' +
+        '<span data-endfield-balance-brand-title>DeepSeek 当前低谷</span>' +
+        '</span>' +
+        '</span>'
+      document.body.appendChild(el)
+      balanceEl = el
+      balanceBootAnswered = false
+      if (bootAnimated) {
+        // Raised before the first paint, so the pill never flashes the settled
+        // row on its way into the pose.
+        el.setAttribute('data-endfield-balance-boot', '')
+        balanceBootAt = Date.now()
+      } else {
+        balanceBootAt = 0
+      }
+      balanceFetch()
+      balancePaintWindow()
+      if (typeof setInterval === 'function') {
+        balanceTimer = setInterval(balancePaintWindow, BALANCE_TICK_MS)
+        balancePollTimer = setInterval(balanceFetch, BALANCE_POLL_MS)
+      }
+    }
+
+    const syncBalanceCapsule = () => {
+      if (!(isEnabled() && isBalanceCapsuleOn())) {
+        destroyBalanceCapsule()
+        return
+      }
+      // showBalanceCapsule() is idempotent (guards on balanceEl), so re-syncing
+      // while already mounted just re-asserts the same state.
+      showBalanceCapsule()
+    }
+
     let disposeToken = () => {}
     let disposeStyles = () => {}
     let mounted = false
@@ -3858,6 +4362,59 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       '--dsw-specific-sidebar-fill': {
         light: '#e8e8e2',
         dark: '#101110',
+      },
+      /* ---------- menus stay OPAQUE (0.2's translucent menu material) ----------
+         Every 0.2 menu is drawn by the shared MenuSurface primitive (shipped by
+         @deepseek-ai/dsh-client-ui-primitives, consumed by dsh-client-ui-commands,
+         dsh-client-ui-input-trigger, dsh-client-ui-model-selection, …): one
+         [data-menu-material="translucent"] box whose ONLY paint is a z-index:-1 child
+
+             .<hash>_material { position:absolute; inset:0; z-index:-1;
+               border-radius:inherit;
+               background: var(--dsw-menu-surface-fill);
+               backdrop-filter: var(--dsw-menu-backdrop-filter); }
+
+         with the two variables coming from the design platform:
+
+             body { --dsw-menu-surface-fill:#f8f9fa94;      (light, 58% alpha)
+                    --dsw-specific-menu:var(--dsw-menu-surface-fill); }
+             body[data-ds-dark-theme] { --dsw-menu-surface-fill:#43454a73; }  (45%)
+             [data-menu-material] { --dsw-menu-backdrop-filter:blur(40px) saturate(150%) }
+
+         So the shipped menu surface is a TRANSLUCENT fill that leans on a 40px
+         backdrop blur for its separation — and it is the only surface in the app the
+         theme left alone.
+
+         Reported symptom: the slash-command menu read as having NO background at all,
+         with the transcript legible straight through it. There is no theme rule to
+         blame (the theme paints no menu and sets no backdrop-filter outside glass),
+         which fits the mechanism: the blur does not composite in this window (Chromium
+         cannot blur a transparent window, which is why the same component ships a
+         separate opaque `data-menu-backing` element for macOS only), so the 45% fill
+         lands on top of the contour sheet a couple of RGB steps away from the page
+         colour — a panel that is technically painted and visually absent.
+
+         The fix is one token, not a selector: the theme already owns an opaque
+         popover colour (--dsw-alias-bg-overlay, the app's own "Overlay and popover
+         background"), so the menu surface is pinned to it. Every MenuSurface inherits
+         it, and so does --dsw-specific-menu, which is defined as
+         var(--dsw-menu-surface-fill). A token cannot be renamed out from under us the
+         way a hashed class name can.
+
+         The blur is deliberately LEFT IN PLACE: an opaque fill paints over whatever
+         the backdrop filter produced, so the platform keeps its own compositing path
+         (and its macOS backing element) while the user sees a solid panel. Removing it
+         would mean adding a rule that must match a hashed class, for no visual gain.
+
+         Guarded by test/menu-surface.test.js: it renders this exact markup over a
+         striped backdrop, proves the shipped default really is translucent (the
+         fixture is not vacuous), then runs the real client.js and requires EVERY pixel
+         inside the menu to be the opaque overlay colour. check.js pins the token name
+         and its value, and selftest.js injects the shipped translucent literal back to
+         prove the guard bites. */
+      '--dsw-menu-surface-fill': {
+        light: 'var(--dsw-alias-bg-overlay)',
+        dark: 'var(--dsw-alias-bg-overlay)',
       },
       /* Turn-status label ("Deep diving…") on DSH 0.2, where it stopped being
          gradient text. The label moved from
@@ -5606,6 +6163,292 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           transform: none;
         }
       }
+
+      /* ---------- 顶部余额胶囊 ----------
+         The reference HUD plate: a near-black stadium/pill — BOTH ends fully
+         rounded (radius = half the height), independent of the theme's
+         直角/圆角 setting because the reference capsule itself is always a
+         pill. Sits at the TOP CENTER of the frame, below the window chrome,
+         over the header — which is why it is pointer-events:none (a caption,
+         not a control: the same discipline as the thunder plate above) and
+         why its z-index stops short of the app's own modals.
+
+         Layout is traced 1:1 off the reference capsule: a white three-layer
+         square mark (a fabricated glyph would be tofu on machines without that
+         face), the ¥ money big and white, the countdown run small and grey —
+         「低谷时段剩余42:08:13」, with the 高峰/低谷 label INSIDE that grey run
+         so the countdown's subject travels with it — then 「低谷已过33%」 pushed
+         to the right end by the auto margin, and a round dial closing the pill.
+
+         The dial is the one piece that carries a value: a dark disc (a shade
+         deeper than the pill, so it reads as inset), an accent ring swept
+         clockwise from 12 o'clock for the elapsed share of the window, and an
+         accent clock face whose needle points at ~1 o'clock. The ring is a
+         conic-gradient masked down to a 4px band, so a tick writes ONE custom
+         property (--endfield-balance-sweep) and never touches a node. */
+      [data-endfield-balance] {
+        position: fixed;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 900;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        /* The reference pill is a 448x48 stadium; rebuilt at 32px tall with the
+           same 9.3:1 proportion it reads as a slim chip next to the header tabs
+           instead of a slab across them. The min-width holds the wide gap
+           between the countdown and the elapsed read, and the min() keeps a
+           narrow window from being overrun: min-width beats max-width in CSS,
+           so a bare 300px would win even against calc(100vw - 16px). */
+        min-width: min(300px, calc(100vw - 16px));
+        max-width: calc(100vw - 16px);
+        height: 32px;
+        padding: 0 1px 0 14px;
+        border-radius: 999px;
+        background: #312f30;
+        color: #f1f1ec;
+        font-family: var(--edge-font);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0.01em;
+        pointer-events: none;
+        user-select: none;
+        white-space: nowrap;
+        /* Boot pose -> balance row. Only the box moves (height, width floor,
+           padding) and the two contents cross-fade in place, so the collapse
+           reads as ONE object changing shape instead of two layouts swapping. */
+        transition:
+          height 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
+          min-width 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
+          padding 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
+          border-radius 420ms cubic-bezier(0.22, 0.72, 0.2, 1);
+      }
+      /* Boot pose: the brand panel from the reference — 448x72 with a 14px
+         radius — held while the first account answer is still in flight. JS
+         drops the attribute once the balance lands (or the cap expires) and the
+         pill animates down into its row. The radius itself is written inline by
+         JS: the theme's zero-radius pass is author !important, so only an
+         inline priority declaration can hand the pose its 14px and then the
+         stadium value back. */
+      [data-endfield-balance][data-endfield-balance-boot] {
+        height: 72px;
+        min-width: min(448px, calc(100vw - 16px));
+        padding: 0 22px;
+      }
+      /* The rows keep their layout under the brand block (opacity only), so the
+         collapse never reflows twice. */
+      [data-endfield-balance][data-endfield-balance-boot] > :not([data-endfield-balance-brand]) {
+        opacity: 0;
+        transition: opacity 170ms linear;
+      }
+      [data-endfield-balance-brand] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        /* Measured off the reference: the mark and the copy sit 30px apart, and
+           the lockup as a whole rides 28px left of centre (hence the padding on
+           the right, which leaves centring — and its narrow-window behaviour —
+           intact). */
+        gap: 30px;
+        padding-right: 56px;
+        opacity: 0;
+        transition: opacity 220ms linear;
+        pointer-events: none;
+      }
+      [data-endfield-balance][data-endfield-balance-boot] [data-endfield-balance-brand] {
+        opacity: 1;
+      }
+      /* Same concentric-square mark as the capsule icon, but on a disc — the
+         brand pose shows the round lockup, the collapsed row the square one. */
+      [data-endfield-balance-brand-mark] {
+        position: relative;
+        flex: none;
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        background: #f1f1ec;
+      }
+      [data-endfield-balance-brand-mark]::before {
+        content: '';
+        position: absolute;
+        inset: 5px;
+        border-radius: 2px;
+        background: #312f30;
+      }
+      [data-endfield-balance-brand-mark]::after {
+        content: '';
+        position: absolute;
+        inset: 9px;
+        border-radius: 1px;
+        background: #f1f1ec;
+      }
+      [data-endfield-balance-brand-copy] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      /* Tracked-out uppercase is how this theme draws a technical label (the
+         loader kicker does the same), so the brand line stays in --edge-font
+         rather than importing a second family for one row. */
+      [data-endfield-balance-brand-kicker] {
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        color: #8d8c88;
+        white-space: nowrap;
+      }
+      [data-endfield-balance-brand-title] {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: #f1f1ec;
+        white-space: nowrap;
+      }
+      /* Three concentric squares, measured off the reference at 16x: a 14px
+         white rounded square, a 6px dark core punched into it, and a 3px white
+         pip at the centre — all pseudo-elements, no glyph and no image. */
+      [data-endfield-balance] [data-endfield-balance-icon] {
+        position: relative;
+        flex: none;
+        width: 10px;
+        height: 10px;
+        margin-right: 4px;
+        border-radius: 3px;
+        background: #f1f1ec;
+      }
+      [data-endfield-balance] [data-endfield-balance-icon]::before {
+        content: '';
+        position: absolute;
+        inset: 2px;
+        border-radius: 2px;
+        background: #312f30;
+      }
+      [data-endfield-balance] [data-endfield-balance-icon]::after {
+        content: '';
+        position: absolute;
+        inset: 3.5px;
+        border-radius: 1px;
+        background: #f1f1ec;
+      }
+      /* ¥ + integer + fraction are one unbroken run: the reference has no gap
+         between the sign and the digits, so the group owns the baseline. */
+      [data-endfield-balance] [data-endfield-balance-money] {
+        display: inline-flex;
+        align-items: baseline;
+        flex: none;
+      }
+      [data-endfield-balance] [data-endfield-balance-currency],
+      [data-endfield-balance] [data-endfield-balance-int] {
+        font-size: 14px;
+        font-weight: 700;
+        color: #f1f1ec;
+        /* Tabular figures on the element itself — never a global font/font-family
+           declaration (see docs/engineering-notes.md: the :root font incident). */
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1, 'ss01' 1;
+      }
+      [data-endfield-balance] [data-endfield-balance-frac] {
+        font-size: 9px;
+        font-weight: 600;
+        color: #a2a1a2;
+        font-variant-numeric: tabular-nums;
+      }
+      /* 低谷时段剩余hh:mm:ss — one grey caption, not three tokens. */
+      [data-endfield-balance] [data-endfield-balance-window] {
+        font-size: 9px;
+        font-weight: 500;
+        color: #a2a1a2;
+      }
+      [data-endfield-balance] [data-endfield-balance-phase] {
+        color: inherit;
+      }
+      /* Off-peak is the cheap window; a peak label is the one thing the user
+         should be able to catch out of the corner of an eye, so it turns
+         accent. */
+      [data-endfield-balance] [data-endfield-balance-phase][data-endfield-balance-phase-peak='1'] {
+        color: var(--edge-accent);
+      }
+      [data-endfield-balance] [data-endfield-balance-remain] {
+        font-variant-numeric: tabular-nums;
+      }
+      /* The elapsed read: money-sized and white, held at the right end by the
+         auto margin that swallows the pill's free space. */
+      [data-endfield-balance] [data-endfield-balance-pct] {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f1f1ec;
+        font-variant-numeric: tabular-nums;
+      }
+      /* Measured gap from the reference: the elapsed read stops 14px short of the
+         dial, which the pill's own gap alone does not cover. */
+      [data-endfield-balance] [data-endfield-balance-badge] {
+        position: relative;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 3px;
+        width: 27px;
+        height: 27px;
+        border-radius: 999px;
+        background: #262425;
+      }
+      /* Progress ring: the accent segment covers the elapsed share starting at
+         12 o'clock; the mask keeps only the outer 4px band. */
+      [data-endfield-balance] [data-endfield-balance-ring] {
+        position: absolute;
+        inset: 1.5px;
+        border-radius: 999px;
+        background: conic-gradient(
+          from 0deg,
+          var(--edge-accent) 0deg var(--endfield-balance-sweep, 0deg),
+          transparent var(--endfield-balance-sweep, 0deg) 360deg
+        );
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+      }
+      [data-endfield-balance] [data-endfield-balance-clock] {
+        position: relative;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--edge-accent);
+      }
+      /* The needle: hangs from the face's centre up to ~1 o'clock, in the
+         disc's own dark so it reads as a hole cut in the accent. */
+      [data-endfield-balance] [data-endfield-balance-clock]::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1.5px;
+        height: 3px;
+        margin: -3px 0 0 -0.75px;
+        border-radius: 1px;
+        background: #262425;
+        transform: rotate(25deg);
+        transform-origin: 50% 100%;
+      }
+      /* Narrow windows: the countdown is the least load-bearing read of the
+         three, so it is the one that yields before a nowrap overflow can push
+         the dial and the elapsed share off the right edge. The breakpoint sits
+         just under the pill's natural 300px + 16px slack, so the reference
+         layout is untouched at every width it actually fits in. */
+      @media (max-width: 316px) {
+        [data-endfield-balance] [data-endfield-balance-window] {
+          display: none;
+        }
+      }
     `)
       syncRadiusMode()
       syncGlass()
@@ -5657,6 +6500,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // The attention poll belongs to the themed, audio-enabled page; leaving it
       // running would keep reporting confirmations for a theme that is off.
       stopAudioAttentionWatch()
+      // Same for the balance capsule: its poll and its node both live inside the
+      // themed page, and its styles were just torn down with the sheet above.
+      destroyBalanceCapsule()
     }
 
     if (isEnabled()) {
@@ -5674,6 +6520,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       syncThunder()
       // 需要你回应: starts only while the theme and the audio feature are both on.
       syncAudioAttentionWatch()
+      // 顶部余额胶囊: mounts only while its own switch is on, and polls the
+      // host-side balance route only while mounted.
+      syncBalanceCapsule()
     }
 
     /* Live preference reconciler. The namespace scope subscription in the store
@@ -5707,10 +6556,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         syncThunder()
         // Same reason: it re-reads both switches and starts or stops the poll.
         syncAudioAttentionWatch()
+        // Same reason: it re-reads its switch and mounts or removes the capsule.
+        syncBalanceCapsule()
       } else {
         // Switched off mid-session: the watcher must not keep polling a page the
         // theme no longer owns.
         stopAudioAttentionWatch()
+        // And the capsule must not keep polling the balance route on an unthemed
+        // page — destroyBalanceCapsule also clears its interval.
+        destroyBalanceCapsule()
       }
     }
 
@@ -5822,6 +6676,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       thunderAnimHintOn: '大字由大缩小砸入并淡出（关闭后为直接显示，仍保持 3 秒）',
       thunderAnimHintOff: '默认关闭；大字直接出现、3 秒后消失，不做缩放与淡入淡出',
       thunderAnimHintReduced: '系统已开启「减少动态效果」，当前直接显示',
+      /* 顶部余额胶囊：数据由宿主路由代理（页面拿不到账户凭证），所以提示里
+          说明「余额来自本机服务」而不是承诺实时精确。 */
+      balanceRow: '顶部余额胶囊',
+      balanceOn: '开启余额胶囊',
+      balanceOff: '关闭余额胶囊',
+      balanceHintOn: '在页面顶部中间悬浮显示账户余额与峰谷定价时段（每分钟刷新余额，时段倒计时每秒走字；右侧「预览」可重播开场动画）',
+      balanceHintOff: '默认关闭；开启后悬浮显示余额与峰谷时段（高峰为工作日 9-12 点、14-18 点；周末、法定节假日全天、以及落在周末的调休上班日都按低谷半价）',
+      balanceNeed: '请先开启顶部余额胶囊',
       /* 音频通知：播放发生在宿主进程（lib/audio.js），所以这里的每一行都在
          说明「什么时候响」而不是「怎么响」；试听按钮走宿主真实播放链路。 */
       groupAudio: '音频',
@@ -5967,6 +6829,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       thunderAnimHintOn: 'The word punches in from oversized and fades out (appears instantly when off, still held 3s)',
       thunderAnimHintOff: 'Off by default; the word appears instantly and leaves after 3s, with no scaling or fading',
       thunderAnimHintReduced: 'Your system asks for reduced motion, so it appears instantly',
+      balanceRow: 'Balance capsule',
+      balanceOn: 'Turn on',
+      balanceOff: 'Turn off',
+      balanceHintOn: 'Floats a capsule at the top centre of the page showing your account balance and the API peak/off-peak pricing window (balance every minute, window countdown every second; Preview on the right replays the opening animation)',
+      balanceHintOff: 'Off by default; floats a balance + pricing-window capsule (peak = weekdays 9-12 & 14-18 Beijing; weekends, Chinese statutory holidays and make-up workdays that land on a weekend are off-peak, half price)',
+      balanceNeed: 'Turn on the balance capsule first',
       groupAudio: 'AUDIO',
       audioRow: 'Audio notifications',
       audioOn: 'Turn on',
@@ -6086,6 +6954,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           const [contourScrollPause, setContourScrollPause] = R.useState(isContourScrollPauseOn())
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
+          const [balanceOn, setBalanceOn] = R.useState(isBalanceCapsuleOn())
           const [palette, setPalette] = R.useState(readPalette())
           const [glass, setGlass] = R.useState(readGlass())
           const [mode, setMode] = R.useState(prefsGet(RADIUS_KEY) || 'square')
@@ -6153,6 +7022,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
               setContourScrollPause(isContourScrollPauseOn())
               setThunderOn(isThunderOn())
               setThunderAnim(isThunderAnimOn())
+              setBalanceOn(isBalanceCapsuleOn())
               setPalette(readPalette())
               setGlass(readGlass())
               setMode(prefsGet(RADIUS_KEY) || 'square')
@@ -6365,6 +7235,26 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             syncThunder()
           }
           const previewThunder = () => { showThunder(THUNDER_DONE) }
+          const toggleBalanceCapsule = () => {
+            const next = !isBalanceCapsuleOn()
+            prefsSet(BALANCE_KEY, next ? '1' : '0')
+            setBalanceOn(next)
+            /* syncBalanceCapsule() reads the pref store, so the write above is what
+               it acts on. Turning it ON mounts the capsule immediately: the first
+               fetch fires inside showBalanceCapsule, so the numbers appear within
+               one round-trip instead of after an arbitrary delay. */
+            syncBalanceCapsule()
+          }
+          /* 预览: the opening pose is a one-shot moment — a real load shows it once
+             and there is no reload button on the settings page. Remounting the
+             capsule is the whole preview: destroyBalanceCapsule() clears the timers
+             and the node, and the forced show re-runs the brand pose followed by the
+             same collapse into the balance row the real load performs. */
+          const previewBalanceBoot = () => {
+            if (!isEnabled() || !isBalanceCapsuleOn()) return
+            destroyBalanceCapsule()
+            showBalanceCapsule(true)
+          }
           const toggleThunderAnim = () => {
             const next = !isThunderAnimOn()
             prefsSet(THUNDER_ANIM_KEY, next ? '1' : '0')
@@ -6773,6 +7663,33 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   title: thunderOn ? '' : t('thunderNeed'),
                 }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
               ]),
+              /* --- 顶部余额胶囊：同样属于「娱乐」组的悬浮层 --- */
+              row('balance-capsule', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('balanceRow') + t('sep') + stateOf(balanceOn),
+                  R.createElement('span', { style: hintStyle },
+                    t(balanceOn ? 'balanceHintOn' : 'balanceHintOff')
+                  )
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  // Same affordance as the boot plate: the theme draws this opening
+                  // pose once per page load, so let the user watch it again without
+                  // reloading. Gated on the theme AND the capsule, because the pose is
+                  // drawn by the stylesheet the master switch removes.
+                  R.createElement('button', {
+                    type: 'button',
+                    onClick: previewBalanceBoot,
+                    style: btnStyleFor(false, !balanceOn || !enabled),
+                    disabled: !balanceOn || !enabled,
+                    title: balanceOn ? '' : t('balanceNeed'),
+                  }, t('preview')),
+                  R.createElement('button', {
+                    type: 'button',
+                    onClick: toggleBalanceCapsule,
+                    style: btnStyleFor(balanceOn),
+                  }, t(balanceOn ? 'balanceOff' : 'balanceOn'))
+                )
+              ]),
             ]),
             /* --- 05 音频：两个生效槽位 + 两个预留槽位 ---
                Every row states WHEN it fires, because that is the whole contract
@@ -6974,6 +7891,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // Same reason as the announcement watcher: a poll that outlives its fiber
       // keeps POSTing against a dead run.
       stopAudioAttentionWatch()
+      // Same reason: the capsule owns a 60s balance poll and a fixed DOM node,
+      // both of which must go with the run.
+      destroyBalanceCapsule()
       disposeSettings()
     })
   }

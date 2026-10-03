@@ -121,7 +121,12 @@ const mk = (dark) => `<!doctype html><html><head><meta charset="utf-8"><style>
     getSnapshot:()=>s, subscribe:(f)=>{subs.add(f);return()=>subs.delete(f)},
     set(n){s=n;[...subs].forEach(f=>f())} } }
   const session = mkObs({ running:false })
-  const list = mkObs({ current:'s1' })
+  // Selection travels as a mainView retention on the row, not as a 'current' field:
+  // the Controller moved view selection out of itself and the workspace main view
+  // marks the session it displays with sessions.retain(target, { source:'mainView' }).
+  // (test/thunder-edges.test.js section 13 is the executable statement of this.)
+  const list = mkObs({ ids:['s1'], phase:'ready',
+    byId:{ s1:{ id:'s1', running:false, retainedBy:{ mainView:1 } } } })
   const sessions = { list, binding:(id)=> id==='s1' ? { sessionId:id, session } : undefined }
 
   const mod = window.__MOD__.factory(()=>null)

@@ -329,6 +329,178 @@ if (/\[class\*='turnStatus'\]/.test(src)) {
   pass('no dead [turnStatus] selector remains (0.2 moved the label to _running)')
 }
 
+/* --- 5. 雷霆大字 must resolve the CURRENT session from the live contract ---
+   Regression guard for a shipped bug: 「雷霆大字在新版本失效了」. This file used to
+   read the current session as `sessions.list.getSnapshot().current`, and the
+   Controller moved view selection out of itself — the list state is now
+   { ids, byId, phase, projectionsBySession } and its own contract says "view
+   selection remains outside the Controller". The read returned undefined, the watch
+   bailed out, and the announcement went permanently silent while the settings switch
+   still read as ON. Nothing threw and nothing logged, which is why the guard is here
+   rather than only in the test: the failure mode is a MISSING FIELD.
+   The runtime's answer is the mainView retention count, the same scan every shipped
+   package uses:
+       Object.values(state.byId).find(row => (row.retainedBy?.mainView ?? 0) > 0)?.id
+   (The behavioural half — waiting states, switches, the legacy shape — lives in
+   test/thunder-edges.test.js sections 13-15.) */
+const thunderAt = src.indexOf('const thunderCurrentId')
+const thunderEnd = thunderAt < 0 ? -1 : src.indexOf('const thunderStopWatch', thunderAt)
+const thunderSrc = (thunderAt < 0 || thunderEnd < 0) ? '' : src.slice(thunderAt, thunderEnd)
+if (thunderSrc === '') {
+  fail('could not locate the 雷霆大字 watch (const thunderCurrentId .. const thunderStopWatch) '
+    + '— has the feature been renamed or removed?')
+} else {
+  const resolvesFromRows = /retainedBy/.test(thunderSrc) && /mainView/.test(thunderSrc)
+  const callSite = /thunderCurrentId\(snap\)/.test(thunderSrc)
+  if (resolvesFromRows && callSite) {
+    pass('雷霆大字 resolves the current session from the list rows\' mainView retention')
+  } else if (!callSite) {
+    fail('雷霆大字 does not resolve the current session through thunderCurrentId(snap)\n      '
+      + '-> a direct read of the removed `current` list field returns undefined, and the '
+      + 'announcement goes permanently silent with no error')
+  } else {
+    fail('thunderCurrentId does not scan byId rows for retainedBy.mainView\n      '
+      + '-> that retention is the runtime\'s own marker of the session the user is looking at '
+      + '(sessions.retain(target, { source: \'mainView\' })); without it the feature is silent again')
+  }
+}
+
+/* --- 6. menus must not be handed back to the platform's translucent material ---
+   Regression guard for 「菜单的背景没了」. On 0.2 every menu is a MenuSurface: the
+   shell paints a --dsh-menu-<id> anchored <div class="_material_ri079_*"> behind the
+   panel with `background: var(--dsw-menu-surface-fill)` plus a 40px backdrop blur.
+   The platform default for that fill is a 45%/58% alpha literal (#43454a73 /
+   #f8f9fa94), and the translucency is meant to be absorbed by the blur. Over this
+   theme's contour sheet the composite lands within a couple of RGB steps of the page
+   itself, so the panel reads as having no background — the session text behind the
+   /命令 list shows straight through. The unfiltered fill is also invisible to a
+   settings switch: nothing in the theme looked wrong, the colour was simply not
+   opaque.
+   Two invariants, both about OPAQUENESS rather than a specific brand colour:
+     1. the token must be pinned, in BOTH schemes, to a theme-owned opaque surface
+        (--dsw-alias-bg-overlay: the app's own "Overlay and popover background");
+     2. it must never be pinned to the page colour either — an opaque panel painted
+        as --dsw-alias-bg-base has no visible background in a different way, and that
+        is exactly what the app's own macOS menu backing does.
+   The behavioural half — real MenuSurface markup, the platform default, both colour
+   schemes and a pixel proof that nothing shows through — lives in
+   test/menu-surface.test.js. */
+const menuBlock = tokenBlock('--dsw-menu-surface-fill')
+const menuLight = tokenValueAfter(menuBlock, 'light')
+const menuDark = tokenValueAfter(menuBlock, 'dark')
+const MENU_FILL = 'var(--dsw-alias-bg-overlay)'
+const PLATFORM_MENU_FILLS = ['#f8f9fa94', '#43454a73']
+if (menuBlock === null) {
+  fail('no --dsw-menu-surface-fill override — menus fall back to the platform material '
+    + '(45%/58% alpha over the contour sheet), and the panel loses its background again')
+} else if (PLATFORM_MENU_FILLS.indexOf(menuLight) >= 0 || PLATFORM_MENU_FILLS.indexOf(menuDark) >= 0) {
+  fail('--dsw-menu-surface-fill is back to the platform default ('
+    + PLATFORM_MENU_FILLS.join(' / ') + ') in at least one scheme\n      '
+    + '-> the menu is translucent again and the conversation behind the /命令 list shows through')
+} else if (menuLight !== MENU_FILL || menuDark !== MENU_FILL) {
+  fail('--dsw-menu-surface-fill is not ' + MENU_FILL + ' in both colour schemes (found '
+    + JSON.stringify(menuLight) + ' / ' + JSON.stringify(menuDark) + ')\n      '
+    + '-> keep it pinned to the theme\'s opaque popover colour in light AND dark')
+} else {
+  pass('menus paint an opaque theme-owned surface in both schemes (--dsw-menu-surface-fill = '
+    + MENU_FILL + ', the app\'s overlay/popover colour)')
+}
+
+/* --- 7. the statutory-holiday table must cover the year we are living in ---
+   Guard for 「顶部胶囊的峰谷定价时间加入法定节假日」. The capsule bills a Chinese
+   statutory holiday as off-peak ALL DAY and a 调休 make-up workday as the weekend it
+   falls on (DeepSeek 「API 峰谷时间补充说明」, 2026-09-19), so the calendar lives in
+   client.js as BALANCE_HOLIDAY_NOTICES — no host service carries the schedule.
+   The failure this guard exists for is silent AND time-based: the State Council
+   publishes the next year's 放假安排 each November, so a stale table quietly bills
+   next January's holiday as peak with nothing visibly wrong. Hence three invariants:
+     1. the CURRENT Beijing year must have an entry — the yearly alarm;
+     2. every 调休 day must be a Saturday or Sunday, which is exactly what licenses
+        the weekend branch to bill it off-peak with no exception list. A notice that
+        moved a normal weekday would invalidate that reasoning, so it has to stop
+        here and be re-thought rather than quietly price the day as peak;
+     3. every span must expand to its own name, day for day, so a typo in from/to
+        cannot silently shift or drop days.
+   The arithmetic itself (holiday vs weekend vs weekday windows, and the countdowns
+   they produce) is pinned in test/balance-window.test.js. */
+const holAt = src.indexOf('const BALANCE_HOLIDAY_NOTICES')
+const holEnd = holAt < 0 ? -1 : src.indexOf('const balanceHolidayName', holAt)
+if (holAt < 0 || holEnd < 0) {
+  fail('could not locate the statutory-holiday table (const BALANCE_HOLIDAY_NOTICES .. '
+    + 'const balanceHolidayName) — has the 顶部余额胶囊 been renamed or removed?')
+} else {
+  const holSandbox = {}
+  vm.createContext(holSandbox)
+  let notices = null
+  try {
+    vm.runInContext(src.slice(holAt, holEnd)
+      + '\nthis.BALANCE_HOLIDAY_NOTICES = BALANCE_HOLIDAY_NOTICES;'
+      + '\nthis.BALANCE_HOLIDAY_DATES = BALANCE_HOLIDAY_DATES;', holSandbox)
+    notices = holSandbox.BALANCE_HOLIDAY_NOTICES
+  } catch (err) {
+    fail('the statutory-holiday table no longer evaluates on its own: ' + err.message
+      + '\n      -> keep it pure data (no client-scope lookups) so this guard can read it')
+  }
+  if (notices) {
+    const beijingYear = String(new Date(Date.now() + 8 * 3600 * 1000).getUTCFullYear())
+    const years = Object.keys(notices)
+    if (years.indexOf(beijingYear) < 0) {
+      fail('no entry for the current Beijing year (' + beijingYear + ') in BALANCE_HOLIDAY_NOTICES\n'
+        + '      -> transcribe the new 放假安排 (published each November), or every '
+        + beijingYear + ' holiday is billed as peak with nothing visibly wrong')
+    } else {
+      pass('the statutory-holiday table covers the current Beijing year (' + beijingYear + ')')
+    }
+
+    const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const badMakeup = []
+    for (const year of years) {
+      for (const span of notices[year].spans) {
+        for (const day of span.makeup || []) {
+          const parts = day.split('-').map(Number)
+          const wd = new Date(Date.UTC(Number(year), parts[0] - 1, parts[1])).getUTCDay()
+          if (wd !== 0 && wd !== 6) badMakeup.push(year + '-' + day + ' (' + WEEKDAYS[wd] + ')')
+        }
+      }
+    }
+    if (badMakeup.length > 0) {
+      fail('a 调休 make-up workday is not a Saturday or Sunday: ' + badMakeup.join(', ') + '\n'
+        + '      -> 调休 days are billed off-peak only because every one of them lands on a '
+        + 'weekend; a weekday one needs its own rule in balanceDayIsOffPeak')
+    } else {
+      pass('every 调休 make-up workday is a Saturday or Sunday, so the weekend rule covers it')
+    }
+
+    const dayKey = (y, mo, d) => y + '-' + (mo < 10 ? '0' : '') + mo + '-' + (d < 10 ? '0' : '') + d
+    const wrongName = []
+    let spanDays = 0
+    for (const year of years) {
+      for (const span of notices[year].spans) {
+        const from = span.from.split('-').map(Number)
+        const to = span.to.split('-').map(Number)
+        for (let at = Date.UTC(Number(year), from[0] - 1, from[1]);
+          at <= Date.UTC(Number(year), to[0] - 1, to[1]); at += 24 * 3600 * 1000) {
+          const d = new Date(at)
+          const k = dayKey(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate())
+          spanDays += 1
+          const got = holSandbox.BALANCE_HOLIDAY_DATES.get(k)
+          if (got !== span.name) wrongName.push(k + ' -> ' + JSON.stringify(got))
+        }
+      }
+    }
+    if (wrongName.length > 0) {
+      fail('a holiday span does not expand to its own name: ' + wrongName.join(', ') + '\n'
+        + '      -> from/to are INCLUSIVE MM-DD dates; the expansion keys each day by its date')
+    } else if (holSandbox.BALANCE_HOLIDAY_DATES.size !== spanDays) {
+      fail('the holiday map holds ' + holSandbox.BALANCE_HOLIDAY_DATES.size + ' dates but the '
+        + 'spans cover ' + spanDays + ' days\n'
+        + '      -> two spans overlap, or a span is written twice under different names')
+    } else {
+      pass('all ' + spanDays + ' statutory-holiday days expand to their own name')
+    }
+  }
+}
+
 console.log('')
 if (failures) {
   console.error(`${failures} check(s) failed`)

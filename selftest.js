@@ -161,6 +161,56 @@ const CASES = [
       '$1      :root { --dsw-font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; }\n'),
     expect: /--dsw-font-family.*DECLARED by the theme/,
   },
+  {
+    name: '雷霆大字 goes back to reading the removed `current` list field (announces nothing, forever)',
+    /* The real reported regression: the Controller moved view selection out of
+       itself, so `sessions.list.getSnapshot().current` is undefined on the current
+       app. The injection restores exactly the shipped line, and the feature dies
+       silently — no throw, no log, the settings switch still reads ON. */
+    mutate: (s) => s.replace(
+      /\?\s*undefined\s*:\s*thunderCurrentId\(snap\)/,
+      '? undefined : snap.current'),
+    expect: /does not resolve the current session/,
+  },
+  {
+    name: 'the menu fill falls back to the platform\'s translucent material (the /命令 panel loses its background)',
+    /* The reported regression: 0.2 paints every menu through
+       `background: var(--dsw-menu-surface-fill)` (MenuSurface's _material layer), whose
+       platform default is a 45%/58% alpha literal meant to be absorbed by a 40px blur.
+       Over the contour sheet the composite is a couple of RGB steps off the page, so the
+       panel reads as background-less and the conversation behind it shows through.
+       The injection restores exactly the shipped default for one scheme. */
+    mutate: (s) => s.replace(
+      /('--dsw-menu-surface-fill':\s*\{\s*light:\s*)'var\(--dsw-alias-bg-overlay\)'/,
+      "$1'#43454a73'"),
+    expect: /platform default|translucent again/,
+  },
+  {
+    name: 'the statutory-holiday table goes stale (next January is billed as peak, silently)',
+    /* The failure this guard is FOR: the 放假安排 notice is published each November
+       for the coming year, so the table ages out quietly — the capsule keeps
+       rendering, the switch still reads ON, and a whole national holiday is priced
+       as peak. Renaming the current year is exactly that end state. */
+    mutate: (s) => s.replace(/\n(\s*)2026: \{/, '\n$1STALE_2026: {'),
+    expect: /no entry for the current Beijing year/,
+  },
+  {
+    name: 'a 调休 make-up workday is moved onto a weekday (the weekend rule no longer covers it)',
+    /* 调休 days are billed off-peak only because every one of them falls on a
+       Saturday or Sunday. A notice that moved a normal weekday would silently keep
+       being priced as peak, so the guard has to stop the transcription. 2026-05-08
+       is the Friday before 劳动节's real make-up day. */
+    mutate: (s) => s.replace("makeup: ['05-09']", "makeup: ['05-08']"),
+    expect: /not a Saturday or Sunday/,
+  },
+  {
+    name: 'a holiday span is transcribed so it overlaps another (a day loses its own name)',
+    /* 清明节 widened back over 元旦: the map is written span by span, so the later
+       span would silently take 01-01 away from 元旦 — a transcription slip the
+       name-by-name expansion check is there to catch. */
+    mutate: (s) => s.replace("{ name: '清明节', from: '04-04', to: '04-06'", "{ name: '清明节', from: '01-01', to: '04-06'"),
+    expect: /does not expand to its own name/,
+  },
 ]
 
 let bad = 0
