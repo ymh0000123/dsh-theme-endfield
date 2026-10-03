@@ -191,6 +191,22 @@ check('race: the RPC goes over the same channel the plugin client uses',
   src.indexOf("JET_HUB_RPC_CHANNEL = 'jet-hub'") > -1 &&
   src.indexOf("method: 'usage.badge'") > -1)
 
+/* ---------- RATE: usage.badge is not fetched more than needed ----------- */
+check('rate: a client-side floor throttles the non-forced fetches',
+  src.indexOf('const CREDITS_MIN_INTERVAL_MS = 5 * 60 * 1000') > -1 &&
+  /creditLastFetch\[provider\] \|\| 0[\s\S]{0,80}Date\.now\(\) - last < CREDITS_MIN_INTERVAL_MS/.test(paint))
+check('rate: the stamp is taken after a COMPLETED fetch (an in-flight call does not arm the floor)',
+  /creditLastFetch\[provider\] = Date\.now\(\)\s*const picked/.test(paint.replace(/\r\n/g, '\n')))
+check('rate: a channel switch bypasses the floor (force skips the throttle check)',
+  /if \(force !== true\) \{\s*const last = creditLastFetch\[provider\]/.test(paint.replace(/\r\n/g, '\n')))
+check('rate: failures re-arm at the 30s failure retry, not the full floor',
+  src.indexOf('const CREDITS_FAILURE_RETRY_MS = 30000') > -1 &&
+  /Date\.now\(\) - CREDITS_MIN_INTERVAL_MS \+ CREDITS_FAILURE_RETRY_MS/.test(paint))
+check('rate: the store-subscription path forces (a switch follows immediately)',
+  /creditsRebindTimer = setTimeout\(\(\) => \{\s*creditsRebindTimer = null\s*creditsRefresh\(true\)/.test(src.replace(/\r\n/g, '\n')))
+check('rate: the poll heartbeat passes force=false (throttled)',
+  /balanceFetch\(\)\s*creditsRefresh\(false\)/.test(src.replace(/\r\n/g, '\n')))
+
 /* ---------- LIFECYCLE: lazy services, watch, teardown ------------------ */
 check('lifecycle: the current session resolves through mainView retention (thunderCurrentId)',
   /thunderCurrentId\(snap\)/.test(src))
@@ -201,7 +217,7 @@ check('lifecycle: each directory store is subscribed once (creditsWatchedStore d
 check('lifecycle: destroy detaches the store subscription and clears the rebind timer',
   /const destroyBalanceCapsule = \(\) => \{[\s\S]{0,900}typeof creditsUnsub === 'function'[\s\S]{0,900}clearTimeout\(creditsRebindTimer\)/.test(src))
 check('lifecycle: the poll heartbeat drives both reads',
-  /balancePollTimer = setInterval\(\(\) => \{\s*balanceFetch\(\)\s*creditsRefresh\(\)/.test(src))
+  /balancePollTimer = setInterval\(\(\) => \{\s*balanceFetch\(\)\s*creditsRefresh\(false\)/.test(src.replace(/\r\n/g, '\n')))
 check('lifecycle: a wallet answer never overwrites the channel read',
   /payload\.ok && creditProvider === null/.test(src))
 check('lifecycle: unknown providers keep the wallet display (no JET_HUB_PROVIDER_LABELS hit -> null)',

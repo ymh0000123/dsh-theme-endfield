@@ -3946,6 +3946,18 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     let creditsUnsub = null
     let creditsRebindTimer = null
     let creditsRebindAttempts = 0
+    /* Rate limiting the usage.badge calls. Two refresh paths feed creditsApply
+       — the shared 60s poll and every model-directory publish — and without a
+       client-side floor both would fire an RPC each time. The host badge cache
+       (TTL 120s) would absorb some of it, but the plugin's own badge polls at
+       the same endpoint too, so the theme keeps its own 5-minute floor: a
+       credit number is a slowly-moving quantity and the capsule is a glance.
+       A channel SWITCH bypasses the floor (the number must follow the switch
+       immediately); a failed fetch retries after 30s instead of the full
+       floor, because failure answers are cached by the host for only 15s. */
+    const CREDITS_MIN_INTERVAL_MS = 5 * 60 * 1000
+    const CREDITS_FAILURE_RETRY_MS = 30000
+    let creditLastFetchAt = 0
     // The directory store currently subscribed; a new session hands us a new
     // store, which is what re-arms the watch in creditsRefresh.
     let creditsWatchedStore = null
@@ -4144,13 +4156,28 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        channels in the meantime (the reply's provider echo guards the race the
        same way the plugin's own badge does). The consumption share for the
        right-hand dial is used/quota of the SAME account the number comes from;
-       with no quota the pct slot stays empty and the sweep zeroes. */
+       with no quota the pct slot stays empty and the sweep zeroes.
+       RATE LIMIT. `force` (a channel switch) always fetches; the throttled
+       path keeps a per-provider floor of CREDITS_MIN_INTERVAL_MS measured from
+       the last COMPLETED fetch of that provider, so the 60s poll and the
+       directory-publish path collapse onto one actual RPC per interval. The
+       state is per-provider because switching A -> B -> A within one floor
+       must still answer the second A visit with a fetch (its own stamp is old
+       and the painted numbers belong to B). Failures re-arm at the shorter
+       CREDITS_FAILURE_RETRY_MS — the host caches failure answers for only 15s,
+       so a longer floor would just add silence after a transient error. */
+    const creditLastFetch = {}
     const creditsApply = async (provider, force) => {
       if (creditsBusy) return
       let connection = null
       try { connection = ctx.get('connection') } catch (e) { connection = null }
       if (!connection || !connection.rpc || typeof connection.rpc.call !== 'function') return
+      if (force !== true) {
+        const last = creditLastFetch[provider] || 0
+        if (Date.now() - last < CREDITS_MIN_INTERVAL_MS) return
+      }
       creditsBusy = true
+      let failed = false
       try {
         const payload = force === true ? { provider, force: true } : { provider }
         const reply = await connection.rpc.call(JET_HUB_RPC_SCOPE, JET_HUB_RPC_CHANNEL, {
@@ -4162,6 +4189,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         if (!reply || reply.ok !== true) throw new Error('usage.badge not ok')
         const value = reply.value && typeof reply.value === 'object' ? reply.value : reply
         if (value.provider !== provider) return
+        creditLastFetch[provider] = Date.now()
         const picked = creditPickAccount(value.accounts)
         // Consumption: 已用 / 总额度, from the summed active packages. Both
         // bounds must be sane or the dial refuses to speak (0 quota, more used
@@ -4180,6 +4208,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           usedPct,
         })
       } catch (e) {
+        failed = true
         // Plugin absent, not logged in, or channel down: -- is the honest read.
         if (creditProvider === provider) {
           creditPaint({
@@ -4192,6 +4221,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           })
         }
       } finally {
+        if (failed) {
+          // Re-arm early after a failure: the host only caches the failure
+          // answer for 15s, so the next poll (or publish) should be allowed
+          // to retry instead of sitting out the whole floor.
+          creditLastFetch[provider] = Date.now() - CREDITS_MIN_INTERVAL_MS + CREDITS_FAILURE_RETRY_MS
+        }
         creditsBusy = false
       }
     }
@@ -4202,7 +4237,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        is resolved per session id (directoryFor), loaded once (a directory that
        has never been loaded carries no `current`), and subscribed so a channel
        switch mid-session repaints the capsule without waiting for the poll. */
-    const creditsRefresh = async () => {
+    const creditsRefresh = async (force) => {
       if (balanceEl === null) return
       let sessions = null
       try { sessions = ctx.get('sessions') } catch (e) { sessions = null }
@@ -4246,19 +4281,26 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         creditProviderResolved = next !== null
         creditPaintIdle()
       }
-      if (next !== null) await creditsApply(next, false)
+      // A switch (force, from the store subscription) bypasses the rate
+      // floor so the read follows the channel immediately; the 60s poll
+      // passes force=false and is throttled by creditsApply.
+      if (next !== null) await creditsApply(next, force === true)
     }
 
     /* Store events land here; a channel flip re-reads the directory and
-       repaints. Debounced so a burst of publishes collapses into one read. */
+       repaints. Debounced so a burst of publishes collapses into one read.
+       The debounce itself is also the switch detector: if the provider the
+       delayed read resolves differs from the one painted, the fetch is
+       forced — ordinary publishes (balance churn, model-list updates) keep
+       the throttle. */
     const creditsRebind = () => {
       if (balanceEl === null) return
       if (creditsRebindTimer !== null && typeof clearTimeout === 'function') clearTimeout(creditsRebindTimer)
       creditsRebindTimer = null
-      if (typeof setTimeout !== 'function') { creditsRefresh(); return }
+      if (typeof setTimeout !== 'function') { creditsRefresh(true); return }
       creditsRebindTimer = setTimeout(() => {
         creditsRebindTimer = null
-        creditsRefresh()
+        creditsRefresh(true)
       }, 150)
     }
 
@@ -4645,12 +4687,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       if (typeof setInterval === 'function') {
         balanceTimer = setInterval(balancePaintWindow, BALANCE_TICK_MS)
         // One poll heartbeat drives both reads: the wallet fetch and a channel
-        // re-resolve. creditsRefresh() is a no-op while no jet-hub provider is
-        // live (and while the capsule is gone), so the cost is one cheap local
-        // lookup per minute either way.
+        // re-resolve. The credit half is throttled inside creditsApply
+        // (CREDITS_MIN_INTERVAL_MS since that provider's last completed
+        // fetch), so the 60s heartbeat itself costs one cheap local lookup
+        // and an actual usage.badge RPC only every five minutes per provider.
         balancePollTimer = setInterval(() => {
           balanceFetch()
-          creditsRefresh()
+          creditsRefresh(false)
         }, BALANCE_POLL_MS)
       }
     }
