@@ -65,7 +65,7 @@ const hooks = [
   // JS detectors (client.js watermark/contour anchoring)
   ['[class$="_root"][data-phase="hero"]', 'hero detector (isHeroVisible)'],
   ['[class$="_root"][data-phase]', 'conversation-column detector (findConversationRoot)'],
-  ['[class$="_headlineText"]', 'headline detector (findVisibleHeadline)'],
+  ['[class$="_headline"], [class$="_headlineText"]', 'headline detector (findVisibleHeadline)'],
   ['[class$="_centerCol"], [class*="_centerCol "]', 'app-frame locator (findAppFrame)'],
   // stylesheet hooks
   ["[class$='_root']:has(> [data-endfield-watermark])", 'watermark host isolation'],

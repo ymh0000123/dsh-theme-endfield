@@ -1285,7 +1285,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     }
     const findVisibleHeadline = () => {
       if (typeof document === 'undefined') return null
-      const all = document.querySelectorAll('[class$="_headlineText"]')
+      /* DSH 0.2 renamed the hero headline export from '*_headlineText' to
+         '*_headline' (HeroShell.module.css: "Hqq-bq_headline"); in the 0.2
+         app.asar 'headlineText' occurs 0 times across all @deepseek-ai
+         packages. Match both spellings so 0.1.2-rc.1-era builds keep working.
+         Verified against 0.2.0-rc.2: hits only Hqq-bq_headline, never
+         Hqq-bq_root/_stack/_titleGroup/_previewBadge, Dc7zOa_* or RlGAzG_*. */
+      const all = document.querySelectorAll('[class$="_headline"], [class$="_headlineText"]')
       for (const h of all) {
         const r = h.getBoundingClientRect()
         if (r.width > 0 && r.height > 0) return h
@@ -1316,6 +1322,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       const frame = findAppFrame()
       return { mode: 'persist', parent: frame !== null ? frame : document.body }
     }
+    /* Park the hero mark where it cannot be seen. Used when the headline anchor
+       is missing or measured zero (see positionWatermark) — issue #29's guard
+       against the "wordmark plastered on the bottom edge" failure shape. */
+    const hideWatermarkOffScreen = () => {
+      const s = watermarkEl.style
+      if (s.top !== '-9999px') s.top = '-9999px'
+      if (s.transform !== '') s.transform = ''
+    }
     const positionWatermark = () => {
       if (!watermarkEl) return
       if (watermarkEl.getAttribute('data-endfield-watermark') === 'persist') {
@@ -1323,9 +1337,17 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         return
       }
       const headline = findVisibleHeadline()
-      if (!headline) return
+      /* No headline (host renamed the class again, transient mount) or a zero
+         box: park the mark off-screen instead of leaving `top` empty. In hero
+         mode styleWatermark() deliberately does not set `top`, and a fixed
+         element with no top falls back to its static position — as <body>'s
+         last child that is the BOTTOM EDGE of the viewport, the exact failure
+         shape of issue #29 on DSH 0.2 where '*_headlineText' matched nothing.
+         Failing closed (hidden) is always recoverable on the next sync; a mark
+         smeared across the screen edge is a visible bug every time. */
+      if (!headline) { hideWatermarkOffScreen(); return }
       const r = headline.getBoundingClientRect()
-      if (r.width === 0 || r.height === 0) return
+      if (r.width === 0 || r.height === 0) { hideWatermarkOffScreen(); return }
       const cy = r.top + r.height / 2
       const cx = r.left + r.width / 2
       const vw = (typeof window !== 'undefined' && window.innerWidth) || (typeof document !== 'undefined' ? document.documentElement.clientWidth : 0)
