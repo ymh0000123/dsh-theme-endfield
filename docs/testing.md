@@ -129,6 +129,10 @@ node test/balance-capsule.test.js    # 胶囊标记 / CSS / 绘制 / 设置行�
 
 **`balance-capsule.test.js`** 从安装态标记里切片：胶囊 DOM 顺序、`slotsWritten` 只允许写标记内已存在的属性（例外集 `STATE_ATTRS`）、样式表选择器不得成孤儿、圆环 `conic-gradient` / `mask` / `elapsedPct * 3.6`、药丸 32px / 999px / `min-width: 300px` / 316px 断点、开场 pose 448×72、品牌 lockup。本次新增的一条断言把节假日的落点钉死：**`win.holiday` 只被一行读取，且那一行在 brand-title 块内**——胶囊宽 300px、316px 断点由它推出，节假日名一旦爬进「时段剩余」行就会撑宽。
 
+收起动画新增三条互相咬合的断言（成因见 [engineering-notes.md § 胶囊收起：transition 不能和状态选择器同生共死](engineering-notes.md#胶囊收起transition-不能和状态选择器同生共死)）：基础选择器 `[data-endfield-balance] > :not(brand)` 携带 `transition: opacity … <延迟>`；pose 选择器**只许**按住 `opacity: 0`、出现 transition 即失败；品牌层自己的 transition 也必须挂在基础规则上。用 `node .dsh-vision-toolkit/tmp/pose-probe.js`（每 40ms 采样 computed height / opacity）可复现修复前的 `rowO: 0 → 1` 跳帧，与修复后的 0 → 0.16 → 0.36 → 0.65 → 0.94 → 1 平滑爬升。
+
+形状不变式（成因见 [engineering-notes.md § 胶囊两端不圆：形状不能依赖"收起时写回"](engineering-notes.md#胶囊两端不圆形状不能依赖收起时写回)）：轮廓是**画出来的**——`balance-capsule.test.js` 钉住三层渐变（两个端头 `radial-gradient` 圆盘 + 中间实色带、都以 `--endfield-balance-cap` 定位）、`@property` 把 cap 注册为 `<length>` 且 pose 态 36px / 基础态 16px、transition 列表补间该属性，以及挂载把 `border-radius` 钉为 `0 !important`（源码不得再出现 999px / 14px 的半径写入——任何裁剪盒都会把坏渲染器的 squircle 重新暴露）。锁步可用 `node .dsh-vision-toolkit/tmp/drawn-check.js` 复测：每 30ms 采样 computed height 与 cap，断言 |cap − height/2| ≤ 0.6px。
+
 > 变异验证：`check.js` 第 7 段配 `selftest.js` 三条注入用例——把当前年份改名、把 `05-09` 调休写成周五、把清明 span 伸回 01-01 造成重叠——分别得到「no entry for the current Beijing year」「not a Saturday or Sunday」「does not expand to its own name」。
 
 ---

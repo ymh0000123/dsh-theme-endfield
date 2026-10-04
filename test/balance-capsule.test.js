@@ -122,18 +122,35 @@ check('dial: the icon is drawn in three CSS layers, not a glyph',
   /\[data-endfield-balance-icon\]::after/.test(css))
 
 /* --- PILL: the reference stadium, rebuilt at header-chip size ------------ */
-check('pill: 32px stadium with fully rounded ends',
-  /\[data-endfield-balance\] \{[\s\S]{0,1200}height: 32px;/.test(css) &&
-  /\[data-endfield-balance\] \{[\s\S]{0,1200}border-radius: 999px;/.test(css))
+check('pill: 32px stadium with drawn fully-rounded ends',
+  /* window clears the rule's own comments (the drawn-stadium notes sit right
+     above the clip declaration) */
+  /\[data-endfield-balance\] \{[\s\S]{0,2400}height: 32px;/.test(css) &&
+  /\[data-endfield-balance\] \{[\s\S]{0,2400}border-radius: 0;/.test(css))
+/* Roundness is DRAWN, not rounded: two end discs + a band between their
+   centres, all gradients — the one shape primitive that has never failed in
+   any renderer here (the border-radius route stranded squircle ends twice,
+   while the dial's gradient ring in the same user screenshot was a perfect
+   circle). */
+check('pill: the silhouette is two radial-gradient caps and a band',
+  /background:\s*\n?\s*radial-gradient\(circle at var\(--endfield-balance-cap\) 50%,/.test(css) &&
+  /radial-gradient\(circle at calc\(100% - var\(--endfield-balance-cap\)\) 50%,/.test(css) &&
+  /linear-gradient\(#312f30, #312f30\) var\(--endfield-balance-cap\) 0 \/ calc\(100% - 2 \* var\(--endfield-balance-cap\)\) 100% no-repeat/.test(css))
+check('pill: the cap radius is a registered length so the collapse tweens it',
+  /@property --endfield-balance-cap \{\s*syntax: '<length>';/.test(css) &&
+  /--endfield-balance-cap: 16px;/.test(css) &&
+  /--endfield-balance-cap: 36px;[\s\S]{0,120}height: 72px;/.test(css) &&
+  /transition:[\s\S]{0,300}--endfield-balance-cap 420ms/.test(css))
 /* The theme flattens every rounded corner it can reach (`body:not(.theme-endfield-round)
-   [class] { border-radius: 0 !important }`), so the one shape that is a stadium by
-   design pins its own radius inline, with priority. */
-check('pill: the stadium survives the theme zero-radius pass',
-  /* The boot pose hands the shape its 14px, the collapse hands it back; both
-     writes carry inline priority, which is the only level that outranks the
-     theme's author-!important flattening. */
-  src.indexOf("el.style.setProperty('border-radius', bootAnimated ? '14px' : '999px', 'important')") > -1 &&
-  src.indexOf("balanceEl.style.setProperty('border-radius', '999px', 'important')") > -1 &&
+   [class] { border-radius: 0 !important }`), and a host style can add one more layer.
+   The drawn stadium WANTS radius zero — any clip box would shave the gradient caps —
+   so the mount pins 0 inline with priority, the one level nothing can outrank. */
+check('pill: the drawn stadium pins its clip to zero, immune to every radius pass',
+  /* the mount writes 0 !important and nothing ever hands a different radius back
+     (the old 14px -> 999px handoff stranded squircle ends twice on real renderers) */
+  src.indexOf("el.style.setProperty('border-radius', '0', 'important')") > -1 &&
+  !/setProperty\('border-radius'[^)]*'14px'/.test(src) &&
+  !/setProperty\('border-radius'[^)]*'999px'/.test(src) &&
   src.indexOf('typeof el.style.setProperty === \'function\'') > -1)
 check('pill: min-width reproduces the reference gap between the two reads, but yields to a narrow window',
   /\[data-endfield-balance\] \{[\s\S]{0,900}min-width: min\(300px, calc\(100vw - 16px\)\);/.test(css))
@@ -146,13 +163,20 @@ check('pill: a narrow window drops the countdown rather than clipping the dial',
   316 <= 300 + 16 && 316 > 300)
 
 /* --- BOOT: the brand pose that collapses into the balance row ------------ */
-check('boot: the pill opens at the reference panel size (448x72, 14px radius)',
+check('boot: the pill opens at the reference panel size (448x72), stadium shape kept',
   /\[data-endfield-balance\]\[data-endfield-balance-boot\] \{[\s\S]{0,300}height: 72px;/.test(css) &&
   /\[data-endfield-balance\]\[data-endfield-balance-boot\] \{[\s\S]{0,300}min-width: min\(448px, calc\(100vw - 16px\)\);/.test(css) &&
-  /\[data-endfield-balance\]\[data-endfield-balance-boot\] \{[\s\S]{0,300}padding: 0 22px;/.test(css))
+  /\[data-endfield-balance\]\[data-endfield-balance-boot\] \{[\s\S]{0,300}padding: 0 22px;/.test(css) &&
+  /* the pose rule must not reintroduce a shape of its own */
+  !/\[data-endfield-balance\]\[data-endfield-balance-boot\] \{[^}]*border-radius/.test(css))
 check('boot: the box geometry is what animates, so the pose is one object changing shape',
-  /\[data-endfield-balance\] \{[\s\S]{0,2200}transition:[\s\S]{0,200}height 420ms/.test(css) &&
-  /\[data-endfield-balance\] \{[\s\S]{0,2200}transition:[\s\S]{0,260}border-radius 420ms/.test(css))
+  /* window is generous: the base rule now carries the drawn-stadium background
+     (three gradient layers + comments) before its transition list */
+  /\[data-endfield-balance\] \{[\s\S]{0,3400}transition:[\s\S]{0,200}height 420ms/.test(css) &&
+  /* and border-radius is NOT in the list: the clip is zero for the pill's
+     whole life and the drawn caps ride the height tween through
+     --endfield-balance-cap, so the shape needs no radius animation */
+  !/\[data-endfield-balance\] \{[\s\S]{0,3400}transition:[\s\S]{0,400}border-radius/.test(css))
 check('boot: the brand block is absolutely placed over the row, hidden when the pose is off',
   /* The window has to clear the rule's own box + comment block, which is longer
      than the declaration list it documents. */
@@ -161,6 +185,20 @@ check('boot: the brand block is absolutely placed over the row, hidden when the 
   /\[data-endfield-balance\]\[data-endfield-balance-boot\] \[data-endfield-balance-brand\] \{\s*opacity: 1;/.test(css))
 check('boot: the balance row keeps its layout and only fades (no second reflow)',
   /\[data-endfield-balance\]\[data-endfield-balance-boot\] > :not\(\[data-endfield-balance-brand\]\) \{[\s\S]{0,200}opacity: 0;/.test(css))
+check('boot: the row fade outlives the pose — its transition is declared on the base rule',
+  /* A transition only runs when the property is still declared after the change.
+     The fade used to live inside the boot-attribute rule, so dropping the pose
+     dropped the transition too and the row SNAPPED to opacity 1 mid-collapse
+     (measured: one frame row 0->1 while the brand was still fading and the box
+     still 72px tall — two reads overprinted). The boot rule must keep only the
+     held-down opacity: 0; the transition belongs to the surviving selector. */
+  /\[data-endfield-balance\] > :not\(\[data-endfield-balance-brand\]\) \{[\s\S]{0,80}transition: opacity/.test(css) &&
+  !/\[data-endfield-balance\]\[data-endfield-balance-boot\] > :not\(\[data-endfield-balance-brand\]\) \{[^}]*transition/.test(css) &&
+  /* the brand fades on its OWN base rule too (that is why it never snapped) */
+  /\[data-endfield-balance-brand\] \{[\s\S]{0,700}transition: opacity/.test(css) &&
+  /* and the row starts after a short delay, so brand-out and row-in overlap as
+     a cross-fade instead of a hard handoff inside the still-shrinking box */
+  /transition: opacity 170ms linear [0-9]+ms/.test(css))
 check('boot: the mark is a disc over the same three-layer square device',
   /\[data-endfield-balance-brand-mark\] \{[\s\S]{0,240}border-radius: 999px;/.test(css) &&
   /\[data-endfield-balance-brand-mark\]::before/.test(css) &&

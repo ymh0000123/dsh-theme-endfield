@@ -4558,9 +4558,6 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           if (waited >= BALANCE_BOOT_MIN_MS && ready && loaderEl === null) {
             balanceBootAt = 0
             balanceEl.removeAttribute('data-endfield-balance-boot')
-            if (typeof balanceEl.style?.setProperty === 'function') {
-              balanceEl.style.setProperty('border-radius', '999px', 'important')
-            }
           }
         }
         return
@@ -4599,18 +4596,16 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       /* Collapse the brand pose: held for at least MIN so the brand is readable,
          released by the first answer, capped by MAX when the host never replies,
          and never released while the boot plate is up — the two overlays sit at
-         the same point on screen and would cross-fade over each other. Writing
-         the stadium radius inline here is what hands the shape back to the pill
-         after the pose; the transition interpolates 14px -> 999px. */
+         the same point on screen and would cross-fade over each other. No
+         radius write-back any more: the stadium is DRAWN by the pill's own
+         gradient layers (see the stylesheet), which no border-radius or
+         zero-radius pass can strand. */
       if (balanceBootAt !== 0) {
         const waited = Date.now() - balanceBootAt
         const ready = balanceBootAnswered || waited >= BALANCE_BOOT_MAX_MS
         if (waited >= BALANCE_BOOT_MIN_MS && ready && loaderEl === null) {
           balanceBootAt = 0
           balanceEl.removeAttribute('data-endfield-balance-boot')
-          if (typeof balanceEl.style?.setProperty === 'function') {
-            balanceEl.style.setProperty('border-radius', '999px', 'important')
-          }
         }
       }
     }
@@ -4647,16 +4642,20 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       if (balanceEl !== null) return
       const el = document.createElement('div')
       el.setAttribute('data-endfield-balance', '')
-      // The theme's zero-radius pass is `body:not(.theme-endfield-round) [class]
-      // { border-radius: 0 !important }`, and a host style could add one more
-      // layer on top. The capsule is a stadium by design, so its radius is
-      // written inline with priority where nothing applied later can flatten it.
-      // The boot pose borrows the brand panel's 14px first; the collapse writes
-      // the stadium value back. Guarded because a jsdom-ish host hands back a
-      // createElement() node whose style object carries no setProperty.
+      /* The pill's silhouette is DRAWN by its background gradients (see the
+         stylesheet section): two end discs + a band, correct in every renderer.
+         border-radius must therefore be ZERO, pinned inline with priority: any
+         radius — even the 999px this file used to write — clips those gradients
+         by the rounded box, which is exactly how a renderer that mis-rounds
+         999px into a squircle stranded this capsule twice (measured: a settled
+         32px pill with ~14px caps while the dial's gradient ring in the same
+         screenshot was a perfect circle). With no clip box, nothing can shave
+         the drawn caps; the zero-radius pass and any host !important both lose
+         to an inline !important. Guarded because a jsdom-ish host hands back a
+         createElement() node whose style object carries no setProperty. */
       const bootAnimated = forceBoot === true || isBalanceBootAnimated()
       if (el.style && typeof el.style.setProperty === 'function') {
-        el.style.setProperty('border-radius', bootAnimated ? '14px' : '999px', 'important')
+        el.style.setProperty('border-radius', '0', 'important')
       }
       // Informational overlay over navigation: never announced, never hit-tested.
       el.setAttribute('aria-hidden', 'true')
@@ -6630,7 +6629,30 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          accent clock face whose needle points at ~1 o'clock. The ring is a
          conic-gradient masked down to a 4px band, so a tick writes ONE custom
          property (--endfield-balance-sweep) and never touches a node. */
+      /* ---------- 顶部余额胶囊 stadium ----------
+         The pill's silhouette is DRAWN, not rounded: two radial-gradient discs
+         (one per end, radius = half the height, held in --endfield-balance-cap)
+         plus a linear-gradient band spanning between their centres. Why: the
+         999px border-radius route proved unreliable on a real user's renderer
+         twice over — first the 14px -> 999px write-back was lost, then a
+         settled screenshot showed squircle ends (~14px caps on a 32px pill)
+         while the dial's GRADIENT ring in the same frame rendered a perfect
+         circle. Gradients are the one shape primitive that has never failed
+          here, so roundness now rides the same mechanism as the ring. The box's
+          own border-radius is pinned to 0 (inline, priority): any radius would
+          clip these gradients by the rounded box and re-expose the very
+          squircle this route exists to survive. @property registers the cap
+          radius as a real length so the collapse tweens it on the SAME 420ms
+          curve as height — cap(t) = height(t)/2 every frame, so the drawn
+          stadium matches the morphing box at every instant. The 0.5px feather
+          on each disc edge is anti-aliasing against the hard rectangle seam. */
+      @property --endfield-balance-cap {
+        syntax: '<length>';
+        inherits: false;
+        initial-value: 16px;
+      }
       [data-endfield-balance] {
+        --endfield-balance-cap: 16px;
         position: fixed;
         top: 6px;
         left: 50%;
@@ -6650,8 +6672,25 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         max-width: calc(100vw - 16px);
         height: 32px;
         padding: 0 1px 0 14px;
-        border-radius: 999px;
-        background: #312f30;
+        /* ZERO on purpose: the background is always clipped by the border
+           radius, so a renderer that mis-rounds 999px into a squircle would
+           shave the drawn caps' corners. With no radius to clip by, the
+           gradient layers below ARE the silhouette — see the section comment. */
+        border-radius: 0;
+        /* The silhouette is DRAWN (see the section comment): two discs at the
+           ends + a band between their centres. A plain colour would show the
+           squircle of a renderer that mishandles border-radius; this way the
+           outline IS the gradient, correct wherever gradients paint. The
+           transparent stops repeat the fill colour at alpha 0 — plain
+           'transparent' would fringe grey through the 0.5px feather. */
+        background:
+          radial-gradient(circle at var(--endfield-balance-cap) 50%,
+            #312f30 calc(var(--endfield-balance-cap) - 0.5px),
+            rgba(49, 47, 48, 0) var(--endfield-balance-cap)),
+          radial-gradient(circle at calc(100% - var(--endfield-balance-cap)) 50%,
+            #312f30 calc(var(--endfield-balance-cap) - 0.5px),
+            rgba(49, 47, 48, 0) var(--endfield-balance-cap)),
+          linear-gradient(#312f30, #312f30) var(--endfield-balance-cap) 0 / calc(100% - 2 * var(--endfield-balance-cap)) 100% no-repeat;
         color: #f1f1ec;
         font-family: var(--edge-font);
         font-size: 13px;
@@ -6661,32 +6700,52 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         pointer-events: none;
         user-select: none;
         white-space: nowrap;
-        /* Boot pose -> balance row. Only the box moves (height, width floor,
-           padding) and the two contents cross-fade in place, so the collapse
-           reads as ONE object changing shape instead of two layouts swapping. */
+        /* Boot pose -> balance row. The box moves (height, width floor,
+           padding), the drawn caps move with it (--endfield-balance-cap is a
+           registered <length>, so it interpolates on the SAME 420ms curve as
+           height — cap(t) = height(t)/2 every frame), and the two contents
+           cross-fade in place, so the collapse reads as ONE object changing
+           shape instead of two layouts swapping. No border-radius entry: the
+           radius is 999px for the pill's whole life and the engine clamps it
+           to half the CURRENT height every frame, where it works. */
         transition:
           height 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
           min-width 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
           padding 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
-          border-radius 420ms cubic-bezier(0.22, 0.72, 0.2, 1);
+          --endfield-balance-cap 420ms cubic-bezier(0.22, 0.72, 0.2, 1);
       }
-      /* Boot pose: the brand panel from the reference — 448x72 with a 14px
-         radius — held while the first account answer is still in flight. JS
-         drops the attribute once the balance lands (or the cap expires) and the
-         pill animates down into its row. The radius itself is written inline by
-         JS: the theme's zero-radius pass is author !important, so only an
-         inline priority declaration can hand the pose its 14px and then the
-         stadium value back. */
+      /* Boot pose: the brand panel from the reference — 448x72 — held while the
+         first account answer is still in flight. JS drops the attribute once the
+         balance lands (or the cap expires) and the pill animates down into its
+          row. The pose grows the drawn caps with the box (--endfield-balance-cap
+          16px -> 36px on the same 420ms curve as height), so the silhouette is
+          a stadium at every instant without ever asking border-radius for it. */
       [data-endfield-balance][data-endfield-balance-boot] {
+        --endfield-balance-cap: 36px;
         height: 72px;
         min-width: min(448px, calc(100vw - 16px));
         padding: 0 22px;
       }
       /* The rows keep their layout under the brand block (opacity only), so the
-         collapse never reflows twice. */
+         collapse never reflows twice.
+         The FADE is declared on a rule that survives the pose, and only the
+         held-down 'opacity: 0' lives under the boot attribute. A transition runs
+         only if the property is still declared on the element AFTER the change:
+         declaring both halves inside the boot-attribute selector meant removing
+         the attribute deleted the transition along with the 'opacity: 0', so on
+         the very frame the collapse started the balance row snapped to full
+         opacity while the brand was still mid-fade — two reads overprinted for
+         a fifth of a second, and the pose read as a glitch instead of a morph
+         (measured: row opacity 0 -> 1 in one sample while height was still
+         72px). The short delay is what makes it a cross-fade: the brand (220ms)
+         is most of the way out before the numbers (170ms) are a third of the way
+         in, and both are done well inside the 420ms the box takes to shrink, so
+         the whole collapse ends as one gesture. */
+      [data-endfield-balance] > :not([data-endfield-balance-brand]) {
+        transition: opacity 170ms linear 90ms;
+      }
       [data-endfield-balance][data-endfield-balance-boot] > :not([data-endfield-balance-brand]) {
         opacity: 0;
-        transition: opacity 170ms linear;
       }
       [data-endfield-balance-brand] {
         position: absolute;

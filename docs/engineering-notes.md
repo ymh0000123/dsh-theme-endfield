@@ -437,6 +437,22 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 
 若照此发布，用户会看到左边一条 10px 黄条僵在原地。改为 JS 按墙钟时间逐帧写 `width` / `opacity` 后，实测同一渲染器下取到 17 个不同宽度、10px → 500px，并在真实速度截图中抓到中途帧。
 
+### 胶囊收起：transition 不能和状态选择器同生共死
+
+顶部余额胶囊的开场 pose（448×72 品牌面板）收进 300×32 药丸时，余额行的淡入**原本**写成 `[data-endfield-balance][data-endfield-balance-boot] > :not(brand) { opacity: 0; transition: opacity … }`。JS 收起的第一步就是 `removeAttribute('data-endfield-balance-boot')`——选择器**当场不再匹配**，`opacity: 0` 与 `transition` 声明在同一瞬间一起消失。transition 只在「属性变更后元素上仍有声明」时才执行，于是行内容直接从 0 **跳到** 1：时序采样（每 40ms 读 computed style）显示收起起始帧 `rowO: 0 → 1` 一步到位，而品牌层的 220ms 淡出（transition 写在基础规则 `[data-endfield-balance-brand]` 上，所以活着）还在中途，72px 的高盒子里两套文字叠印了约五分之一秒——用户看到的"动画不连贯"就是这一帧。
+
+修法是拆开两个半边：**「按住」的 `opacity: 0` 留在 pose 选择器里，能跑的 `transition` 挪到不依赖 pose 的基础规则** `[data-endfield-balance] > :not(brand)`，并给它 90ms 延迟。延迟是交叉淡化的关键——品牌（220ms）淡出大半时数字（170ms）才爬到三分之一，两者都远早于盒子的 420ms 收缩结束，整段收起读成一个动作。复测同一采样器得到 `0 → 0.16 → 0.36 → 0.65 → 0.94 → 1` 的平滑爬升，与品牌淡出完全交叠。
+
+这与上面加载屏那条是同一课的两面：那条说**有的渲染器根本不跑 transition**（要 JS 逐帧兜底）；这条说即便在跑 transition 的渲染器里，**声明的存续期也是动画的一部分**——把 transition 挂在会被移除的状态属性下，等于亲手在动画起始帧掐死它。`test/balance-capsule.test.js` 因此钉住三条：基础选择器带 transition、pose 选择器**不带**、且 transition 带延迟。
+
+### 胶囊两端不圆：形状不能依赖"收起时写回"
+
+第一版修法（挂载只写常量 `999px !important`、pose 不再借用 14px、收起不再写回）在夹具里完美，但用户重载后**仍然**看到椭圆端头——第二张截图证明：那张图没有被拉伸（同图里 27px 表盘实测 27×27 正圆、药丸 300×32 分毫不差），端头弧深却仍是 ~14px。结论只剩一个：**那个渲染器对 999px 的钳制本身就坏**（渲染出 squircle 而非半圆），任何依赖 `border-radius` 计算终值的方案在它上面都不可信；而同一帧里表盘那圈 `conic-gradient` + `radial mask` 是**完美圆形**——渐变是这个渲染器从未失手的形状原语。
+
+最终修法即用户所言「直接在 CSS 上左右画个半圆」：**轮廓改为绘制，不再依赖圆角**。胶囊 `border-radius` 钉成 0（内联带 priority——任何半径都会把背景裁进圆角盒，把坏渲染器的 squircle 重新暴露出来），背景换成三层渐变：两端各一个 `radial-gradient` 圆盘（圆心在 `--endfield-balance-cap` / `calc(100% - cap)` 的垂直中点，半径 cap，边缘 0.5px 羽化抗锯齿）加一条 `linear-gradient` 实色带铺在两圆心之间。`@property --endfield-balance-cap` 注册为 `<length>` 并进入 420ms transition 列表，与 `height` 同曲线补间（16px ↔ 36px），于是收起全程 **cap(t) = height(t)/2 每帧成立**（实测 83 个采样点零失步），画出来的 stadium 与变形的盒子始终重合。像素验证：端头轮廓逐行内缩 21,16,14,12,10,9,8,…,0 精确落在 R=16 圆弧上。
+
+教训合并成一句话：**凡是"最终必须成立"的视觉状态，都不能只靠动画、状态切换或某个几何属性的钳制去达成**——transition 可能不跑、声明可能随选择器消失、内联写回可能被吞、border-radius 的超大值钳制本身可能渲染成 squircle；把不变式压到最原始的绘制原语上（这里：渐变），让坏不了的东西替你维持形状。`balance-capsule.test.js` 钉住：三层渐变轮廓、@property 注册 + 16/36 两值 + transition 补间、挂载写 `0 !important` 且源码不得再出现任何 999px/14px 的半径写入。
+
 ### 启动读取不能只信 `apply()` 那一刻
 
 加载屏是唯一一个**必须在启动瞬间做决定**的表面：它在 `apply()` 里同步读一次 `loader`，读到就播。而设置节的实际到达顺序是异步的——`settingsScope` 的首次快照是 `{ status:'loading', value: undefined }`（`dsh-client-ui-settings` 的 `SettingsScopeSnapshot` 契约明写了这一点），Host 那份 section 走线上回来时 `apply()` 早已跑完。于是那次读落在 schema 默认值 `'0'` 上：用户即使存着 `loader:"1"`，也什么都不播。
@@ -493,7 +509,6 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 实现上 `blocksAt(day)` 给出当天的块序列（整天谷 / 工作日五块），非高峰时从当前块向两侧逐块走，遇到高峰块即停；步数上限 `BALANCE_WINDOW_WALK_CAP = 4096` 只作防呆（9 天春节连周末约 20 块，实际不可达）。顺带把 `BALANCE_PEAK_WINDOWS` 从**死常量**改造成块序列的推导来源：此前它在声明后从未被使用，函数里另写死了一份 `edges`，两者随时可能漂移。
 
 ### 节假日名只出现在开场 pose
-
 胶囊宽 300px，窄屏断点 316px 正是按它推出的，所以 **settled 行的文案一个字都不能加**。「今天是国庆节」只在开场品牌 pose 的标题里体现（`DeepSeek 国庆节低谷`，普通日子仍是 `DeepSeek 当前低谷`）；`test/balance-capsule.test.js` 直接断言 `win.holiday` 只被**一行**读取、且那一行在 brand-title 块内，防止它以后爬进 settled 行把胶囊撑宽。
 
 算术本身（节假日 / 周末 / 工作日各读到什么窗口、倒计时多少）钉在 `test/balance-window.test.js`；守卫与注入用例见 [testing.md](testing.md#顶部余额胶囊)。
