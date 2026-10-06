@@ -1,0 +1,5 @@
+    `)
+      syncRadiusMode()
+      syncGlass()
+      syncPaletteClass()
+    }

@@ -49,6 +49,16 @@ jobs:
         if: always()
         run: node .github/scripts/syntax-check.js
 
+      # 产物是从 src/ 拼出来的（见 docs/engineering-notes.md 的「源码是真源，
+      # 产物是拼出来的」），改了源码却忘了重新构建，产物就会悄悄过期。三个
+      # --check 都只做字符串比对，不写文件，也不启动浏览器。
+      - name: 构建产物未过期
+        if: always()
+        run: |
+          node scripts/build-host.js --check
+          node scripts/build-client.js --check
+          node scripts/build-contour-worker.js --check
+
       # 项目自带的护栏：专查那个单模板字面量里的游离反引号和 ${...} 插值。
       # selftest.js 再拿故意改坏的副本验证护栏本身有效。
       - name: 样式表护栏

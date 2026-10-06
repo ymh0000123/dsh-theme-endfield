@@ -8,7 +8,13 @@ const test = require('node:test'), assert = require('node:assert/strict')
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path')
 const cp = require('node:child_process')
 const root = path.resolve(__dirname, '..')
-const INPUTS = ['client.js', 'src/contour-worker.js', 'src/contour-webgl.js']
+/* The whole point of this file is the CRLF/LF split, so it has to follow the
+   build: the kernel now lives in src/client/20-contour.js and the generated block
+   is its own fragment (src/client/21-contour-worker.embed.js). */
+const INPUTS = [
+  'src/client/20-contour.js', 'src/client/21-contour-worker.embed.js',
+  'src/contour-worker.js', 'src/contour-webgl.js',
+]
 
 /** A throwaway checkout with every input converted to `eol`. */
 function checkout(eol, { stale = false } = {}) {
@@ -52,8 +58,8 @@ test('--check still catches a stale embedded worker on a CRLF checkout', () => {
 test('write mode keeps the checkout line endings uniform', () => {
   const dir = checkout('\r\n')
   assert.equal(build(dir).status, 0)
-  const out = fs.readFileSync(path.join(dir, 'client.js'), 'utf8')
+  const out = fs.readFileSync(path.join(dir, 'src/client/21-contour-worker.embed.js'), 'utf8')
   const lfOnly = out.split('\n').slice(0, -1).filter((line) => !line.endsWith('\r'))
-  assert.equal(lfOnly.length, 0, `rebuilt client.js mixed in ${lfOnly.length} LF-only lines`)
+  assert.equal(lfOnly.length, 0, `rebuilt fragment mixed in ${lfOnly.length} LF-only lines`)
   assert.equal(build(dir, '--check').status, 0, 'a rebuild must satisfy its own check')
 })

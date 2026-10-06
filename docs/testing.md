@@ -41,6 +41,28 @@ npm test           # 上面两项 + 配色 / 设置页 / 渲染 / 覆盖率 / �
 
 ---
 
+## 源码/产物一致性 — build-*.js --check
+
+```bash
+npm run check:host    # node scripts/build-host.js --check
+npm run check:client  # node scripts/build-client.js --check
+npm run check:worker  # node scripts/build-contour-worker.js --check
+```
+
+`client.js` 与 `index.js` 是 `src/` 下片段拼出来的产物（见 [工程笔记的「源码是真源，产物是拼出来的」](engineering-notes.md#源码是真源产物是拼出来的)）。这三条命令重新拼一遍并与仓库里的产物逐字节比较，守的是**没人能只改源码、忘了重新构建**。`npm run check` 与 `npm run test:ci` 的链首都串了这三条，CI 的 static job 里也单独跑一次（`构建产物未过期` 这一步）。
+
+失败时长这样：
+
+```text
+client.js is stale (first difference at line 4096); run npm run build:client
+```
+
+照提示跑对应命令即可；改产物本身不是修法，下一次 `--check` 还会红。
+
+`test/worker-eol.test.js` 是这三条门禁的**行尾**回归：它在临时目录里造一份 LF 检出和一份 CRLF 检出，断言两份都能通过 `build-contour-worker.js --check`、注入一处真实改动后必须失败、写模式产出的文件行尾统一。它的输入清单（`INPUTS`）跟着构建走 —— kernel 在 `src/client/20-contour.js`，生成块是独立片段 `src/client/21-contour-worker.embed.js`。改动构建输入时这个清单必须一起改，否则测试会在错误的文件上打印「通过」。
+
+---
+
 ## 选择器与主题化落点
 
 ```bash
@@ -66,6 +88,35 @@ _centerCol > _header > _titleRow > _titleCluster > _headerActions
 夹具用语义假名（`probe_headerActions` 等）而不是真哈希，所以上游重新哈希不会让这条测试说谎；它能稳稳抓住「后缀写对了、层数写错了」这一类回归。**注意：这条测试的夹具本身就是它的核心资产**——它曾经漏掉那层无 class 包裹层，于是选择器在夹具上命中、测试全绿，而真实页面一个元素都没匹配到。改动夹具结构时，务必对着真实 DOM 核，别为了让选择器通过而搭。
 
 > 变异验证 5 类：把选择器换回"漏掉包裹层"的那版 → 2 条断言红（含线上看到的灰底）；把图标判据换成裸后代 → jobs 标签与容器外 `_label` 两条反向断言红；重新加回"压平包裹层 + 增长容器" → 两条"变成长条"断言红。
+
+---
+
+## 样式表投递与幂等
+
+```bash
+npm run test:sheet                            # 真实浏览器：同 build 重复挂载不换表，换 build 必须换表
+node .dsh-vision-toolkit/tmp/live-probe15.js  # live 复核（本地探针，不入库）
+```
+
+**`theme-sheet-refresh.test.js`** 守的是「代码明明改了、页面还是老样子」这类**不报错**的失效。`apply()` 的页面级幂等标志（`__dshThemeEndfieldApplied`）本意是挡 boot loader + cordis 组合造成的重复挂载，但 `dsh-client-modules` 的 `rebuilt()`/HMR 会把新 bundle 送进**已经跑过旧 build** 的长驻标签页，且这条路不走 dispose——布尔标志挡不住它，新代码在第一行就返回，旧样式表一直留到标签页关闭。
+
+现在标志配一个 build marker：同 build 仍然短路，marker 缺失或不等就先摘掉旧样式表再正常安装。三段断言：源码里每次置标志都必须同时记 marker、dispose 必须一起释放、样式表首行注释必须等于 marker 字面量（`check.js` 禁止样式表里出现模板插值，所以这行只能是字面量，由这条断言钉住同步）；真实 DOM 上同 build 重复 `apply()` 不换表；删掉 marker 后再 `apply()` 必须换表（`replaced` / `staleGone` 都为真）。
+
+marker 落在样式表首行，所以「页面挂的是哪一版」可以直接在控制台读出来：
+
+```js
+document.querySelector('style[data-plugin="dsh-theme-endfield"]').textContent.slice(0, 80)
+```
+
+```bash
+npm run test:corners                          # 源码级：stadium/圆形规则必须带 corner-shape: round
+```
+
+**`corner-shape.test.js`** 守的是「999px 写了、画出来不是半圆」这一类失效：宿主在 `@supports (corner-shape:superellipse(1.5))` 里给全元素默认方圆角（Chrome 139+），主题里每条要「半圆/正圆」的规则必须在同一规则体里声明 `corner-shape: round`（999px 胶囊 ×3 + 50% 圆形化通道），余额胶囊家族（badge/ring/clock/brand-mark）由胶囊根规则继承豁免。老渲染器把它当未知属性丢弃，零成本。
+
+---
+
+**`live-probe15.js`** 是同一件事在真实 GUI 上的复核：全新导航后挂上的表首行就是当前 marker；随后模拟长驻标签页（保留标志、删掉 marker、把已挂样式表换成旧内容），再跑**服务器当场下发的那份 bundle**，旧表被摘掉、新表带上 marker，页面无异常。
 
 ---
 

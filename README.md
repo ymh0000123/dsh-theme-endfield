@@ -71,8 +71,13 @@ npm test
 ## 项目结构
 
 ```text
-client.js          Client 侧主题实现
-index.js           Host 侧：导出 volatile Config，声明设置命名空间
+src/client/        Client 侧源码片段（拼接顺序见 src/client/manifest.js）
+src/host/          Host 侧源码片段（拼接顺序见 src/host/manifest.js）
+src/styles/        theme.css：主题样式表（那一整个模板字面量的内容）
+src/contour-*.js   等高线 worker / WebGL 源码（npm run build:worker 嵌入产物）
+client.js          Client 侧产物，由 src/client/ + src/styles/ 拼接而来
+index.js           Host 侧产物，由 src/host/ 拼接而来
+scripts/           构建与门禁：lib/bundle-build.js 拼接器 + build-*.js 入口
 lib/               音频通知：槽位定义、WAV 合成与播放运行时
 locale/            插件卡片的展示文案（meta.title / meta.description）
 sounds/            生成的通知音（npm run sound:build 重新生成）
@@ -82,6 +87,11 @@ selftest.js        校验器自检
 test/              渲染、设置、配色与性能测试
 docs/              设计、功能、工程与测试文档
 ```
+
+`client.js` 与 `index.js` 是**构建产物，不要直接编辑**：改 `src/` 下的片段，再跑
+`npm run build:client` / `npm run build:host`（等高线 worker 走 `npm run build:worker`）。
+`npm run check` 与 CI 都用 `--check` 验证产物没有过期：产物与源码不一致时报出第一个差异行。
+片段划分与改动规则见 [docs/engineering-notes.md](docs/engineering-notes.md) 的「源码是真源，产物是拼出来的」。
 
 ## 素材归属
 

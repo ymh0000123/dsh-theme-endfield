@@ -1,0 +1,2518 @@
+      /* endfield-build/2026-10-06-darker-dim — read this to tell which build's sheet is mounted.
+         Kept literal (no template interpolation): check.js requires the stylesheet literal to be
+         interpolation-free. test/theme-sheet-refresh.test.js pins it equal to SHEET_MARKER. */
+      /* ================= typography: SCOPED to the theme's own elements =====
+         The theme used to redeclare the app's two font TOKENS at :root:
+             --dsw-font-family: Arial, ...      -> dropped, see below
+             --ds-font-family-code: <mono list> -> dropped (see the note under it)
+         and that is what broke third-party widgets.
+
+         WHY IT BROKE THEM. The app declares --dsw-font-family at :root and then
+         renders the UI root font from it — dsh-web-frontend ships exactly
+         'body{font-family:var(--dsw-font-family, <system stack>)}'. A :root
+         declaration WINS over the app's own :root one, so the entire UI root
+         font became Arial; a widget injected into the app root (DeepSeek-
+         Balance-Whale-Widget and friends) carries 'font-family:inherit' and
+         therefore inherited Arial, losing its own face for its balance digits.
+         The root font token is a SHARED PUBLIC INTERFACE of the app, not a
+         theme-private knob: overriding it silently restyles every third-party
+         component on the page, so this theme no longer touches either token.
+
+         WHAT KEEPS THE LOOK. The theme's industrial editorial face lives in
+         --edge-font, declared on body and applied ONLY to elements this theme
+         owns: the boot plate, the watermark wordmark, and the settings panel.
+         --dsw-font-family is still READ on those elements, as the trailing
+         fallback of that stack, so nothing outside the theme is ever affected
+         while the app's own font configuration stays part of the protocol. The
+         ORDER of that stack matters and is documented where it is declared —
+         flipping it re-types the boot plate.
+
+         The code token went for the same reason. It is nearly identical to the
+         app's own list (only the final fallbacks differ: Liberation Mono, Menlo,
+         Courier, PingFang SC, Microsoft YaHei here vs Helvetica, Arial,
+         sans-serif in the app), so dropping the override is visually inert on
+         every code surface the theme does not own.
+
+         NO GLOBAL TEXT PROPERTIES EITHER. There is deliberately no 'body { ... }'
+         rule setting font-family / font-feature-settings / font-variant-*: all
+         three inherit, so all three leak into injected third-party nodes exactly
+         the way the token did. openType features belong on the specific elements
+         that measure with them instead (see the loader's own tabular figures). */
+      /* ================= accent palette =================================
+         Every accent value in this stylesheet reads from the variables below
+         instead of a literal, so the whole theme repaints from ONE declaration
+         block. Two palettes ship:
+
+           谷地黄 (default)  signal yellow  #fff500 — the Endfield site accent
+           武陵青            teal-cyan      #14d0d0
+
+         WHY THIS BLOCK IS ON body AND NOT :root. The app applies its theme
+         tokens as INLINE STYLES ON <body> (dsh-client-ui-layout does
+         body.style.setProperty(name, value) for every token in the snapshot).
+         A custom property declared at :root that substitutes one of those
+         tokens is resolved AT THE html ELEMENT, where the token does not
+         exist, so it becomes guaranteed-invalid and computes to nothing.
+         That was not theory: the shipped --edge-line / --edge-paper /
+         --edge-soft were declared at :root and measured EMPTY in a real
+         browser, which silently disabled the themed scrollbar
+         (scrollbar-color computed to 'auto') and left the table/hairline
+         rules falling back. Moving them onto body is what makes them resolve
+         (see test/probe-edge-line.js).
+
+         The same fact is what makes the palette switch free: the theme's
+         token overrides are values like var(--edge-accent), body carries the
+         palette class, so flipping the class re-resolves every token and
+         every rule below with NO JavaScript repaint at all — verified in a
+         real browser (test/probe-css.js), not assumed.
+
+         --edge-accent-rgb is the same colour as a bare comma list, because
+         rgba() needs channels rather than a hex; substituting a comma-list
+         custom property inside rgba() is legal and was verified in the same
+         probe. Keeping both in one place is why the ~30 translucent washes
+         did not have to become 60 declarations.
+
+         Values are MEASURED, not chosen — see test/palette-contrast.test.js,
+         which fails the build if any of them stops clearing its bar:
+           ink #101110 on 谷地黄 16.50:1 · on 武陵青 6.62:1   (AA, solid chips)
+           accent as dark-mode icon ink   15.26:1  ·  6.12:1  (>=3 icon floor) */
+      body {
+        --edge-accent: #fff500;
+        --edge-accent-rgb: 255, 245, 0;
+        /* Hover/pressed step of the accent, still carrying ink-coloured text:
+           谷地黄 13.60:1 · 武陵青 5.31:1. */
+        --edge-accent-deep: #e8e000;
+        /* The one place the accent must survive on CREAM as a fill (the light
+           deepseek-450 slot): pure signal yellow is nearly paper-white there,
+           so light mode uses a darkened step of the same hue. */
+        --edge-accent-onpaper: #d9c700;
+        /* Turn-status gradient text stops — see the long note on that rule.
+           Gradient text paints glyphs with EVERY stop, and reduced-motion pins
+           the mid band permanently inside the letters, so all four clear AA
+           against both surfaces of their mode:
+             谷地黄 light #6b5d00 5.35 / mid #3f3600 9.82
+                    dark  #fff500 15.26 / mid #a08a00 5.11
+             武陵青 light #006a6a 5.22 / mid #003f3f 9.58
+                    dark  #14d0d0 9.14 / mid #7ee7e7 12.06 */
+        --edge-status-light: #6b5d00;
+        --edge-status-light-mid: #3f3600;
+        --edge-status-dark: #fff500;
+        --edge-status-dark-mid: #a08a00;
+        /* Hero backdrop glow alpha, per scheme. These are the measured values
+           from the note on that rule: the replacement must not change how deep
+           the hero reads compared with the app's own #6187D8 at 8%. */
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.05;
+      }
+      /* ---------- 武陵青 (teal-cyan, #14d0d0) ----------
+         Only the palette changes here; paper, ink, borders and the semantic
+         state colours (error red, success green, warn amber) are shared, so
+         this block is exactly the set of values that carry the accent hue.
+
+         BRIGHTNESS. The first version shipped #0daaaa (the literal
+         rgb(13, 170, 170) that was asked for) and read as too dark next to the
+         signal yellow it alternates with — measured, that is not a matter of
+         taste: relative luminance was 31.7% against the yellow's 86.6%, so on a
+         near-black page the cyan chip carried barely a third of the presence.
+         #14d0d0 keeps the same hue axis (R low, G == B, so it is still the same
+         teal rather than drifting toward grey-cyan) and lifts luminance to
+         49.8% — 57% brighter — while every measured invariant still holds:
+           ink #101110 on the chip   6.62 -> 9.88:1   (AA, and now better)
+           chip as dark-mode ink     6.62 -> 9.88:1   (icon floor is 3)
+         It is deliberately NOT taken to the yellow's luminance: past ~#16dcdc
+         the light-mode chip stops separating from cream (1.39:1 at #16dcdc
+         versus 1.56:1 here), and a cyan that pale reads white-ish rather than
+         teal. This is the brightest step that still looks like 武陵青 in both
+         schemes. */
+      body.theme-endfield-wuling {
+        --edge-accent: #14d0d0;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. Derived from
+           the hex above and kept beside it so the two cannot drift. */
+        --edge-accent-rgb: 20, 208, 208;
+        /* Hover step. Chosen to match the PERCEPTUAL drop the yellow palette uses
+           (#fff500 -> #e8e000 is ΔY 19.9) rather than a copied percentage, so
+           hover feels equally strong in both palettes: ΔY 19.7 here, 7.72:1 under
+           ink text. */
+        --edge-accent-deep: #10b8b8;
+        /* Cyan is still far darker than yellow under ink (9.88 vs 16.50), so it
+           needs no separate on-cream step — the accent itself reads on paper. */
+        --edge-accent-onpaper: #14d0d0;
+        /* Light mode dips deep, exactly as the yellow palette does: on cream no
+           tint above #007070 clears AA on both surfaces, and that is a property of
+           the paper, not of how bright the accent is — so these two are unchanged
+           by the brightening. */
+        --edge-status-light: #006a6a;
+        --edge-status-light-mid: #003f3f;
+        --edge-status-dark: #14d0d0;
+        /* Dark mode LIFTS for its mid band instead of dipping like yellow's
+           #a08a00: a darker cyan mid stop measured 3.54:1 and failed, because cyan
+           at this lightness has less headroom below it than yellow does. Raised
+           with the accent so the shimmer keeps a visible band: #7ee7e7 is 12.06:1
+           and ΔY 40.6 from the accent (the old #4fd6d6 would now sit only ΔY 27.8
+           away and read flatter). */
+        --edge-status-dark-mid: #7ee7e7;
+        /* Cyan carries real luminance where yellow is nearly neutral on cream, so
+           the glow alphas are measured rather than inherited. Both stay inside the
+           depth of the #6187D8 glow they replace (budget: light 9.90, dark 11.28).
+           Dark comes down from 0.05 to 0.04 because the brighter accent lifts a
+           near-black page faster: 0.05 now measures |ΔY| 7.6 where the old cyan
+           measured 6.0. */
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.04;
+      }
+      /* Token-derived aliases. These MUST be on body, not :root — see above. */
+      body {
+        --edge-signal: var(--edge-accent);
+        --edge-signal-dim: rgba(var(--edge-accent-rgb), 0.7);
+        --edge-paper: var(--dsw-alias-bg-base);
+        --edge-panel: var(--dsw-alias-bg-layer-1);
+        --edge-line: var(--dsw-alias-border-l1);
+        --edge-soft: var(--dsw-alias-bg-layer-2);
+        /* The theme's own face. THREE things are deliberate here.
+
+           (1) THE THEME STACK LEADS, with --dsw-font-family as a trailing
+               fallback — and this ORDER was measured, not guessed. On this host
+               the app's token renders in Segoe UI while the theme's stack renders
+               Arial (same string, 81.688px vs 84.516px — measured by
+               test/font-scope.test.js), so reading the token FIRST would silently
+               repaint the boot plate, the watermark and the settings panel in a
+               different face and invalidate every Arial-based proportion the
+               loader was measured with (see the pixel-scan notes on the brand
+               block). Leading with the theme stack keeps those surfaces exactly
+               as they render today, which is what this fix has to promise: the
+               request is to stop RESTYLING THE WHOLE APP, not to re-type the
+               theme.
+           (2) THE TOKEN IS STILL HONOURED, which is the protocol half of the
+               requirement: it is read, not ignored, and it is what applies on a
+               host with no Arial/Narrow/PingFang/YaHei at all — so a system
+               carrying neither the theme stack nor a configured root font still
+               lands on the app's stack instead of an arbitrary generic. A user
+               who deliberately configures a root font family therefore still
+               reaches the theme's own elements. If a future author wants the
+               world's configuration to win OUTRIGHT over the theme face, swapping
+               the two halves of this declaration is the whole change — say so in
+               the commit, because it re-types the boot plate.
+           (3) IT IS DECLARED ON body, NOT :root, for the same reason the aliases
+               above are — see the app-token note higher up. The var() fallback is
+               not decoration either: a custom property that substitutes a token
+               missing at the element it is READ from computes to nothing, the
+               trap that already shipped once with --edge-line
+               (test/probe-edge-line.js). Resolving where the value is used cannot
+               hit it. */
+        --edge-font: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif, var(--dsw-font-family);
+      }
+      /* ---------- where the theme's face is applied, and where it is NOT ----------
+         Only elements this theme created or owns. Every one of the three is a
+         node the theme injected itself, so a third-party widget can never be an
+         ancestor or a descendant of one of them — unless it attaches INSIDE the
+         boot plate or the watermark, which it does not: those layers are
+         pointer-events:none, aria-hidden chrome.
+           [data-endfield-loader]  the boot plate      (also carries the feature
+                                                       settings the layout measures:
+                                                       tabular figures + the
+                                                       altered single-storey
+                                                       glyph)
+           [data-endfield-watermark] the ENDFIELD wordmark
+           .endfield-settings      the 「终末地主题设置」 panel root
+         Deliberately NOT on body: the app renders its UI root font from
+         var(--dsw-font-family) on body, and a body font-family here would
+         re-break every installed widget exactly as the old :root override did. */
+      [data-endfield-loader],
+      [data-endfield-watermark],
+      .endfield-settings {
+        font-family: var(--edge-font);
+        font-feature-settings: "tnum" 1, "ss01" 1;
+        font-variant-ligatures: no-common-ligatures;
+      }
+      /* The persist-mode watermark is a z-index:-1 child of the conversation column.
+         Two properties are needed on that column, and only while the mark is mounted
+         there (the :has() guard makes this a no-op whenever the feature is off):
+           isolation: isolate — without a stacking context, z-index:-1 escapes to the
+             nearest ancestor context and paints behind the column's own opaque
+             background, i.e. invisible.
+           position: relative — the column ships as position:static, so an absolutely
+             positioned child would resolve against the app frame instead and spill
+             across the sidebar. This makes the column the containing block so
+             inset:0 means "exactly this column".
+         Every absolute descendant the app itself renders (header:after, tab:after,
+         heroGlow, the overlay composer seat) already has a positioned ancestor
+         nearer than this column, so their containing blocks are unchanged. */
+      /* Suffix-only match: the :has(>) guard pins this to exactly the element the
+         JS mounted the watermark into (only the conversation column or the app
+         frame ever hosts it), so the broad '_root' suffix cannot over-match. */
+      [class$='_root']:has(> [data-endfield-watermark]) {
+        isolation: isolate;
+        position: relative;
+      }
+      /* The persist FALLBACK mounts inside the app FRAME on pages with no
+         conversation column (a full-page settings view). Same reason as the rule
+         above: without isolation, the mark's z-index:-1 escapes to the root
+         stacking context and paints below the frame's own opaque background —
+         i.e. it never shows, which is exactly what the old body-level fallback
+         did. The frame is already position:relative (see the contour notes), so
+         isolation alone is enough here. The :has() guard keeps the frame's
+         stacking behaviour stock whenever the mark is not mounted in it. */
+      [class*='_frame']:has(> [data-endfield-watermark]) {
+        isolation: isolate;
+      }
+      /* The mark sits behind text, so it must never intercept selection or clicks. */
+      [data-endfield-watermark] {
+        pointer-events: none !important;
+      }
+      /* ---------- watermark strength, per colour scheme ----------
+         One variable per scheme instead of one number in JS, because the two
+         schemes genuinely need different alphas and a scheme flip must re-resolve
+         with no JS involved.
+
+         Computed, not eyeballed — contrast of the composited ink against its own
+         background (the mark is always BEHIND text, so this measures how loudly
+         the decoration competes for attention, never foreground readability):
+
+              alpha | dark #101110  | light #e8e8e2
+              0.07  | 1.171 : 1     | 1.152 : 1
+              0.085 | 1.215 : 1     | 1.186 : 1
+              0.10  | 1.278 : 1     | 1.225 : 1
+              0.13  | 1.406 : 1     | 1.310 : 1   <- previous dark value
+              0.16  | 1.541 : 1     | 1.398 : 1   <- previous persist value
+
+         Dark mode is the reported problem: adding luminance to a near-black page
+         makes the wordmark read far louder than the same alpha subtracted from
+         cream, and at 0.13/0.16 it visibly cluttered the UI. Dark therefore drops
+         to 0.085 (1.215:1) — still clearly present, no longer competing. Light
+         keeps more strength (0.13) because cream needs it to register at all;
+         1.310:1 there looks quieter than 1.215:1 on black.
+         Floor is ~1.06:1, below which the mark reads as absent. */
+      body {
+        --edge-wm-alpha: 0.13;
+      }
+      body[data-ds-dark-theme] {
+        --edge-wm-alpha: 0.085;
+      }
+      /* Translation-proof glyphs: the wordmark is drawn from the CSS 'content'
+         property, not a DOM text node, so page translators (which walk text nodes)
+         have nothing to rewrite — the brand name cannot be turned into "终末地" or
+         similar. The element's own text stays empty; ::before carries the letters. */
+      [data-endfield-watermark]::before {
+        content: 'ENDFIELD';
+        display: block;
+        white-space: nowrap;
+      }
+      /* ================= contour background sheet =================
+         The layer is a child of the app frame. Every rule here is gated on the
+         frame actually CONTAINING the layer, so with the feature off none of it
+         matches and the app keeps its stock backgrounds exactly.
+
+         The wrapper is inset:0 / z-index:0 inside a frame that is position:relative
+         and creates no stacking context, so it paints above the frame's own
+         background and below every positioned descendant. */
+      [data-endfield-contour] {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      [data-endfield-contour] canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+      }
+      /* Why these three transparency rules exist. Measured from the app's own
+         stylesheets: the frame, the conversation column and the details column each
+         paint an OPAQUE var(--dsw-alias-bg-base). Any of them left opaque hides the
+         sheet completely on a real page, which is exactly why the existing
+         watermark has to mount INSIDE the conversation column instead.
+         Clearing them is safe and colour-neutral: the frame itself still supplies
+         bg-base underneath, so the composited result is unchanged except that the
+         contour is now visible through it. */
+      [class*='_frame']:has(> [data-endfield-contour]) {
+        background: transparent !important;
+      }
+      /* WHY _centerCol / _rightbarCol and not a bare [class$='_root']: the current
+         build renders hundreds of '*_root' classes and many of them carry an
+         opaque background (trajectory bar, sidebar root, right-panel content, …).
+         Only the conversation column (inside the centre column) and the right
+         column may be cleared, so the columns scope the match. Both column
+         suffixes are unique to the layout frame
+         (@deepseek-ai/dsh-client-ui-layout/AppFrame.module.css).
+
+         0.1.x -> 0.2 MIGRATION. The right column used to be _detailsCol with the
+         opaque surface on an inner '*_root'; on 0.2 it is _rightbarCol and the
+         background sits ON THE COLUMN ITSELF, while the inner panel
+         (OUqwTW_panel in @deepseek-ai/dsh-client-ui-sidebar-right) has no
+         background at all. So the old
+             [class$='_detailsCol'] [class$='_root']
+         selector matched nothing twice over: the column suffix is gone AND the
+         element that needs clearing is now the column, not a descendant. Left
+         as-is, the right panel painted an opaque bg-base straight over the
+         contour sheet whenever it was open. */
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_centerCol'] [class$='_root'],
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_rightbarCol'] {
+        background: transparent !important;
+      }
+      /* The sidebar reads --dsw-specific-sidebar-fill, which this theme sets to the
+         SAME value as --dsw-alias-bg-base, so clearing it shifts no colour and
+         simply lets the sheet run behind the sidebar as one continuous field. */
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_sidebarCol'] {
+        background: transparent !important;
+      }
+      /* The composer seat fades content out behind the input with a gradient to
+         bg-base. Left alone it would show as an opaque band cutting across the
+         sheet, so it fades to the base colour with alpha instead — same visual
+         falloff, but the contour stays continuous underneath. */
+      [class*='_frame']:has(> [data-endfield-contour]) [class$='_composerSeat'] {
+        background: linear-gradient(180deg,
+          rgba(0, 0, 0, 0) 0px,
+          color-mix(in srgb, var(--dsw-alias-bg-base) 82%, transparent) 36px) !important;
+      }
+      /* Optional bounded frost. No full-window blur, nested filters or animation. */
+      body[data-endfield-glass] {
+        --edge-glass-fill: 248 247 240;
+        --edge-glass-alpha: .8;
+        --edge-glass-blur: 14px;
+        --edge-glass-edge: rgb(255 255 255 / .65);
+        --edge-glass-sheen: rgb(255 255 255 / .35);
+      }
+      body[data-endfield-glass][data-ds-dark-theme] {
+        --edge-glass-fill: 31 36 34;
+        --edge-glass-alpha: .76;
+        --edge-glass-edge: rgb(255 255 255 / .18);
+        --edge-glass-sheen: rgb(255 255 255 / .07);
+      }
+      body[data-endfield-glass='subtle'] { --edge-glass-alpha: .68; --edge-glass-blur: 8px; }
+      body[data-endfield-glass='strong'] { --edge-glass-alpha: .9; --edge-glass-blur: 22px; }
+      body[data-endfield-glass='subtle'][data-ds-dark-theme] { --edge-glass-alpha: .64; }
+      body[data-endfield-glass='strong'][data-ds-dark-theme] { --edge-glass-alpha: .88; }
+      /* WHY [data-sidebar-right-open]: the docked right panel div (SidebarPanel)
+         is position:absolute; top:0;bottom:0;right:0 and stays in the DOM even
+         when collapsed — only its inner [data-dockkit-host=dock] child is slid
+         off-screen with visibility:hidden. Frosting the bare 'push' panel would
+         leave an opaque glass rectangle covering the right half of the screen
+         while collapsed, so frost it only when the panel is expanded. */
+      body[data-endfield-glass]
+        :is([data-composer-card], [data-sidebar-right-panel='push'][data-sidebar-right-open]) {
+        background-color: rgb(var(--edge-glass-fill) / var(--edge-glass-alpha)) !important;
+        background-image: linear-gradient(145deg, var(--edge-glass-sheen), transparent 58%),
+          radial-gradient(ellipse at 0% 0%, color-mix(in srgb, var(--edge-accent) 10%, transparent), transparent 75%) !important;
+        -webkit-backdrop-filter: blur(var(--edge-glass-blur)) saturate(1.05);
+        backdrop-filter: blur(var(--edge-glass-blur)) saturate(1.05);
+        --dsw-elevation-stroke-color: var(--edge-glass-edge);
+      }
+      body[data-endfield-glass] [data-slot='sidebar'] > div {
+        background-image: linear-gradient(145deg, var(--edge-glass-sheen), transparent 58%),
+          radial-gradient(ellipse at 0% 0%, color-mix(in srgb, var(--edge-accent) 8%, transparent), transparent 75%);
+        box-shadow: inset -1px 0 0 var(--edge-glass-edge);
+      }
+      @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+        body[data-endfield-glass]
+          :is([data-composer-card], [data-sidebar-right-panel='push'][data-sidebar-right-open]) {
+          background-color: rgb(var(--edge-glass-fill) / .96) !important;
+        }
+      }
+      @media (prefers-reduced-transparency: reduce) {
+        body[data-endfield-glass]
+          :is([data-composer-card], [data-sidebar-right-panel='push'][data-sidebar-right-open]) {
+          background-color: rgb(var(--edge-glass-fill)) !important;
+          -webkit-backdrop-filter: none; backdrop-filter: none;
+        }
+      }
+      ::selection {
+        color: #000;
+        background: var(--edge-signal, var(--edge-accent));
+      }
+      /* Square corners (default): zero EVERY classed element, then restore circles/pills below.
+         body.theme-endfield-round disables all of this and restores app-native rounding. */
+      body:not(.theme-endfield-round) button,
+      body:not(.theme-endfield-round) input,
+      body:not(.theme-endfield-round) textarea,
+      body:not(.theme-endfield-round) select,
+      body:not(.theme-endfield-round) [role='button'],
+      body:not(.theme-endfield-round) [role='dialog'],
+      body:not(.theme-endfield-round) [role='menu'],
+      body:not(.theme-endfield-round) [role='tooltip'],
+      body:not(.theme-endfield-round) [role='tab'] {
+        border-radius: 0 !important;
+      }
+      body:not(.theme-endfield-round) [class] {
+        border-radius: 0 !important;
+      }
+      body:not(.theme-endfield-round) [class*='avatar'],
+      body:not(.theme-endfield-round) [class*='Avatar'],
+      body:not(.theme-endfield-round) [class*='spinner'],
+      body:not(.theme-endfield-round) [class*='Spinner'],
+      body:not(.theme-endfield-round) [class*='dot'],
+      body:not(.theme-endfield-round) [class*='Dot'],
+      body:not(.theme-endfield-round) [class*='actionButton' i],
+      body:not(.theme-endfield-round) [class$='_iconButton'] {
+        border-radius: 50% !important;
+        /* The host roots corner-shape at superellipse(1.5) (Chrome 139+ draws
+           corners as squircles). 50% of a square is only a CIRCLE when the
+           shape is round, so every re-circled element must say so too. */
+        corner-shape: round !important;
+      }
+      /* Hover feedback should track the pointer immediately; the app's broad
+         transition rule otherwise makes colour changes feel delayed. */
+      button,
+      [role='button'] {
+        transition: none !important;
+      }
+      body:not(.theme-endfield-round) [class*='scrollbar'],
+      body:not(.theme-endfield-round) [class*='Scrollbar'] {
+        border-radius: 0 !important;
+      }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--edge-line) transparent;
+      }
+      /* ---------- Light mode: deepen tertiary/secondary labels for icon visibility ---------- */
+      body:not([data-ds-dark-theme]) {
+        --dsw-alias-label-tertiary: #6a6d68;
+        --dsw-alias-label-caption: #5a5d58;
+        --dsw-alias-label-dimmed: #9a9d98;
+        --edge-btn-muted: #dcddd6;
+      }
+      /* ---------- Neutralize remaining DeepSeek brand blues ---------- */
+      body {
+        --dsw-static-deepseek-50: #dcddd6;
+        --dsw-static-deepseek-100: #dcddd6;
+        --dsw-static-deepseek-200: #d8d9d5;
+        --dsw-static-deepseek-300: #c8cac5;
+        --dsw-static-deepseek-400: #757874;
+        --dsw-static-deepseek-450: var(--edge-accent-onpaper);
+        --dsw-static-deepseek-500: #101110;
+        --dsw-static-deepseek-600: #101110;
+        --dsw-static-deepseek-800: #3a3c38;
+        --dsw-static-deepseek-900: #2a2c2a;
+        --dsw-static-blue-900: #101110;
+        --dsw-alias-button-info-fill: #101110;
+        --dsw-alias-button-info-hover: #2a2b28;
+        --dsw-alias-state-business-primary: #101110;
+        --dsw-alias-state-business-tertiary: rgba(var(--edge-accent-rgb), 0.14);
+        --dsw-alias-brand-primary-new-colorprimary-new-color: #101110;
+        --dsw-alias-label-primary-bluish: #101110;
+        --dsw-specific-bubble: #f2f2ec;
+        --dsw-specific-bubble-highlight: #dcddd6;
+        --dsw-specific-sidebar-nav-item-active-accent: #101110;
+        --dsw-alias-interactive-bg-hover-accent: rgba(var(--edge-accent-rgb), 0.14);
+        --dsw-alias-border-l3: #b6b8b3;
+        --dsw-alias-border-l4: #9a9d98;
+      }
+      body[data-ds-dark-theme] {
+        --dsw-static-deepseek-50: #242624;
+        --dsw-static-deepseek-100: #242624;
+        --dsw-static-deepseek-200: #2f312e;
+        --dsw-static-deepseek-300: #3a3c38;
+        --dsw-static-deepseek-400: #898d89;
+        --dsw-static-deepseek-450: var(--edge-accent);
+        --dsw-static-deepseek-500: #f5f5f0;
+        --dsw-static-deepseek-600: #d8d9d5;
+        --dsw-static-deepseek-800: #343633;
+        --dsw-static-deepseek-900: #242624;
+        --dsw-static-blue-900: #f5f5f0;
+        --dsw-alias-button-info-fill: var(--edge-accent);
+        --dsw-alias-button-info-hover: var(--edge-accent);
+        --dsw-alias-state-business-primary: var(--edge-accent);
+        --dsw-alias-state-business-tertiary: rgba(var(--edge-accent-rgb), 0.22);
+        --dsw-alias-brand-primary-new-colorprimary-new-color: var(--edge-accent);
+        --dsw-alias-label-primary-bluish: #f5f5f0;
+        --dsw-specific-bubble: #181a18;
+        --dsw-specific-bubble-highlight: #242624;
+        --dsw-specific-sidebar-nav-item-active-accent: var(--edge-accent);
+        --dsw-alias-interactive-bg-hover-accent: rgba(var(--edge-accent-rgb), 0.22);
+        --dsw-alias-border-l3: #4f534f;
+        --dsw-alias-border-l4: #5f6460;
+        --edge-btn-muted: #3a3c38;
+      }
+      /* ---------- Signal yellow everywhere (light: visible but soft) ---------- */
+      body {
+        --dsw-alias-interactive-bg-hover: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-alias-interactive-bg-active: rgba(var(--edge-accent-rgb), 0.26);
+        --dsw-alias-interactive-bg-hover-solid: var(--edge-accent);
+        --dsw-alias-bg-multi-select: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-alias-bg-skeleton: rgba(var(--edge-accent-rgb), 0.12);
+        --dsw-alias-markdown-citation: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-alias-markdown-code-block-banner: rgba(var(--edge-accent-rgb), 0.10);
+        --dsw-alias-markdown-code-segment-selected: rgba(var(--edge-accent-rgb), 0.22);
+        --dsw-alias-markdown-code-segment-unselected: rgba(var(--edge-accent-rgb), 0.06);
+        --dsw-alias-markdown-inline-code: rgba(var(--edge-accent-rgb), 0.14);
+        --dsw-alias-markdown-tag: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-scrollbar-bg-l1: transparent;
+        --dsw-alias-scrollbar-bg-l2: transparent;
+        --dsw-alias-scrollbar-hover-l1: var(--edge-accent);
+        --dsw-alias-scrollbar-hover-l2: var(--edge-accent);
+        --dsw-specific-sidebar-nav-item-active: rgba(var(--edge-accent-rgb), 0.16);
+        --dsw-specific-sidebar-nav-item-hover: rgba(var(--edge-accent-rgb), 0.12);
+      }
+      body[data-ds-dark-theme] {
+        --dsw-alias-interactive-bg-hover: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-interactive-bg-active: rgba(var(--edge-accent-rgb), 0.28);
+        --dsw-alias-interactive-bg-hover-solid: var(--edge-accent);
+        --dsw-alias-bg-multi-select: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-bg-skeleton: rgba(var(--edge-accent-rgb), 0.14);
+        --dsw-alias-markdown-citation: rgba(var(--edge-accent-rgb), 0.20);
+        --dsw-alias-markdown-code-block-banner: rgba(var(--edge-accent-rgb), 0.12);
+        --dsw-alias-markdown-code-segment-selected: rgba(var(--edge-accent-rgb), 0.26);
+        --dsw-alias-markdown-code-segment-unselected: rgba(var(--edge-accent-rgb), 0.08);
+        --dsw-alias-markdown-inline-code: rgba(var(--edge-accent-rgb), 0.18);
+        --dsw-alias-markdown-tag: rgba(var(--edge-accent-rgb), 0.22);
+        --dsw-alias-scrollbar-bg-l1: transparent;
+        --dsw-alias-scrollbar-bg-l2: transparent;
+        --dsw-alias-scrollbar-hover-l1: var(--edge-accent);
+        --dsw-alias-scrollbar-hover-l2: var(--edge-accent);
+        --dsw-specific-sidebar-nav-item-active: rgba(var(--edge-accent-rgb), 0.20);
+        --dsw-specific-sidebar-nav-item-hover: rgba(var(--edge-accent-rgb), 0.16);
+      }
+      input, textarea, [contenteditable='true'] {
+        caret-color: var(--edge-accent);
+      }
+      :focus-visible {
+        outline: 2px solid var(--edge-accent) !important;
+        outline-offset: 1px;
+      }
+      a {
+        text-decoration-thickness: 1px;
+      }
+      a:hover {
+        text-decoration-color: var(--edge-accent);
+      }
+      body[data-ds-dark-theme] a:hover {
+        color: var(--edge-accent);
+      }
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-thumb {
+        border-radius: 0;
+        background: var(--edge-line);
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--edge-accent) !important;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      /* ---------- Hover text contrast (reference page inversion) ---------- */
+      /* Note: plain buttons are excluded — their own fill/text color must survive hover
+         (e.g. yellow toggle button keeps black text; white-on-dark send button stays white). */
+      :is([role='tab'], [role='menuitem'], [role='option'], [role='link'], [role='treeitem'], [role='checkbox'], [role='switch'], [role='radio'], [role='combobox'], [class*='nav-item' i], [class*='menu-item' i], [class*='list-item' i], [class*='session-item' i], [class*='workspace-item' i], [class*='search-result' i], [class*='item' i], [class*='tab' i], [class*='card' i], [class*='row' i], [class*='tool' i], [class*='composer' i]):hover {
+        color: var(--dsw-alias-label-primary) !important;
+      }
+      /* ---------- Workspace browser rows (ui-sidebar) ---------- */
+      /* Hash-free rebuild of the old .YDXeBa_* rules: those class names are
+         '<hash>_suffix' CSS-module exports and 0.1.2-rc.1 rehashed every module,
+         killing all 33 pinned hashes. Matching survives on the SEMANTIC suffix
+         ('_sessionRow' etc.), scoped to the sidebar column — '_slot'/'_row' style
+         suffixes are too generic to match bare, but the sidebar column suffix is
+         unique to the layout frame (same hook findAppFrame() and the contour sheet
+         already rely on). Compound states match on substrings, NOT [class$=]: a
+         suffix match needs the WHOLE class attribute to end with the string, so
+         'x_sessionRow x_selected' would silently miss the second condition.
+         '_unselected' is safe against '_selected' here — the leading underscore
+         breaks the substring. */
+      [class$='_sidebarCol'] [class*='_slot'] {
+        color: var(--dsw-alias-brand-primary) !important;
+      }
+      [class$='_sidebarCol'] [class*='_projectRow']:hover,
+      [class$='_sidebarCol'] [class*='_sessionRow']:hover,
+      [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'],
+      [class$='_sidebarCol'] [class*='_searchResultRow']:hover,
+      [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
+        background: rgba(var(--edge-accent-rgb), 0.22) !important;
+      }
+      [class$='_sidebarCol'] [class*='_projectRow']:hover *,
+      [class$='_sidebarCol'] [class*='_sessionRow']:hover *,
+      [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'] *,
+      [class$='_sidebarCol'] [class*='_searchResultRow']:hover *,
+      [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] * {
+        color: #000 !important;
+      }
+      /* ---------- Light mode: workspace folder / icon buttons ink ---------- */
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_folder'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_chevron'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_arrow'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_iconButton'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_searchButton'],
+      body:not([data-ds-dark-theme]) [class$='_sidebarCol'] [class*='_clearButton'] {
+        color: #101110 !important;
+      }
+      /* ---------- Dark mode: solid signal-yellow inversions ---------- */
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_projectRow']:hover,
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow']:hover,
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'],
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow']:hover,
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
+        background: var(--edge-accent) !important;
+      }
+      /* WHY '_badge' not bare 'badge': app CSS-module badges are '<hash>_badge'
+         (zf92ZW_badge footer, dlU_AG_badge …), but third-party plugins name
+         their own widgets without the underscore word boundary —
+         dsh-codearts-auth paints a 280px .dim-jh-badgePop account card whose
+         EVERY class contains 'badge', so the bare substring hover turned the
+         whole popup solid yellow. Same lesson as the '_add' hook (see
+         selector-guard part 3). */
+      body[data-ds-dark-theme] [class*='_badge' i]:hover,
+      body[data-ds-dark-theme] [class*='_badge' i][data-active] {
+        background: var(--edge-accent) !important;
+      }
+      /* ---------- Dark mode: icon buttons (plus / ellipsis / stop / actions) ---------- */
+      /* The cordis approval trio is EXCLUDED here. Those three buttons carry their own
+         solid fill (signal yellow for approve, error red for decline) from the approval
+         block below, so a signal-yellow glyph renders yellow-on-yellow — an invisible
+         check. A 'body[data-ds-dark-theme] [attr]' selector (0,2,1) also outranks the
+         plain '[data-cordis-approve]' (0,1,0) rules below, so source order cannot undo it:
+         the exclusion has to happen in this selector. Their ink is set below. */
+      body[data-ds-dark-theme] [class$='_iconButton'],
+      body[data-ds-dark-theme] [data-cordis-switch],
+      body[data-ds-dark-theme] [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]) {
+        color: var(--edge-accent) !important;
+      }
+      body[data-ds-dark-theme] [class$='_iconButton']:hover:not(:disabled),
+      body[data-ds-dark-theme] [data-cordis-switch]:hover:not(:disabled),
+      body[data-ds-dark-theme] [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]):hover:not(:disabled) {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+      }
+      /* ---------- Cordis approval buttons (allow once / allow plugin / decline) ---------- */
+      /* Each button is a solid chip, so its glyph must contrast with its OWN fill:
+         black check on signal yellow, white X on error red. The icons are
+         fill="currentColor" svg paths, so 'color' alone drives the glyph — but the
+         svg/path are also targeted explicitly, because any inherited-color rule that
+         wins on a descendant would otherwise repaint the glyph and hide it again. */
+      [data-cordis-approve],
+      [data-cordis-approve-plugin],
+      [data-cordis-approve] svg,
+      [data-cordis-approve-plugin] svg,
+      [data-cordis-approve] svg path,
+      [data-cordis-approve-plugin] svg path {
+        color: #101110 !important;
+        fill: currentColor !important;
+      }
+      [data-cordis-approve],
+      [data-cordis-approve-plugin] {
+        background: var(--edge-accent) !important;
+      }
+      [data-cordis-decline],
+      [data-cordis-decline] svg,
+      [data-cordis-decline] svg path {
+        color: #fff !important;
+        fill: currentColor !important;
+      }
+      [data-cordis-decline] {
+        background: var(--dsw-alias-state-error-primary) !important;
+      }
+      /* The second check of the double-check icon is dimmed to .7 opacity by the panel's
+         own stylesheet; on the solid chip keep both strokes at full ink. */
+      [data-cordis-approve-plugin] [class$='_doubleCheck'] svg {
+        opacity: 1 !important;
+      }
+      [data-cordis-approve]:hover:not(:disabled),
+      [data-cordis-approve-plugin]:hover:not(:disabled) {
+        background: var(--edge-accent-deep) !important;
+      }
+      [data-cordis-decline]:hover:not(:disabled) {
+        background: #d6281d !important;
+      }
+      /* ---------- 审批弹窗：全屏白条 + 上下遮罩（Endfield 寻访确认框） ----------
+         The shipped panel is a rounded warn-bordered card parked inside the
+         composer column (max-width: --dsh-chat-content-width). The reference
+         dialog is a different shape entirely: a PAPER BAND that runs from the
+         left screen edge to the right, vertically centred, with the dimming
+         only above and below it. That is reproduced without touching React's
+         tree: the panel's own root becomes a fixed full-viewport flex layer
+         whose translucent black background is the mask, and the card is
+         stretched to the band. The band paints opaque over the middle of the
+         mask, so the darkening only ever shows above and below it — the
+         「上下有遮罩，不是全屏」 shape, with zero extra DOM.
+         Selectors are hash-free by project law (test/selector-guard.test.js):
+         the root is pinned by its SEMANTIC data-approval-key attribute (the
+         same anchor the attention watcher uses) and the children by their
+         CSS-module SUFFIXES, each rule scoped under the root so a generic
+         '_card' / '_body' elsewhere in the app is untouched.
+         position:fixed escapes the composer column's width cap and the
+         frame's overflow clip; no ancestor between the seat and the viewport
+         carries a transform/filter, and if a future one did, the band simply
+         stays in flow — degraded position, never a broken dialog. */
+      [data-approval-key] {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 1000;
+        display: flex !important;
+        flex-direction: column;
+        justify-content: center;
+        align-items: stretch;
+        padding: 0 !important;
+        background: rgba(6, 6, 6, 0.62);
+      }
+      /* The band: square, full-bleed, paper. The zero-radius pass in round
+         mode would restore the app's --dsw-radius-xl here, and a rounded band
+         contradicts the reference — pin it flat with priority. */
+      [data-approval-key] > [class$='_card'] {
+        width: 100%;
+        max-width: none !important;
+        box-sizing: border-box;
+        border: none !important;
+        border-radius: 0 !important;
+        background: var(--edge-paper) !important;
+        box-shadow: none !important;
+        padding: 26px 24px 22px !important;
+      }
+      /* 「等待审批」 strip: the reference top line is a bare centred caption,
+         not a tinted bar — drop the warn fill, keep the dot + copy. */
+      [data-approval-key] [class*='_strip'] {
+        justify-content: center;
+        background: transparent !important;
+        padding: 0 0 6px !important;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+      }
+      [data-approval-key] [class*='_body'] {
+        align-items: center;
+        text-align: center;
+        padding: 4px 0 0 !important;
+        gap: 8px !important;
+      }
+      [data-approval-key] [class*='_headline'] {
+        font-size: 17px;
+        line-height: 1.5;
+      }
+      [data-approval-key] [class*='_command'] {
+        text-align: center;
+        word-break: break-all;
+      }
+      /* Two stadium actions straddling the band's lower half, cancel-left /
+         confirm-right like the reference. The blanket square pass
+         (body:not(.theme-endfield-round) [class], 0,2,1 !important) and the
+         plain button rule both try to flatten these, so every radius here
+         rides (0,2,2) with !important — and the stadium holds in BOTH corner
+         modes, exactly like the balance pill. corner-shape: round is what
+         actually draws the 「半圆」: the host roots corner-shape at
+         superellipse(1.5), which renders even a correctly clamped 999px
+         radius as a squircle with ~3/4-radius caps (measured on Chrome 154:
+         a 36px button drew 14px caps), so the declaration must be undone
+         right here, on the same element that asks for the stadium. */
+      [data-approval-key] [class*='_actionRow'] {
+        justify-content: center;
+        gap: 28px;
+        padding: 22px 0 2px !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button {
+        flex: none;
+        min-width: 190px;
+        padding: 9px 26px !important;
+        border-radius: 999px !important;
+        corner-shape: round !important;
+        border: none !important;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+      }
+      /* 拒绝 = the dark capsule with a white ✕; 允许一次 = the signal-yellow
+         capsule with the ◎ target. Ink-on-accent contrast is the same pairing
+         test/palette-contrast.test.js pins at AA for every other solid chip. */
+      body [data-approval-key] [class*='_actionRow'] button:first-child {
+        background: #33312e !important;
+        color: #f5f5f0 !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:first-child:hover:not(:disabled) {
+        background: #46433f !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child {
+        background: var(--edge-accent) !important;
+        color: #101110 !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child:hover:not(:disabled) {
+        background: var(--edge-accent-deep) !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:disabled {
+        opacity: 0.45;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:first-child::after {
+        content: '✕';
+        margin-left: 10px;
+        font-weight: 700;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child::after {
+        content: '◎';
+        margin-left: 10px;
+      }
+      /* ---------- 完全权限确认框：通栏白条（左右到屏幕边缘）+ 上下遮罩 ----------
+         The 「确认启用完全权限？」 box is NOT the approval panel above: it is
+         the shared ui-primitives Modal (a portal on <body>: role=presentation
+         root > mask + role=dialog card) wrapped by RiskConfirmation, whose
+         ONLY semantic mark is the _confirmation class it adds to the dialog.
+         Reference shape (Endfield's own confirm dialog): the paper band runs
+         edge to edge HORIZONTALLY only — vertically it is one content-high
+         strip centred in the viewport, the existing full-viewport mask —
+         already there, already behind the card — shows above and below it,
+         and the capsule pair STRADDLES the band's bottom edge (upper half on
+         paper, lower half over the dim). NOT a full-screen white takeover,
+         and the band stays the bright paper in the dark palette too. Scoping is exact: every rule
+         hangs under [role='dialog'][class*='_confirmation'], and the one
+         rule that must reach the shared root (its 24px side padding would
+         strand the band short of the screen edges) addresses it through
+         :has() so plain modals elsewhere keep the app's compact card.
+         This module's class names put the semantic word in the MIDDLE
+         (_header_o6lrb_71), unlike the suffix form used above, so the child
+         hooks are [class*='_word'] substrings — still hash-free and still
+         pinned by test/selector-guard.test.js. */
+      [role='presentation']:has(> [role='dialog'][class*='_confirmation']) {
+        padding: 0 !important;
+      }
+      [role='dialog'][class*='_confirmation'] {
+        width: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        box-sizing: border-box;
+        gap: 16px;
+        /* no bottom padding: the capsule pair is the last content, so the box
+           ends at the capsules and the band can stop through their middle */
+        padding: 28px 0 0 !important;
+        border: none !important;
+        /* flat band in BOTH corner modes: the square pass already zeroes it,
+           and round mode must not hand back --dsw-radius-panel */
+        border-radius: 0 !important;
+        /* The reference band is the bright paper in BOTH palettes — in the dark
+           scheme the app's paper token is #101110, so var(--edge-paper) painted
+           a dark strip and the band stopped reading as 白条. Pinned literal
+           #f5f5f0 (the theme's Endfield white) instead. The fill covers all but
+           the bottom 18px of the box — half of the 36px capsule — so the caps
+           straddle the band's bottom edge: upper half on paper, lower half over
+           the dim mask that already sits behind the card. */
+        background: linear-gradient(#f5f5f0, #f5f5f0) 0 0 / 100% calc(100% - 18px) no-repeat !important;
+        /* A box shadow would wrap the whole box and float under the hanging
+           caps; drop-shadow follows the PAINTED silhouette — band edge and
+           capsule shapes — which is the shadow the reference draws. */
+        box-shadow: none !important;
+        filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
+        font-family: var(--edge-font);
+      }
+      /* Ink side of the paper: in the dark palette the app's labels are
+         #f5f5f0 (paper-on-dark) and would vanish on the white band, so the
+         dialog scope re-declares the label tokens as ink — every var() the
+         copy references flips at once, while elements carrying their own
+         colour (a danger-red warning line) keep it. The explicit hooks catch
+         the title and close glyph even if they switch token names. */
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] {
+        --dsw-alias-label-primary: #101110;
+        --dsw-alias-label-secondary: #4a4c48;
+        --dsw-alias-label-primary-bluish: #101110;
+        color: #101110;
+      }
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] [class*='_title'],
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] [class*='_body'],
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] [class*='_close'] {
+        color: #101110 !important;
+      }
+      /* The dark scheme needs a DARKER dim. The app's mask token is black at
+         50% (light 24%), which over the #101110 page leaves the transcript
+         behind the band fully legible — the dim reads as grey haze, not
+         blackout, so the band stops floating. Pinned to black at 80% so the
+         band sits on near-black like the reference. Scoped to this modal's
+         root only (the mask element itself is hash-named; the only hash-free
+         mark it carries is aria-hidden) — every other modal keeps the app's
+         own dim, and the light palette is untouched. */
+      body[data-ds-dark-theme] [role='presentation']:has(> [role='dialog'][class*='_confirmation']) > [aria-hidden='true']::after {
+        background: rgba(0, 0, 0, 0.8) !important;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_header'] {
+        position: relative;
+        justify-content: center;
+        padding: 0 56px !important;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_title'] {
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-align: center;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_close'] {
+        position: absolute;
+        right: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_body'] {
+        align-items: center;
+        gap: 16px;
+        margin-top: 0;
+        padding: 0 24px !important;
+      }
+      /* The warning copy and the checkbox row stay left-aligned (they are
+         paragraphs), but the column of them is centred on the band. */
+      [role='dialog'][class*='_confirmation'] [class*='_warning'],
+      [role='dialog'][class*='_confirmation'] [class*='_acknowledgement'] {
+        max-width: 640px;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_acknowledgement'] {
+        margin-top: 0;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_acknowledgement'] input {
+        accent-color: var(--edge-accent);
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_footer'] {
+        justify-content: center;
+        gap: 28px;
+        padding: 0 !important;
+      }
+      /* Same capsule pair as the approval band — cancel dark, confirm signal
+         yellow. The (0,3,1)+!important route keeps the stadium alive through
+         the blanket square pass, exactly like [data-approval-key] above. The
+         confirm button is disabled until the checkbox is ticked; the app's
+         own disabled paint is replaced with a dim so the yellow never turns
+         into an app-grey slab. corner-shape: round undoes the host's
+         superellipse(1.5) root default — without it the 999px radius draws
+         as a squircle, not the reference's semicircular caps. */
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction'],
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
+        flex: none;
+        min-width: 190px;
+        padding: 9px 26px !important;
+        border-radius: 999px !important;
+        corner-shape: round !important;
+        border: none !important;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction'] {
+        background: #33312e !important;
+        color: #f5f5f0 !important;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']:hover {
+        background: #46433f !important;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
+        background: var(--edge-accent) !important;
+        color: #101110 !important;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:hover:not(:disabled) {
+        background: var(--edge-accent-deep) !important;
+      }
+      /* Disabled until the checkbox is ticked. The app dims disabled buttons
+         with element-level opacity — but this capsule straddles TWO backdrops,
+         and translucent yellow goes chalky over the white band and muddy olive
+         over the dim below it: one button, two dirty colours, read as 灰色.
+         So the disabled look is painted part by part at FULL opacity instead:
+         the fill is baked to the exact colour translucent yellow makes over
+         the white band (color-mix with the band paper — the upper half then
+         matches the old 45%-over-paper look exactly), the label drops its
+         alpha, and the keyline/disc dim through their own pseudo opacity. Both
+         halves render identically and the yellow never turns grey. */
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:disabled {
+        opacity: 1 !important;
+        background: color-mix(in srgb, var(--edge-accent) 42%, #f5f5f0) !important;
+        color: rgba(16, 17, 16, 0.45) !important;
+        box-shadow: none;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:disabled::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:disabled::after {
+        opacity: 0.35;
+      }
+      body [role='dialog'][class*='_confirmation'] button:disabled {
+        opacity: 0.45;
+      }
+      /* Reference dressing for both capsule pairs (approval band + this box):
+         a thin light keyline inset ~3px inside the silhouette, the trailing
+         icon sitting in its own disc, and a soft drop shadow — the Endfield
+         dialog's capsules all carry these three. The keyline and the disc are
+         rounded shapes, so they pin corner-shape: round against the host's
+         superellipse(1.5) default just like the capsule itself. */
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::after {
+        content: '✕';
+        font-weight: 700;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
+        content: '◎';
+      }
+      body [data-approval-key] [class*='_actionRow'] button,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction'],
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
+        position: relative;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+      }
+      body [data-approval-key] [class*='_actionRow'] button::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::before {
+        content: '';
+        position: absolute;
+        inset: 3px;
+        border-radius: 999px !important;
+        corner-shape: round !important;
+        border: 1px solid rgba(245, 245, 240, 0.32);
+        pointer-events: none;
+      }
+      /* On the accent capsule the keyline reads white (paper-on-yellow in the
+         reference); on the dark capsule the same ink-white at lower alpha. */
+      body [data-approval-key] [class*='_actionRow'] button:last-child::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::before {
+        border-color: rgba(255, 255, 255, 0.7);
+      }
+      /* The trailing glyph lives in its own disc: darker-than-button for the
+         dark capsule (white ✕), ink disc with accent glyph for the yellow one
+         — the reference's ◎ target. */
+      body [data-approval-key] [class*='_actionRow'] button::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        margin-left: 10px;
+        border-radius: 999px !important;
+        corner-shape: round !important;
+        font-size: 11px;
+        line-height: 1;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:first-child::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::after {
+        background: #211f1d;
+        color: #f5f5f0;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
+        background: #1c1b19;
+        color: var(--edge-accent);
+      }
+      /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
+      [class*='tableScroll' i] th,
+      [class*='table' i] th {
+        background: var(--edge-soft) !important;
+        border-bottom-color: var(--edge-line) !important;
+      }
+      [class*='tableScroll' i] td,
+      [class*='table' i] td {
+        border-bottom-color: var(--edge-line) !important;
+      }
+      tbody tr:hover,
+      tbody tr:hover *,
+      [class*='table' i] tbody tr:hover,
+      [class*='table' i] tbody tr:hover *,
+      [class*='tableScroll' i] tbody tr:hover,
+      [class*='tableScroll' i] tbody tr:hover * {
+        color: var(--dsw-alias-label-primary) !important;
+        background: color-mix(in srgb, var(--edge-accent) 15%, var(--dsw-alias-bg-base)) !important;
+      }
+      /* Text selection keeps the full accent, visibly distinct from row hover. */
+      /* ---------- New session button (sidebar) ---------- */
+      [class$='_newSession'] {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+        border-color: var(--edge-accent) !important;
+      }
+      body:not(.theme-endfield-round) [class$='_newSession'] {
+        border-radius: 0 !important;
+      }
+      [class$='_newSession']:hover,
+      [class$='_newSession']:focus-visible {
+        color: #000 !important;
+        background: var(--edge-accent-deep) !important;
+        border-color: var(--edge-accent-deep) !important;
+      }
+      [class$='_newSession'] svg {
+        color: #000 !important;
+      }
+      [class$='_newSessionLabel'] {
+        color: #000 !important;
+      }
+      /* ---------- Badge hover: signal-yellow inversion (reference .kpi:hover) ---------- */
+      /* '_badge' (underscore word boundary) for the same reason as the dark-mode
+         rule above: bare 'badge' substring-matches third-party plugin classes
+         (dsh-codearts-auth .dim-jh-badgePop popup + all its children). */
+      [class*='_badge' i]:hover,
+      [class*='_badge' i]:hover *,
+      [class*='_badge' i][data-active],
+      [class*='_badge' i][data-active] * {
+        color: #000 !important;
+      }
+      /* ---------- Cordis action buttons (run/stop) ---------- */
+      /* Approval chips excluded again: they already own a solid fill, and this blanket
+         hover would repaint the decline chip yellow and re-tint the approve glyphs. */
+      [data-cordis-switch]:hover:not(:disabled),
+      [class*='actionButton' i]:not([data-cordis-approve]):not([data-cordis-approve-plugin]):not([data-cordis-decline]):hover:not(:disabled) {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+      }
+      body:not(.theme-endfield-round) [data-cordis-switch],
+      body:not(.theme-endfield-round) [class*='actionButton' i] {
+        border-radius: 999px !important;
+        /* Same squircle trap as the approval stadium above: 999px only reads
+           as a pill when the corner SHAPE is round. */
+        corner-shape: round !important;
+      }
+      /* ---------- Session header actions (agent preset / subagent / jobs) ---------- */
+      [class$='_trigger']:hover:not(:disabled),
+      [class$='_trigger'][aria-expanded='true'],
+      [class$='_trigger']:focus-visible {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+      }
+      /* ---------- Agent-preset header chip: accent fill, stock geometry ---------- */
+      /* Hash-free scope for the old .SVAs4q_label: the chip is the preset label the
+         agent-preset plugin registers into the "conversation.session.header.actions"
+         slot. A bare [class*='_label'] is PROHIBITED here: it was tried first and it
+         yellowed plain list labels (产物 / settings / jobs names), which is why this
+         was hash-pinned in the first place.
+
+         DOM measured off the running 0.1.5-rc.2 GUI (not inferred):
+
+           div.pI_x6G_centerCol
+             > header.wSkVaW_header
+                 > div.wSkVaW_titleRow
+                   > div.wSkVaW_titleCluster
+                     > div.wSkVaW_headerActions
+                       > div                  <- the slot's own entry wrapper.
+                         > span.SVAs4q_label     It has NO class at all, so it
+                           > svg.SVAs4q_icon     cannot be named either.
+
+         Two silent-failure lessons are baked in here — a selector that matches
+         nothing reports nothing, so both cost a shipped bug:
+           1. The chip is NOT a child of _header; it is four levels down. Every '>'
+              between the header and the chip encodes how many wrappers upstream
+              happens to render, and upstream has now added wrappers twice.
+           2. The chip's own parent is a class-less wrapper, so the depth cannot be
+              collapsed onto a named container either.
+         The scope therefore STOPS at the actions container and the chip is picked
+         out by a property of the chip itself: it is the only _label in that slot
+         carrying an icon. The jobs rows render text-only _label spans and the
+         schedule module declares no _label local at all, so the scope still does
+         exactly what it exists for. */
+      [class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg) {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+        padding: 0 12px !important;
+      }
+      body:not(.theme-endfield-round) [class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg) {
+        border-radius: 0 !important;
+      }
+      [class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg) svg,
+      [class$='_centerCol'] [class$='_header'] [class$='_headerActions'] [class*='_label']:has(> svg) [class*='_icon'] {
+        opacity: 1 !important;
+        color: #000 !important;
+      }
+      /* DELIBERATELY NOT STRETCHED. This rule used to carry flex:1 1 auto and
+         max-width:none, and an earlier attempt of this fix also flattened the slot
+         wrapper (display:contents) and grew _headerActions, to reproduce the old
+         "chip fills the action row" look. On the real 0.1.5-rc.2 header that turns
+         the chip into a full-width yellow BAR across the top of the conversation
+         (measured: 923px of a 976px row) — nothing like the stock chip it is
+         replacing, and reported straight back as "现在变成一个长条了".
+         The theme's job here is the ACCENT, not the geometry: the chip keeps its
+         stock size/hit area (height, 180px cap and ellipsis included) and only its
+         colours change. Everything that made it grow is gone — do not reintroduce
+         flex/max-width/display overrides without looking at it on the real page. */
+      /* ================= dark compaction notice + residual blues ================= */
+      /* Dark mode: warm label grays (compaction notice title/summary/sep used bluish defaults) */
+      body[data-ds-dark-theme] {
+        --dsw-alias-label-tertiary: #9a9d98;
+        --dsw-alias-label-caption: #a4a6a1;
+        --dsw-alias-label-dimmed: #70736f;
+        --dsw-alias-label-primary-dimmed: #d8d9d5;
+        --dsw-alias-label-primary-inverted: #101110;
+      }
+      /* Preset menu descriptions readable without hover in dark */
+      body[data-ds-dark-theme] [class$='_itemDesc'] {
+        color: #c5c7c2 !important;
+      }
+      /* Light + dark: warm the remaining bluish-gray surfaces / buttons / code blocks */
+      body {
+        --dsw-alias-bg-layer-3: #dcddd6;
+        --dsw-alias-bg-module-platform: #f2f2ec;
+        --dsw-alias-markdown-code-block: #ecece6;
+        --dsw-alias-button-elevated-fill: #f2f2ec;
+        --dsw-alias-button-floating-fill: #f2f2ec;
+        --dsw-alias-button-floating-hover: #e8e8e2;
+        --dsw-alias-button-ghost-active-fill: #dcddd6;
+        --dsw-alias-button-ghost-active-hover: #d8d9d5;
+        --dsw-alias-button-ghost-active-border: #b6b8b3;
+        --dsw-alias-button-primary-hover: #2a2b28;
+        --dsw-alias-button-contrast-fill: #3a3c38;
+        --dsw-alias-tooltip-bg: #2a2b28;
+        --dsw-specific-input-major: #f2f2ec;
+        --dsw-specific-selector: #e8e8e2;
+        --dsw-specific-tip: #e8e8e2;
+        --dsw-static-blue-400: #757874;
+        --dsw-static-blue-450: var(--edge-accent);
+        --dsw-static-blue-500: #101110;
+        --dsw-alias-label-quaternary: #6a6d68;
+        --dsw-alias-label-error: #ff3b30;
+        --dsw-alias-label-inverse: #101110;
+        --dsw-alias-line-secondary: #d8d9d5;
+        --dsw-alias-separator-primary: #9a9d98;
+        --dsw-alias-border-secondary: #b6b8b3;
+        --dsw-alias-bg-primary: #f2f2ec;
+        --dsw-alias-interactive-bg-primary: var(--edge-accent);
+        --dsw-alias-fill-l2: #dcddd6;
+        --dsw-alias-fill-tsp-secondary: #dcddd6;
+      }
+      body[data-ds-dark-theme] {
+        --dsw-alias-bg-layer-3: #2c2e2a;
+        --dsw-alias-bg-module-platform: #2c2e2a;
+        --dsw-alias-bg-layer-2: #1e201d;
+        --dsw-alias-markdown-code-block: #181a18;
+        --dsw-alias-button-elevated-fill: #3a3c38;
+        --dsw-alias-button-floating-fill: #343633;
+        --dsw-alias-button-floating-hover: #3a3c38;
+        --dsw-alias-button-ghost-active-fill: #343633;
+        --dsw-alias-button-ghost-active-hover: #3f413d;
+        --dsw-alias-button-ghost-active-border: #5f6460;
+        --dsw-alias-button-primary-hover: var(--edge-accent-deep);
+        --dsw-alias-button-contrast-fill: #f5f5f0;
+        --dsw-alias-tooltip-bg: #2a2b28;
+        --dsw-specific-input-major: #202220;
+        --dsw-specific-selector: #2c2e2a;
+        --dsw-specific-tip: #2c2e2a;
+        --dsw-static-blue-400: #9a9d98;
+        --dsw-static-blue-450: var(--edge-accent);
+        --dsw-static-blue-500: #f5f5f0;
+        --dsw-alias-label-quaternary: #9a9d98;
+        --dsw-alias-label-error: #ff6b61;
+        --dsw-alias-label-inverse: #101110;
+        --dsw-alias-line-secondary: #343633;
+        --dsw-alias-separator-primary: #70736f;
+        --dsw-alias-border-secondary: #4a4d49;
+        --dsw-alias-bg-primary: #181a18;
+        --dsw-alias-interactive-bg-primary: var(--edge-accent);
+        --dsw-alias-fill-l2: #242624;
+        --dsw-alias-fill-tsp-secondary: #242624;
+      }
+      /* Token meter: messages segment signal yellow, system warm gray (tools keeps purple)
+         Both suffixes are unique to the ContextMeter component, so a bare substring
+         match is safe (hash-pinned .JObwrW_* died in the 0.1.2-rc.1 rehash). */
+      [class*='_colorMessages'] {
+        --meter-tint: var(--edge-accent) !important;
+      }
+      [class*='_colorSystem'] {
+        --meter-tint: #9a9d98 !important;
+      }
+      /* Appearance theme cube selected border: warm.
+         '_selected' as a bare substring is safe-ish BECAUSE the rule only sets
+         border-color: an element without a border is untouched, and any bordered
+         selected element gets the warm line colour — which is the theme's
+         de-blue-ing goal everywhere anyway. In dark mode the broad accent rule
+         further down (0,2,0 specificity) outranks this and keeps its own colour. */
+      [class*='_selected'] {
+        border-color: var(--dsw-alias-border-l2) !important;
+      }
+      /* Hero preview badge: solid signal-yellow + black (reference accent chip).
+         '_previewBadge' is unique to the hero shell (HeroShell on 0.1.2-rc.1). */
+      [class*='_previewBadge'] {
+        color: #101110 !important;
+        background: var(--edge-accent) !important;
+        border-color: var(--edge-accent) !important;
+      }
+      /* ---------- Hero backdrop glow: brand blue -> signal yellow ----------
+         The empty-conversation hero paints one large blurred ellipse behind the
+         composer card (ConversationRoot's <HeroGlow>, class *_heroGlow, figma
+         313:14109; feGaussianBlur stdDeviation 50, ellipse 135% of the column
+         width centred 92px above its bottom edge).
+         Its colour is an SVG PRESENTATION ATTRIBUTE — fill="#6187D8"
+         fill-opacity="0.08" — not a token, so the whole "neutralize remaining
+         DeepSeek brand blues" variable block above could never reach it: a soft
+         periwinkle haze survived the theme on that one page. A presentation
+         attribute loses to ANY author CSS declaration, so restyling the ellipse
+         here is sufficient and no app source is touched.
+
+         Opacity is per scheme, and the two values are MEASURED, not picked: the
+         app's exact glow svg was rendered headless over each --dsw-alias-bg-base
+         and the ellipse core sampled, so the replacement can be matched to the
+         presence of the glow it replaces (Y = 0.2126R+0.7152G+0.0722B):
+           light #e8e8e2 (Y 231.5): 8% #6187D8 -> #DDE0E1 (Y 223.3, -8.2)
+                                    8% #fff500 -> #E9E8D0 (Y 230.4, -1.1)
+           dark  #101110 (Y  16.8): 8% #6187D8 -> #161A1F (Y  25.0, +8.2)
+                                    5% #fff500 -> #1C1C0F (Y  27.1, +10.3)
+         Light keeps 8%: yellow there is almost luminance-NEUTRAL and shifts only
+         chroma (blue channel -18), i.e. a warm breath on the paper rather than
+         the blue's grey-blue darkening — gentler than what it replaces, not
+         louder. Dark had to come down from 8%/7%: over near-black, added
+         luminance reads far more readily than subtracted blue does over cream
+         (7% measured #20200E, Y +13.4 — about 1.6x the blue's lift), and 5%
+         lands within ~2 Y of the original glow. So the hero keeps exactly the
+         depth it had, in the theme's own accent.
+         Matched on the '_heroGlow' CSS-module suffix, never on a build hash.
+         NOTE: 0.1.2-rc.1 removed the glow SVG entirely (the hero was merged into
+         ConversationRoot with no <HeroGlow>), and the module is still absent in
+         0.2 (verified against the shipped 0.2.0-rc.2 bundles), so these rules
+         match nothing today; they are kept as a self-healing hook in case
+         upstream restores it. */
+      [class*='_heroGlow'] ellipse {
+        fill: var(--edge-signal, var(--edge-accent)) !important;
+        fill-opacity: var(--edge-glow-light) !important;
+      }
+      body[data-ds-dark-theme] [class*='_heroGlow'] ellipse {
+        fill-opacity: var(--edge-glow-dark) !important;
+      }
+      /* Brand wordmark HARNESS chip: signal-yellow box + black letters (both modes) */
+      body {
+        --dsw-alias-label-primary-inverted: #101110;
+      }
+      [class*='brand'] svg rect,
+      [class$='_newSession'] svg rect {
+        fill: var(--edge-accent) !important;
+      }
+      /* Compaction notice row: soft yellow wash + accent in dark, hover = solid inversion */
+      body[data-ds-dark-theme] [class$='_compactionRow'] {
+        background: rgba(var(--edge-accent-rgb), 0.08) !important;
+        border-left: 2px solid rgba(var(--edge-accent-rgb), 0.55) !important;
+      }
+      body[data-ds-dark-theme] [class$='_compactionButton']:hover:not(:disabled),
+      body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible {
+        background: var(--edge-accent) !important;
+      }
+      body[data-ds-dark-theme] [class$='_compactionButton']:hover *,
+      body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible * {
+        color: #000 !important;
+      }
+      body[data-ds-dark-theme] [class$='_compactionButton']:hover [class$='_compactionSep'],
+      body[data-ds-dark-theme] [class$='_compactionButton']:focus-visible [class$='_compactionSep'] {
+        background: #000 !important;
+      }
+      /* ================= composer add (+) button hover inversion ================= */
+      /* Dark: + icon signal yellow at rest; on hover solid yellow bg + black icon.
+
+         SCOPED TO THE COMPOSER, like the '_arrow' rule below and for the same
+         reason: the hook is a bare SUBSTRING ('_add'), so every upstream class that
+         merely CONTAINS it was painted too. Audited against the installed bundles
+         (0.1.7-era), the collision set is:
+           RlGAzG_add             composer + button                    <- the target
+           _3nPmjq_addActions     settings > 模型 add-block WRAPPER   <- the report
+           _3nPmjq_addBlock / _addCard / _addModes / _addPanel / _addModelButton
+           _0SbxAa_add            deliverables file-diff ADDED line
+           LFNH1G_added / kuvljq_added / pFy1Ka_diffAdded /
+           haSm5q_promptDiffLineadded
+           qWvkEq_address*        sidebar-browser address bar
+           fO69Vq_addButton / _3nPmjq_addButton   (what the old ':not()' excluded)
+
+         The reported screenshot is the WRAPPER. '_addActions' is a plain <div>
+         around 添加模型提供商, so ':disabled' never applies and pointing at the
+         BUTTON hovers the wrapper as well. The theme filled the wrapper with the
+         SOLID accent while the button kept upstream's translucent wash
+         (rgba(255,245,0,.18)) plus color: label-primary — #f5f5f0 on #fff500 =
+         1.05:1, an invisible label. The button's dashed border kept drawing over
+         the fill, which is exactly what the report shows. Measured on the running
+         build (not inferred): rest -> wrapper transparent, hover -> wrapper
+         rgb(255,245,0) under a button at rgb(245,245,240).
+
+         ':not([class*='_addButton'])' could not have caught it — the wrapper is not
+         the button — and every '*_add*' container upstream adds would have had to be
+         appended to that exclusion list one bug report at a time. Scoping fixes the
+         whole family at once, the same way '_arrow' was fixed.
+
+         The scope is the pair the composer '_primary' / '_arrow' rules already use,
+         so the + keeps its inversion. '[data-composer-seat]' is included because the
+         seat declares it upstream ('data-composer-seat', an e2e anchor): a
+         '[class$=]' hook dies silently the moment upstream appends a second class to
+         that element, which is the failure mode this file has already paid for.
+
+         Note the + is the ONLY composer element whose class contains '_add'; the
+         scope cannot reach the settings wrappers, the diff lines or the address bar.
+         Verified by test/hover-check.js against real hovered pixels in both
+         palettes and both schemes. */
+      body[data-ds-dark-theme] :is([data-composer-seat], [class$='_composerSeat'], [class$='_composerHero']) [class*='_add'] {
+        color: var(--edge-accent) !important;
+      }
+      body[data-ds-dark-theme] :is([data-composer-seat], [class$='_composerSeat'], [class$='_composerHero']) [class*='_add']:hover:not(:disabled),
+      body[data-ds-dark-theme] :is([data-composer-seat], [class$='_composerSeat'], [class$='_composerHero']) [class*='_add']:focus-visible {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+      }
+      /* ================= composer primary send/stop button ================= */
+      /* Dark: hardcoded #fff icon on yellow info-fill -> black icon; hover deeper yellow.
+         Scoped to the composer (the seat band in a live conversation, the hero
+         wrapper on the empty state) and to <button>: '_primary' as a bare suffix is
+         too generic to trust with a colour flip anywhere else. */
+      body[data-ds-dark-theme] :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary'] {
+        color: #101110 !important;
+      }
+      body[data-ds-dark-theme] :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary']:hover:not(:disabled) {
+        color: #101110 !important;
+        background: var(--edge-accent-deep) !important;
+      }
+      /* ================= light-mode white-on-dark buttons keep white icon ================= */
+      /* Generic hover inversion would make the white send icon black on the dark fill.
+         (The old list also had .zGbnIq_primaryButton from settings › 模型; upstream
+         removed that class in 0.1.2-rc.1. If a replacement appears, name it here
+         explicitly rather than widening the composer scope.) */
+      body:not([data-ds-dark-theme]) :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary'],
+      body:not([data-ds-dark-theme]) :is([class$='_composerSeat'], [class$='_composerHero']) button[class*='_primary']:hover:not(:disabled) {
+        color: #fff !important;
+      }
+      /* ================= buttons the theme fills with the SOLID accent =================
+         Settings > 模型 draws its row actions with a '<hash>_secondaryButton'
+         class (zGbnIq_ in the 0.1.1 bundles), whose upstream rule is:
+             color:      var(--dsw-alias-label-primary)
+             background: var(--dsw-alias-interactive-bg-hover-solid)   (on :hover)
+         This theme maps that background token to the solid accent but upstream keeps
+         owning the foreground — so in dark mode the label stayed label-primary
+         (#f5f5f0) on signal yellow. Measured from a real screenshot of the 编辑
+         button: 63 px of #f5f5f0 sitting on #fff500 = 1.05:1, i.e. the word was
+         invisible. On 武陵青 the same pairing is 2.61:1 — still failing, just less
+         obviously, which is how it stayed hidden.
+
+         Why the existing hover-inversion rule did not already cover it: that
+         selector deliberately EXCLUDES plain buttons, because a button's own fill
+         and text must survive hover (the yellow toggle keeps black text, the
+         white-on-dark send button keeps white). This button is the case where the
+         fill comes from the THEME and the text from the APP, so it has to be named.
+
+         Scoped to the accent-filled states only, so the resting transparent button
+         keeps label-primary and stays correct in both schemes (measured 16.00:1
+         dark / 16.84:1 light). Guarded by test/settings-buttons.test.js.
+
+         .HOVERPROBE is included deliberately: a screenshot/computed-style test
+         cannot trigger :hover, so the test swaps in that class, which has the same
+         0,1,0 specificity as the pseudo-class and therefore the same cascade
+         outcome. Naming it here keeps the rule the test verifies identical to the
+         rule that ships, instead of testing a near-copy. It never matches in the
+         real app, since nothing renders that class.
+
+         The class list is not just the reported button. Auditing the installed
+         bundles for elements whose hover background is that token found SIX, and
+         three of them additionally re-assert color:label-primary in the same rule
+         (so they would fight a token-level fix):
+           *_secondaryButton   settings > 模型 row actions           <- reported
+           *_inspectButton     inspect panels (cordis / skill / tool —
+                               three modules, one semantic suffix)
+           *_arrow             attachment carousel arrow
+           *_add               composer + (already handled above)
+         All are the same defect on different screens, so they are fixed together
+         rather than one bug report at a time.
+
+         MATCHING IS HASH-FREE and matched on the SUBSTRING, not [class$=...]: an
+         attribute-suffix match requires the WHOLE class attribute to end with the
+         string, so it silently misses any element that carries a second class
+         after it (measured: [class$='_inspectButton'] failed on
+         class="gNWCoW_inspectButton HOVERPROBE"). Upstream composes class lists
+         freely AND rehashes modules between releases (0.1.2-rc.1 killed all 33
+         pinned hashes), so the semantic token embedded in the class is the only
+         durable hook — '_secondaryButton' / '_inspectButton' are specific enough
+         that no other component uses them.
+
+         '_arrow' is the one exception that needs SCOPING, not a bare match: two
+         other components (trajectory, workspace) also carry *_arrow classes and
+         take NO hover fill, so a bare match would force ink onto elements that
+         keep their normal background — black-on-near-black in dark mode,
+         inventing a new contrast bug while fixing this one. The attachment
+         carousel lives inside the composer, so the composer wrappers scope it;
+         if a hover-filled arrow ever renders elsewhere, add its scope here. */
+      :is([class*='_secondaryButton'], [class*='_inspectButton']):hover:not(:disabled),
+      :is([class*='_secondaryButton'], [class*='_inspectButton']):hover:not(:disabled) svg,
+      :is([class*='_secondaryButton'], [class*='_inspectButton']):hover:not(:disabled) svg path,
+      :is([class*='_secondaryButton'], [class*='_inspectButton']).HOVERPROBE:not(:disabled),
+      :is([class*='_secondaryButton'], [class*='_inspectButton']).HOVERPROBE:not(:disabled) svg,
+      :is([class*='_secondaryButton'], [class*='_inspectButton']).HOVERPROBE:not(:disabled) svg path,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']:hover:not(:disabled),
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']:hover:not(:disabled) svg,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']:hover:not(:disabled) svg path,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow'].HOVERPROBE:not(:disabled),
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow'].HOVERPROBE:not(:disabled) svg,
+      :is([class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow'].HOVERPROBE:not(:disabled) svg path {
+        /* Ink on accent: 16.50:1 on 谷地黄, 6.62:1 on 武陵青 — both AA. */
+        color: #101110 !important;
+        fill: currentColor !important;
+      }
+      /* ---------- light mode: the danger (移除) button needs a darker red ----------
+         Not part of the accent work, but measured by the same test and failing:
+         --dsw-alias-state-error-primary is #ff3b30, which on the settings panel
+         (#f2f2ec) is only 3.16:1 — below AA for the 12px label it paints. iOS-style
+         reds are tuned for white-on-red fills, not red-on-paper text. Darkening the
+         TEXT colour alone (the token keeps its value for fills/dots elsewhere)
+         brings it to 5.12:1 while staying unmistakably red.
+         (0.1.2-rc.1 removed the old zGbnIq_dangerButton class; the semantic suffix
+         is kept so the rule re-arms itself if the button returns under the same
+         name, and no-ops harmlessly until then.) */
+      body:not([data-ds-dark-theme]) [class*='_dangerButton'] {
+        color: #c62016 !important;
+      }
+      /* ================= dark mode: selected rows = solid signal-yellow + black text ================= */
+      /* The translucent yellow wash makes white text look muddy olive; the reference
+         inverts to black-on-signal-yellow, so selected rows get the full inversion. */
+      body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) {
+        color: #000 !important;
+        background: var(--edge-accent) !important;
+        border-color: var(--edge-accent) !important;
+      }
+      body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) *:not(svg):not(path) {
+        color: #000 !important;
+      }
+      /* ================= ask_user_question option chips ================= */
+      /* Two contrast collisions in the question card (@deepseek-ai/dsh-client-ui-user-questions),
+         both measured on a real card rather than guessed.
+
+         1) The recommended chip. Upstream paints it with
+              color: var(--dsw-alias-button-info-fill)
+              background: var(--dsw-specific-sidebar-nav-item-active-accent)
+            i.e. it uses info-fill as a FOREGROUND. This theme maps that token and the
+            nav accent to the SAME value in both modes (#101110 light / #fff500 dark),
+            so the label painted itself onto its own fill and the chip measured as a
+            single flat colour with ZERO glyph pixels. Broken in BOTH modes, not just
+            dark. Pin the pair explicitly instead of retuning either token, because
+            both are consumed as real background fills elsewhere. */
+      :is([role='radio'], [role='checkbox']) [class*='badge' i] {
+        color: #101110 !important;
+        background: var(--edge-accent) !important;
+      }
+      /* On a selected row the row itself is already solid signal yellow, so the chip
+         inverts to keep its edge instead of dissolving into the row. */
+      body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) [class*='badge' i] {
+        color: var(--edge-accent) !important;
+        background: #101110 !important;
+      }
+      /* 2) The option number ("1", "2", ...). The blanket dark inversion above
+            recolours descendant TEXT to black but cannot touch a descendant's own
+            background, so this chip kept its overlay fill
+            (--dsw-alias-bg-overlay = #1c1e1c) and rendered a black digit on
+            near-black: measured 1.25:1, i.e. the numbering vanished on the selected
+            row. Wash the chip rather than filling it, so the digit reads on yellow
+            and the chip still looks like a chip. */
+      body[data-ds-dark-theme] [class*='selected' i]:not([class*='unselected' i]) [class*='number' i] {
+        color: #101110 !important;
+        background: rgba(16, 17, 16, 0.16) !important;
+      }
+      /* ---------- Turn-status label ("Deep diving...") ----------
+         MOVED AND RE-MECHANISED ON DSH 0.2, so the recolour moved with it.
+
+         On 0.1.x the label was owned by @deepseek-ai/dsh-client-ui-conversation as
+         'Md3f7G_turnStatus' and painted as GRADIENT TEXT — a linear-gradient
+         background, -webkit-text-fill-color: transparent plus background-clip:
+         text, shimmered by animating background-position:
+
+           background: linear-gradient(90deg,
+             var(--dsw-static-deepseek-500) 0%   40%,
+             var(--dsw-static-deepseek-200) 50%,
+             var(--dsw-static-deepseek-500) 60% 100%);
+           color: #0000; -webkit-text-fill-color: transparent;
+
+         Two consequences drove the 0.1.x rules that used to live here:
+           1. A plain 'color:' CANNOT recolour that label — the transparent text
+              fill wins, so the recolour had to go through the gradient itself.
+           2. Retinting the shared --dsw-static-deepseek-* tokens would be the wrong
+              lever: --dsw-static-deepseek-500/200 also back
+              --dsw-alias-button-info-fill, --dsw-alias-state-business-primary and
+              --dsw-specific-bubble-highlight (verified in
+              dsh-client-ui-theme/styles/design-platform.css), so the theme maps
+              them to ink/paper on purpose.
+         Hence only background-image was overridden, leaving upstream's
+         background-size, background-position and shimmer animation untouched.
+
+         ON 0.2 THERE IS NO GRADIENT AND NO 'turnStatus' CLASS. The same label now
+         lives in @deepseek-ai/dsh-client-ui-chat as '<hash>_running' and is
+         masked-sweep text whose only levers are the two
+         --dsw-alias-label-deep-diving* tokens. A rule matching '[class*=
+         "turnStatus"]' can never fire on 0.2, so the recolour is carried by the
+         theme.overrideTokens layer above instead (search for
+         '--dsw-alias-label-deep-diving'). Measured on a real 0.2.0-rc.2 page with
+         the old rules still present: the token kept resolving to the app's own
+         color-mix(in srgb, #101110 70%, #172554) and the label lost the theme
+         colour entirely. test/selector-guard.test.js pins both the 0.2 class hook
+         and the token pair so this cannot silently rot again.
+
+         COLOUR CHOICE IS MEASURED, NOT PICKED BY EYE — and it did not have to be
+         re-derived for 0.2, because both tokens paint glyphs against the SAME two
+         surfaces (bg-base and bg-layer-1), and under prefers-reduced-motion the
+         sweep is effectively held inside the text. Every stop therefore still has
+         to clear WCAG AA 4.5:1 against both. Measured:
+           light bg #e8e8e2 / #f2f2ec —  #fff500 scores 1.02:1 (invisible; the naive
+             "just make it yellow" reading of this request), #8f7c00 3.38, #7d6c00
+             4.25, and #6b5d00 5.35 is the FIRST gold that clears AA (mid #3f3600
+             9.82);
+           dark  bg #101110 / #181a18 —  #fff500 15.26 (mid #a08a00 5.11), while
+             #8f7c00 falls to 4.21 and fails.
+         Hence the sweep DIPS deeper in both modes instead of lifting brighter:
+         in light mode no gold above #6b5d00 can clear AA, and in dark mode a pale
+         lift band desaturates to near-white and loses the yellow entirely.
+         Light mode is a deep gold rather than signal yellow for the same reason the
+         watermark and rail are not: on cream, #fff500 is not a colour choice, it is
+         an erasure. The 武陵青 palette swaps both stops to its own teal pair
+         (#006a6a / #003f3f light, #14d0d0 / #7ee7e7 dark) by redefining
+         --edge-status-* in its body class, so the palette flip re-resolves the
+         tokens with no JS repaint — the same var() trick as --dsw-alias-brand-primary. */
+      /* ================= boot loading screen ================= */
+      /* Fixed plate above everything, including the shell overlay layer. It exists
+         only while the boot animation plays and is removed afterwards, so none of
+         these rules match during normal use. Measurements come from the reference
+         frame (1340x731) expressed as ratios so they scale with the viewport. */
+      [data-endfield-loader] {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        background: #101110;
+        /* Not inherited from the app: the plate can paint before tokens resolve,
+           and since the theme stopped overriding the root font token it must not
+           depend on inheritance for its face either. Both the family and the
+           openType features are declared here rather than globally. */
+        color: #f5f5f0;
+        font-family: var(--edge-font);
+        font-feature-settings: "tnum" 1, "ss01" 1;
+        overflow: hidden;
+        /* Never trap the user: even mid-animation the app underneath stays usable. */
+        pointer-events: none;
+        opacity: 1;
+        /* No opacity transition: the fade is driven from JS (see finish()) because a
+           CSS transition proved not to run in every renderer this plate targets.
+           finish() also sets inline transition:none so nothing can fight it. */
+      }
+      /* Kept as a state hook (and a fallback for a renderer that never runs the JS
+         fade) — the inline opacity written by finish() is what actually animates. */
+      [data-endfield-loader][data-endfield-loader-exit] {
+        opacity: 0;
+      }
+      /* Faint industrial grid, matching the reference backdrop texture. */
+      [data-endfield-loader-tex] {
+        position: absolute;
+        inset: 0;
+        opacity: 0.55;
+        background-image:
+          repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 4px),
+          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.010) 0 1px, transparent 1px 120px);
+      }
+      /* 8px rail: dim track full height, signal-yellow fill from the top down. */
+      /* 10px rail, measured from the reference (10/1184 of the width). */
+      [data-endfield-loader-track] {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 10px;
+        background: rgba(var(--edge-accent-rgb), 0.10);
+      }
+      [data-endfield-loader-fill] {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 10px;
+        height: 0%;
+        background: var(--edge-accent);
+      }
+      /* Meter RIDES THE FILL END: its top offset is set per frame from the same eased
+         progress value that drives the fill height (see step()), so the readout
+         descends with the bar. The exact offset and the clamping are done in JS,
+         where the group's real height is known — a pure CSS percentage would let the
+         readout hang off the bottom of the screen as the fill approaches 100%.
+         Deliberately no CSS transition on the top offset: it is already updated every
+         frame, and a transition would make the readout visibly lag the bar. */
+      [data-endfield-loader-meter] {
+        position: absolute;
+        left: 26px;
+        top: 0;
+        will-change: top;
+      }
+      [data-endfield-loader][data-endfield-loader-complete] [data-endfield-loader-meter] {
+        position: fixed !important;
+        left: 26px !important;
+        top: auto !important;
+        bottom: 64px !important;
+      }
+      /* ---- completion flourish: yellow sweep to the right, then fade ----
+         Starts as the rail itself (same 10px width, same colour, same left edge) and
+         widens to cover the viewport, so the sweep reads as the finished bar flooding
+         the screen rather than a new element appearing.
+         Width and opacity are animated from JS (see finish()), deliberately NOT by a
+         CSS transition: measured in the verification renderer, a transition declared
+         here never started — no transitionrun/start/end events fired and the computed
+         width stayed at 10px well past its duration — which would leave a thin stub
+         instead of a sweep. These rules therefore only describe the resting state and
+         must not declare a width/opacity transition that would fight the JS. */
+      [data-endfield-loader-wipe] {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 10px;
+        background: var(--edge-accent);
+        opacity: 0;
+      }
+      [data-endfield-loader-tick] {
+        display: block;
+        width: 4px;
+        height: 15px;
+        background: var(--edge-accent);
+      }
+      [data-endfield-loader-pct] {
+        display: block;
+        margin-top: 7px;
+        color: var(--edge-accent);
+        font-size: 39px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -0.01em;
+        font-variant-numeric: tabular-nums;
+      }
+      [data-endfield-loader-status] {
+        display: block;
+        margin-top: 12px;
+        color: #666;
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0.02em;
+      }
+      /* ---- Poster brand block --------------------------------------------------
+         Measured from the supplied key-art (1184x685) by scanning its pixels, not
+         estimated — the ink bands on the right half of the reference are:
+           block left ink edge  x=868  -> 868/1184 = 73.3% of the width
+           right-most ink       x=1098 -> right gap 86px = 7.3% of the width
+           kicker band          y 258..260   h=3    (ratio to cap 0.10)
+           END band             y 265..293   h=29   -> cap 4.23% of plate height
+           FIELD band           y 297..325   h=29   -> line pitch 32px, 32/29 = 1.10
+           chevron band         y 498..506   x=841  -> outdent 868-841 = 27px
+           tagline band         y 543..551   h=9, run width 231px
+         The block is LEFT-aligned internally (all rows share x=868) but placed on
+         the right — that combination is what gives the reference its look; a
+         right-aligned (ragged-left) block reads completely differently.
+
+         GEOMETRY MODEL — the block is anchored by its RIGHT margin, not by a left
+         percentage. That is deliberate and is what fixes two measured faults:
+           1. A left percentage (the old --edge-rail: 73%) sets where the block
+              STARTS and lets its width run toward the right edge, so the margin
+              that a viewer actually reads as "too far right" was never controlled.
+              Anchoring 'right' makes that margin the declared quantity, and the
+              rhythm line falls out of the widest row instead of being guessed.
+           2. Sizing purely in vh made the wordmark shrink on a wide-but-short
+              window and, at the old 4.2vh, rendered the cap at 3.01% of plate
+              height against the reference's 4.23% — measurably ~70% of reference,
+              which is why it read as too small.
+         --edge-word is therefore clamp(26px, min(5.2vh, 4.8vw), 64px):
+           min(5.2vh, 4.8vw)  scales with the SMALLER axis, so neither a short nor
+                              a narrow window can push the block into the rail;
+           26px floor         keeps the sub-rows legible on a tiny plate;
+           64px ceiling       measured: without it, cap-height fell to 2.69% of H
+                              at 2560x1440 (the block visibly shrank on a large
+                              display); 64px holds it at ~3.2% and up.
+         Verified across 13 viewports from 520x900 to 2560x1440: cap-height stays
+         within 3.1-3.9% of plate height (reference 4.23%, intentionally a touch
+         under — see below) with no overflow past any edge and >=150px clearance
+         from the progress rail and its meter.
+         The block still renders slightly under reference scale on purpose: the
+         key-art is a full-bleed poster, whereas this plate flashes over an app.
+         Every row is a ratio of --edge-word, so this one value rescales the whole
+         block without disturbing the measured proportions above. The small rows
+         additionally carry a px floor — see the max() calls below. */
+      [data-endfield-loader] {
+        --edge-word: clamp(26px, min(5.2vh, 4.8vw), 64px);
+        /* Distance from the plate's right edge to the block's right edge. The %
+           term keeps it proportional on a wide display; the px term stops it
+           collapsing on a narrow one. */
+        --edge-gap: max(64px, 12%);
+      }
+      [data-endfield-loader-brand] {
+        position: absolute;
+        right: var(--edge-gap);
+        top: 50%;
+        transform: translateY(-50%);
+        /* No max-width: every row sets white-space: nowrap, so a width cap cannot
+           wrap them — it only clips. The block moves instead (see the --edge-gap
+           media queries) so the longest row always fits. */
+      }
+      /* Anchor to --edge-word like every other row. Without this the em below
+         resolves against the inherited root font-size (16px), which rendered the
+         kicker at 2.25x its reference size and bloated the whole block. */
+      [data-endfield-loader-kicker] {
+        display: block;
+        font-size: var(--edge-word);
+      }
+      [data-endfield-loader-kicker]::before {
+        content: 'DEEPSEEK HARNESS';
+        display: block;
+        margin-bottom: 0.5em;
+        color: #f5f5f0;
+        /* max() floor: the reference ratio alone (0.135em of the wordmark) computes
+           to ~4px on a short plate, which renders as an illegible grey smudge
+           rather than text. 9px is the smallest size this still reads at. */
+        font-size: max(9px, 0.155em);
+        font-weight: 600;
+        letter-spacing: 0.26em;
+        white-space: nowrap;
+        opacity: 0.95;
+      }
+      /* Both rows: the negative margin cancels Arial's left side bearing so the
+         INK edge lands on the rhythm line, not the glyph box edge. */
+      [data-endfield-loader-word] {
+        display: block;
+        margin-left: -0.055em;
+        color: #f5f5f0;
+        font-size: var(--edge-word);
+        font-weight: 900;
+        /* 0.80, not 1.10: the reference pitch/cap of 1.10 is measured between
+           INK tops, while line-height spans the full em box (ascender+descender),
+           which for Arial-900 is ~1.38x the cap height. 1.10 as a line-height
+           renders a visibly loose 1.52 ink pitch. */
+        line-height: 0.80;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+      }
+      [data-endfield-loader-word1]::before { content: 'END'; }
+      [data-endfield-loader-word2]::before { content: 'FIELD'; }
+      /* ---- detail cluster: chevron outdented into the left margin ---- */
+      [data-endfield-loader-detail] {
+        display: block;
+        position: relative;
+        margin-top: 1.9em;
+        font-size: var(--edge-word);
+      }
+      [data-endfield-loader-chev] {
+        position: absolute;
+        left: -0.26em;
+        top: 0.02em;
+        width: 0.12em;
+        height: 0.24em;
+      }
+      /* Two stacked chevrons drawn from borders — no glyph, no font dependency. */
+      [data-endfield-loader-chev]::before,
+      [data-endfield-loader-chev]::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        width: 0.10em;
+        height: 0.10em;
+        border-left: 0.028em solid var(--edge-accent);
+        border-bottom: 0.028em solid var(--edge-accent);
+        transform: rotate(-45deg);
+      }
+      [data-endfield-loader-chev]::before { top: 0; }
+      [data-endfield-loader-chev]::after { top: 0.09em; }
+      [data-endfield-loader-sub]::before {
+        content: 'EDGE INTELLIGENCE THEME';
+        display: block;
+        color: #8a8d88;
+        /* Same legibility floor as the kicker: measured, the bare ratio rendered
+           this row 3px tall — visible as a blur, not readable as words. */
+        font-size: max(9px, 0.135em);
+        font-weight: 500;
+        letter-spacing: 0.12em;
+        white-space: nowrap;
+      }
+      [data-endfield-loader-seq]::before {
+        content: 'TERRA RESEARCH COMMISSION / BOOT SEQUENCE';
+        display: block;
+        margin-top: 0.4em;
+        color: #6a6d64;
+        font-size: max(8px, 0.125em);
+        font-weight: 500;
+        letter-spacing: 0.10em;
+        white-space: nowrap;
+      }
+      [data-endfield-loader-squares] {
+        display: grid;
+        grid-template-columns: repeat(6, 0.115em);
+        gap: 0.04em;
+        margin-top: 0.30em;
+      }
+      [data-endfield-loader-squares] i {
+        display: block;
+        height: 0.05em;
+        background: #2e302d;
+      }
+      [data-endfield-loader-squares] i[data-on] {
+        background: var(--edge-accent);
+      }
+      /* Tagline closes the block on the same rhythm line.
+         Reference: cap 11px across 232px, i.e. cap/width 0.38 — unreachable in
+         Arial, where an 11px-cap run of this string measures 299px (340px at the
+         reference's tracking). The source art uses a condensed face, and probing
+         the renderer showed Arial Narrow genuinely resolves here (245px vs Arial's
+         299px on the same probe), so it is used with Arial as the fallback: on a
+         host without it the run simply sets wider in Arial and still fits, because
+         the size below is a ratio of the wordmark rather than a fixed px. */
+      [data-endfield-loader-tag]::before {
+        content: 'OVER THE FRONTIER / INTO THE FRONT';
+        display: block;
+        margin-top: 1.05em;
+        color: #f5f5f0;
+        font-family: "Arial Narrow", Arial, sans-serif;
+        font-size: max(10px, 0.34em);
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+      }
+      [data-endfield-loader-tag] {
+        display: block;
+        font-size: var(--edge-word);
+      }
+      /* Narrow windows: pull the block toward the right edge so the measured ratios
+         survive instead of the text clipping. Only the margin changes — --edge-word
+         already scales itself off the smaller viewport axis, so the wordmark needs
+         no per-breakpoint override. */
+      @media (max-width: 1100px) {
+        [data-endfield-loader] { --edge-gap: max(48px, 9%); }
+      }
+      @media (max-width: 760px) {
+        [data-endfield-loader] { --edge-gap: max(28px, 5%); }
+      }
+      /* Reduced motion is handled in finish(), which skips the sweep/fade entirely
+         and removes the plate outright; nothing here needs to disable a transition,
+         since the plate no longer declares one. */
+      /* Settings page root (the settings.section slot's own wrapper div, the one
+         element of that panel this theme gets to name). Declaring the theme face
+         here means every row, hint and button inside it inherits it BY
+         CONSTRUCTION, without touching the app's root font token. The class is
+         stable and additive, so it is safe to target. It also carries no colours:
+         the panel keeps taking its ink and surfaces from app tokens, which is
+         what keeps it readable on both schemes and with the theme switched off
+         (see test/settings-off.test.js). */
+      .endfield-settings {
+        font-family: var(--edge-font);
+      }
+      /* Settings page group headers (rendered by the settings.section slot).
+         The label is accent ink that stays AA on both surfaces: light mode uses
+         the darkened accent stops (--edge-status-light: #6b5d00 / #006a6a),
+         dark mode the bright ones (--edge-status-dark: #fff500 / #14d0d0) — the
+         same measured pairs the turn-status shimmer uses. The palette class
+         flips both variables, so the header follows the palette for free. */
+      .endfield-settings-group-title {
+        color: var(--edge-status-light);
+      }
+      body[data-ds-dark-theme] .endfield-settings-group-title {
+        color: var(--edge-status-dark);
+      }
+      /* ================= 雷霆大字 (娱乐模式) =================
+         The task-boundary announcement. Fixed, centred, above the shell overlay
+         layer and the app's own dialogs but BELOW the boot plate (2147483000), so
+         a boot animation still wins the screen it owns.
+
+         WHITE, EXPLICITLY. The request asks for white text, and white is the one
+         thing this theme's own tokens cannot promise: --dsw-alias-label-primary is
+         INK (#101110) in light mode, so inheriting it would print the word in near
+         black on cream. The glyph colour is therefore a literal #fff in both
+         schemes, and legibility over unknown page content is bought by the plate's
+         own scrim plus a dark text shadow rather than by the page background.
+
+         THE SCRIM ALPHA IS MEASURED, NOT PICKED BY EYE — and the first value was
+         WRONG. Shipping 0.28 looked fine in dark mode (18.92:1) and was almost
+         invisible in light: white on ink-over-cream measured 2.29:1 on bg-base and
+         2.11:1 on bg-layer-1, i.e. the same "on cream, #fff500 is not a colour
+         choice, it is an erasure" failure this theme already documents for the
+         watermark and the turn-status label — except here it was pure white. Caught
+         by rendering the plate and measuring the pixels (test/thunder-shot.js), not
+         by reading the CSS.
+
+         Measured white-vs-scrimmed-surface, ink #101110 over each light surface:
+             alpha   bg-base #e8e8e2   bg-layer-1 #f2f2ec   dark #101110
+             0.28         2.29:1            2.11:1            18.92:1
+             0.40         3.13:1            2.90:1            18.92:1
+             0.50         4.17:1            3.89:1            18.92:1
+             0.55         4.85:1            4.55:1            18.92:1
+         0.55 is the first step where BOTH light surfaces clear 4.5:1 — the AA bar
+         for ordinary body text, which is deliberate headroom for a word whose own
+         bar is only the 3:1 large-text floor. Dark mode is unaffected either way
+         (ink over near-black is the same colour), so the light surfaces are what
+         set this number.
+
+         pointer-events:none on both layers keeps every click, selection and scroll
+         underneath working while the word is up — the plate is a caption, not a
+         modal. Click-to-dismiss does NOT change that: the listener lives on the
+         DOCUMENT in the capture phase (see showThunder), so a press both clears the
+         word and reaches whatever the user aimed at. Giving this layer
+         'pointer-events: auto' to catch the click itself would turn it into a
+         full-screen click-eater for 3 seconds — verified by injecting exactly that
+         and watching test/thunder-dismiss.test.js fail on hit-testing. */
+      [data-endfield-thunder] {
+        position: fixed;
+        inset: 0;
+        z-index: 2147482000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        background: rgba(16, 17, 16, 0.55);
+        animation: endfield-thunder-plate 3000ms linear 1 both;
+      }
+      [data-endfield-thunder-word] {
+        /* 大字: heavy, oversized, and scaled off the viewport so it stays a
+           screen-filling statement at any window size rather than a fixed 48px that
+           looks large on a phone and small on a 4K panel. Same clamp discipline as
+           --edge-word on the boot plate. */
+        font-family: "Arial Black", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: clamp(44px, 13vw, 176px);
+        font-weight: 900;
+        line-height: 1;
+        letter-spacing: 0.12em;
+        /* The trailing letter-spacing would otherwise push the word off-centre. */
+        text-indent: 0.12em;
+        color: #fff;
+        white-space: nowrap;
+        text-align: center;
+        /* Ink halo: what makes white type survive on cream paper, where a pure
+           white glyph would otherwise have almost no edge. */
+        text-shadow:
+          0 0 2px rgba(16, 17, 16, 0.55),
+          0 4px 18px rgba(16, 17, 16, 0.65),
+          0 0 46px rgba(var(--edge-accent-rgb), 0.45);
+        animation: endfield-thunder-word 3000ms cubic-bezier(0.16, 1, 0.3, 1) 1 both;
+      }
+      /* The slam: overshoot in, hold, then fade. Keyframe percentages are the 3s
+         hold expressed as one timeline, so a single animation covers entry, hold and
+         exit and nothing has to be re-timed in JS. */
+      @keyframes endfield-thunder-word {
+        0%   { opacity: 0; transform: scale(2.4); }
+        7%   { opacity: 1; transform: scale(0.94); }
+        12%  { transform: scale(1); }
+        80%  { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.06); }
+      }
+      @keyframes endfield-thunder-plate {
+        0%   { opacity: 0; }
+        5%   { opacity: 1; }
+        80%  { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      /* The STATIC path: the word appears at full size and opacity, holds its 3s,
+         then the JS timer removes it. Two independent reasons reach this attribute
+         (see showThunder): the 动画 sub-switch being off — which is the DEFAULT — and
+         the OS asking for reduced motion. Driving it from an attribute rather than a
+         media query alone is what makes the default state testable in a browser that
+         cannot toggle the OS preference from script.
+
+         'opacity: 1' is load-bearing, not redundant: the animated rules start at
+         'opacity: 0' and rely on the keyframes to bring the word in, so cancelling
+         only 'animation' would leave a permanently invisible plate. */
+      [data-endfield-thunder][data-endfield-thunder-still],
+      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-word] {
+        animation: none;
+        opacity: 1;
+        transform: none;
+      }
+      /* Belt-and-braces for reduced motion: the attribute above already covers it,
+         but this keeps the guarantee in CSS even if a future edit reaches the DOM
+         without going through showThunder(). */
+      @media (prefers-reduced-motion: reduce) {
+        [data-endfield-thunder],
+        [data-endfield-thunder] [data-endfield-thunder-word] {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* ---------- 顶部余额胶囊 ----------
+         The reference HUD plate: a near-black stadium/pill — BOTH ends fully
+         rounded (radius = half the height), independent of the theme's
+         直角/圆角 setting because the reference capsule itself is always a
+         pill. Sits at the TOP CENTER of the frame, below the window chrome,
+         over the header — which is why it is pointer-events:none (a caption,
+         not a control: the same discipline as the thunder plate above) and
+         why its z-index stops short of the app's own modals.
+
+         Layout is traced 1:1 off the reference capsule: a white three-layer
+         square mark (a fabricated glyph would be tofu on machines without that
+         face), the ¥ money big and white, the countdown run small and grey —
+         「低谷时段剩余42:08:13」, with the 高峰/低谷 label INSIDE that grey run
+         so the countdown's subject travels with it — then 「低谷已过33%」 pushed
+         to the right end by the auto margin, and a round dial closing the pill.
+
+         The dial is the one piece that carries a value: a dark disc (a shade
+         deeper than the pill, so it reads as inset), an accent ring swept
+         clockwise from 12 o'clock for the elapsed share of the window, and an
+         accent clock face whose needle points at ~1 o'clock. The ring is a
+         conic-gradient masked down to a 4px band, so a tick writes ONE custom
+         property (--endfield-balance-sweep) and never touches a node. */
+      /* ---------- 顶部余额胶囊 stadium ----------
+         The pill's silhouette is DRAWN, not rounded: two radial-gradient discs
+         (one per end, radius = half the height, held in --endfield-balance-cap)
+         plus a linear-gradient band spanning between their centres. Why: the
+         999px border-radius route proved unreliable on a real user's renderer
+         twice over — first the 14px -> 999px write-back was lost, then a
+         settled screenshot showed squircle ends (~14px caps on a 32px pill)
+         while the dial's GRADIENT ring in the same frame rendered a perfect
+         circle. Gradients are the one shape primitive that has never failed
+          here, so roundness now rides the same mechanism as the ring. The box's
+          own border-radius is pinned to 0 (inline, priority): any radius would
+          clip these gradients by the rounded box and re-expose the very
+          squircle this route exists to survive. @property registers the cap
+          radius as a real length so the collapse tweens it on the SAME 420ms
+          curve as height — cap(t) = height(t)/2 every frame, so the drawn
+          stadium matches the morphing box at every instant. The 0.5px feather
+          on each disc edge is anti-aliasing against the hard rectangle seam. */
+      @property --endfield-balance-cap {
+        syntax: '<length>';
+        inherits: false;
+        initial-value: 16px;
+      }
+      [data-endfield-balance] {
+        --endfield-balance-cap: 16px;
+        position: fixed;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 900;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        /* The reference pill is a 448x48 stadium; rebuilt at 32px tall with the
+           same 9.3:1 proportion it reads as a slim chip next to the header tabs
+           instead of a slab across them. The min-width holds the wide gap
+           between the countdown and the elapsed read, and the min() keeps a
+           narrow window from being overrun: min-width beats max-width in CSS,
+           so a bare 300px would win even against calc(100vw - 16px). */
+        min-width: min(300px, calc(100vw - 16px));
+        max-width: calc(100vw - 16px);
+        height: 32px;
+        padding: 0 1px 0 14px;
+        /* ZERO on purpose: the background is always clipped by the border
+           radius, and the host's root corner-shape: superellipse(1.5) drew
+           that clip as a squircle — measured: a settled 32px pill with ~14px
+           caps. With no radius to clip by, the gradient layers below ARE the
+           silhouette — see the section comment. */
+        border-radius: 0;
+        /* Covers every circle INSIDE the pill (badge, ring, clock, brand
+           mark): they inherit the host's superellipse(1.5) like everything
+           else, and a 999px radius only draws a true disc when the shape is
+           round. The pill itself needs no shape — its radius is zero. */
+        corner-shape: round;
+        /* The silhouette is DRAWN (see the section comment): two discs at the
+           ends + a band between their centres. A plain colour would be clipped
+           by the host's superellipse corner shape; this way the outline IS the
+           gradient, correct wherever gradients paint. The transparent stops
+           repeat the fill colour at alpha 0 — plain 'transparent' would fringe
+           grey through the 0.5px feather. */
+        background:
+          radial-gradient(circle at var(--endfield-balance-cap) 50%,
+            #312f30 calc(var(--endfield-balance-cap) - 0.5px),
+            rgba(49, 47, 48, 0) var(--endfield-balance-cap)),
+          radial-gradient(circle at calc(100% - var(--endfield-balance-cap)) 50%,
+            #312f30 calc(var(--endfield-balance-cap) - 0.5px),
+            rgba(49, 47, 48, 0) var(--endfield-balance-cap)),
+          linear-gradient(#312f30, #312f30) var(--endfield-balance-cap) 0 / calc(100% - 2 * var(--endfield-balance-cap)) 100% no-repeat;
+        color: #f1f1ec;
+        font-family: var(--edge-font);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0.01em;
+        pointer-events: none;
+        user-select: none;
+        white-space: nowrap;
+        /* Boot pose -> balance row. The box moves (height, width floor,
+           padding), the drawn caps move with it (--endfield-balance-cap is a
+           registered <length>, so it interpolates on the SAME 420ms curve as
+           height — cap(t) = height(t)/2 every frame), and the two contents
+           cross-fade in place, so the collapse reads as ONE object changing
+           shape instead of two layouts swapping. No border-radius entry: the
+           radius is 999px for the pill's whole life and the engine clamps it
+           to half the CURRENT height every frame, where it works. */
+        transition:
+          height 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
+          min-width 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
+          padding 420ms cubic-bezier(0.22, 0.72, 0.2, 1),
+          --endfield-balance-cap 420ms cubic-bezier(0.22, 0.72, 0.2, 1);
+      }
+      /* Boot pose: the brand panel from the reference — 448x72 — held while the
+         first account answer is still in flight. JS drops the attribute once the
+         balance lands (or the cap expires) and the pill animates down into its
+          row. The pose grows the drawn caps with the box (--endfield-balance-cap
+          16px -> 36px on the same 420ms curve as height), so the silhouette is
+          a stadium at every instant without ever asking border-radius for it. */
+      [data-endfield-balance][data-endfield-balance-boot] {
+        --endfield-balance-cap: 36px;
+        height: 72px;
+        min-width: min(448px, calc(100vw - 16px));
+        padding: 0 22px;
+      }
+      /* The rows keep their layout under the brand block (opacity only), so the
+         collapse never reflows twice.
+         The FADE is declared on a rule that survives the pose, and only the
+         held-down 'opacity: 0' lives under the boot attribute. A transition runs
+         only if the property is still declared on the element AFTER the change:
+         declaring both halves inside the boot-attribute selector meant removing
+         the attribute deleted the transition along with the 'opacity: 0', so on
+         the very frame the collapse started the balance row snapped to full
+         opacity while the brand was still mid-fade — two reads overprinted for
+         a fifth of a second, and the pose read as a glitch instead of a morph
+         (measured: row opacity 0 -> 1 in one sample while height was still
+         72px). The short delay is what makes it a cross-fade: the brand (220ms)
+         is most of the way out before the numbers (170ms) are a third of the way
+         in, and both are done well inside the 420ms the box takes to shrink, so
+         the whole collapse ends as one gesture. */
+      [data-endfield-balance] > :not([data-endfield-balance-brand]) {
+        transition: opacity 170ms linear 90ms;
+      }
+      [data-endfield-balance][data-endfield-balance-boot] > :not([data-endfield-balance-brand]) {
+        opacity: 0;
+      }
+      [data-endfield-balance-brand] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        /* Measured off the reference: the mark and the copy sit 30px apart, and
+           the lockup as a whole rides 28px left of centre (hence the padding on
+           the right, which leaves centring — and its narrow-window behaviour —
+           intact). */
+        gap: 30px;
+        padding-right: 56px;
+        opacity: 0;
+        transition: opacity 220ms linear;
+        pointer-events: none;
+      }
+      [data-endfield-balance][data-endfield-balance-boot] [data-endfield-balance-brand] {
+        opacity: 1;
+      }
+      /* Same concentric-square mark as the capsule icon, but on a disc — the
+         brand pose shows the round lockup, the collapsed row the square one. */
+      [data-endfield-balance-brand-mark] {
+        position: relative;
+        flex: none;
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        background: #f1f1ec;
+      }
+      [data-endfield-balance-brand-mark]::before {
+        content: '';
+        position: absolute;
+        inset: 5px;
+        border-radius: 2px;
+        background: #312f30;
+      }
+      [data-endfield-balance-brand-mark]::after {
+        content: '';
+        position: absolute;
+        inset: 9px;
+        border-radius: 1px;
+        background: #f1f1ec;
+      }
+      [data-endfield-balance-brand-copy] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      /* Tracked-out uppercase is how this theme draws a technical label (the
+         loader kicker does the same), so the brand line stays in --edge-font
+         rather than importing a second family for one row. */
+      [data-endfield-balance-brand-kicker] {
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        color: #8d8c88;
+        white-space: nowrap;
+      }
+      [data-endfield-balance-brand-title] {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: #f1f1ec;
+        white-space: nowrap;
+      }
+      /* Three concentric squares, measured off the reference at 16x: a 14px
+         white rounded square, a 6px dark core punched into it, and a 3px white
+         pip at the centre — all pseudo-elements, no glyph and no image. */
+      [data-endfield-balance] [data-endfield-balance-icon] {
+        position: relative;
+        flex: none;
+        width: 10px;
+        height: 10px;
+        margin-right: 4px;
+        border-radius: 3px;
+        background: #f1f1ec;
+      }
+      [data-endfield-balance] [data-endfield-balance-icon]::before {
+        content: '';
+        position: absolute;
+        inset: 2px;
+        border-radius: 2px;
+        background: #312f30;
+      }
+      [data-endfield-balance] [data-endfield-balance-icon]::after {
+        content: '';
+        position: absolute;
+        inset: 3.5px;
+        border-radius: 1px;
+        background: #f1f1ec;
+      }
+      /* ¥ + integer + fraction are one unbroken run: the reference has no gap
+         between the sign and the digits, so the group owns the baseline. */
+      [data-endfield-balance] [data-endfield-balance-money] {
+        display: inline-flex;
+        align-items: baseline;
+        flex: none;
+      }
+      [data-endfield-balance] [data-endfield-balance-currency],
+      [data-endfield-balance] [data-endfield-balance-int] {
+        font-size: 14px;
+        font-weight: 700;
+        color: #f1f1ec;
+        /* Tabular figures on the element itself — never a global font/font-family
+           declaration (see docs/engineering-notes.md: the :root font incident). */
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1, 'ss01' 1;
+      }
+      [data-endfield-balance] [data-endfield-balance-frac] {
+        font-size: 9px;
+        font-weight: 600;
+        color: #a2a1a2;
+        font-variant-numeric: tabular-nums;
+      }
+      /* ---------- 渠道额度 group (dsh-codearts-auth) ----------
+         The wallet and the channel read occupy the same visual slot, so they
+         are two exclusive states of one pill, switched by the
+         data-endfield-credit-mode attribute: 'wallet' (default — DeepSeek
+         numbers) hides the channel group, 'credits' hides the wallet group.
+         Attribute-driven, not class-driven, so no per-poll class churn and
+         the markup owns both halves up front. The pricing window and the
+         elapsed-pct read are wallet-only for the same reason the money group
+         is: peak/off-peak is a DeepSeek API concept, and in credits mode the
+         right-hand slot shows the channel's consumption share instead. */
+      [data-endfield-balance] [data-endfield-credit-money] {
+        display: none;
+        align-items: baseline;
+        flex: none;
+      }
+      [data-endfield-balance] [data-endfield-credit-pct] {
+        display: none;
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f1f1ec;
+        font-variant-numeric: tabular-nums;
+      }
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-balance-money],
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-balance-window],
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-balance-pct] {
+        display: none;
+      }
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-credit-money] {
+        display: inline-flex;
+      }
+      [data-endfield-balance][data-endfield-credit-mode='credits'] [data-endfield-credit-pct] {
+        display: inline;
+      }
+      [data-endfield-balance] [data-endfield-credit-channel] {
+        margin-right: 5px;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: #8d8c88;
+        white-space: nowrap;
+      }
+      [data-endfield-balance] [data-endfield-credit-int] {
+        font-size: 14px;
+        font-weight: 700;
+        color: #f1f1ec;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1, 'ss01' 1;
+      }
+      [data-endfield-balance] [data-endfield-credit-unit] {
+        margin-left: 3px;
+        font-size: 9px;
+        font-weight: 600;
+        color: #a2a1a2;
+      }
+      /* 低谷时段剩余hh:mm:ss — one grey caption, not three tokens. */
+      [data-endfield-balance] [data-endfield-balance-window] {
+        font-size: 9px;
+        font-weight: 500;
+        color: #a2a1a2;
+      }
+      [data-endfield-balance] [data-endfield-balance-phase] {
+        color: inherit;
+      }
+      /* Off-peak is the cheap window; a peak label is the one thing the user
+         should be able to catch out of the corner of an eye, so it turns
+         accent. */
+      [data-endfield-balance] [data-endfield-balance-phase][data-endfield-balance-phase-peak='1'] {
+        color: var(--edge-accent);
+      }
+      [data-endfield-balance] [data-endfield-balance-remain] {
+        font-variant-numeric: tabular-nums;
+      }
+      /* The elapsed read: money-sized and white, held at the right end by the
+         auto margin that swallows the pill's free space. */
+      [data-endfield-balance] [data-endfield-balance-pct] {
+        margin-left: auto;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f1f1ec;
+        font-variant-numeric: tabular-nums;
+      }
+      /* Measured gap from the reference: the elapsed read stops 14px short of the
+         dial, which the pill's own gap alone does not cover. */
+      [data-endfield-balance] [data-endfield-balance-badge] {
+        position: relative;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 3px;
+        width: 27px;
+        height: 27px;
+        border-radius: 999px;
+        background: #262425;
+      }
+      /* Progress ring: the accent segment covers the elapsed share starting at
+         12 o'clock; the mask keeps only the outer 4px band. */
+      [data-endfield-balance] [data-endfield-balance-ring] {
+        position: absolute;
+        inset: 1.5px;
+        border-radius: 999px;
+        background: conic-gradient(
+          from 0deg,
+          var(--edge-accent) 0deg var(--endfield-balance-sweep, 0deg),
+          transparent var(--endfield-balance-sweep, 0deg) 360deg
+        );
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+      }
+      [data-endfield-balance] [data-endfield-balance-clock] {
+        position: relative;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--edge-accent);
+      }
+      /* The needle: hangs from the face's centre up to ~1 o'clock, in the
+         disc's own dark so it reads as a hole cut in the accent. */
+      [data-endfield-balance] [data-endfield-balance-clock]::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1.5px;
+        height: 3px;
+        margin: -3px 0 0 -0.75px;
+        border-radius: 1px;
+        background: #262425;
+        transform: rotate(25deg);
+        transform-origin: 50% 100%;
+      }
+      /* Phones: drop the 「时段剩余hh:mm:ss」 tail first and keep the
+         高峰/低谷 label. A seconds-precision countdown is the read nobody
+         glances at on a one-hand viewport, and it is also the WIDEST token
+         run in the pill — at phone widths (390–480px) it alone would push
+         the capsule past the header tabs it floats over. The breakpoint is
+         the conventional phone ceiling, comfortably above the pill's 300px
+         natural width, so desktop and tablet layouts are untouched.
+         The width floor goes with the tail it was sized for: 300px exists to
+         hold the gap between the countdown and the elapsed share, so leaving
+         it in place would only stretch the pill back out with whitespace
+         (margin-left: auto on the elapsed read swallows every spare pixel).
+         Zero lets the box shrink-to-fit its remaining reads, and the fixed
+         6px gap owns the spacing. The boot pose keeps its own wider floor:
+         that rule carries the -boot attribute and outranks this one, so the
+         opening panel still morphs. */
+      @media (max-width: 480px) {
+        [data-endfield-balance] {
+          min-width: 0;
+        }
+        [data-endfield-balance] [data-endfield-balance-remain-run] {
+          display: none;
+        }
+      }
+      /* Narrow windows: the countdown is the least load-bearing read of the
+         three, so it is the one that yields before a nowrap overflow can push
+         the dial and the elapsed share off the right edge. The breakpoint sits
+         just under the pill's natural 300px + 16px slack, so the reference
+         layout is untouched at every width it actually fits in. */
+      @media (max-width: 316px) {
+        [data-endfield-balance] [data-endfield-balance-window] {
+          display: none;
+        }
+      }

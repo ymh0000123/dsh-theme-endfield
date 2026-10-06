@@ -10,6 +10,7 @@
 
 - [变量必须声明在 body 而不是 :root](#变量必须声明在-body-而不是-root)
 - [字体令牌是应用的公共接口，不是主题的开关](#字体令牌是应用的公共接口不是主题的开关)
+- [源码是真源，产物是拼出来的](#源码是真源产物是拼出来的)
 - [样式表是一整个模板字符串](#样式表是一整个模板字符串)
 - [层叠与挂载点](#层叠与挂载点)
 - [等高线背景](#等高线背景)
@@ -209,6 +210,52 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 3. **主题字体栈在前，`--dsw-font-family` 作为末尾兜底**。这个顺序是量出来的，不是猜的：本机同一串文字在应用令牌下渲染 **Segoe UI**（81.688px），在主题字体栈下渲染 **Arial**（84.516px）。若把令牌放在前面，加载屏、水印、设置面板会全部换脸，品牌块那套按 Arial 量出来的比例（见「启动加载屏」）随之失效。放在末尾既保住主题自有表面的现有观感，又保留「应用侧配置了根字体仍能到达主题元素」的协议含义；宿主没有 Arial / Narrow / PingFang / YaHei 时也仍然落在应用字体栈上，而不是某个任意 generic。
 4. 加载屏与水印的 `tnum` / `ss01` **跟着字体一起下移到元素自身**（不能再挂 `body`），否则挂件会被继承，加载屏也会失去它排版时依赖的等宽数字与变体字形。
 5. 回归测试 `test/font-scope.test.js`：在同一页里同时放一个 `font-family:inherit` 的第三方挂件与主题的全部自有表面，断言挂件拿回应用字体、`font-feature-settings` / `font-variant-ligatures` 为默认值，而加载屏与水印仍在主题字体（Arial）上且各自带着 `tnum` + `ss01`。把旧写法注回去，这条测试与 `check.js` 会同时变红。
+
+---
+
+## 源码是真源，产物是拼出来的
+
+`client.js` 曾经是 8986 行 / 547KB 的单文件，`index.js` 1263 行。拆分的**目标只有一个：让人能在正确的位置改代码**，因此定下的硬约束是 —— **产物逐字节不变**。
+
+### 为什么不做逻辑重构
+
+看起来更「干净」的做法是把 `apply()` 里那 352 个顶层声明重新组织成模块、用参数传递依赖。评估后放弃：
+
+- **跨分区引用密集成网**。设置页那一段引用 109 个外部名字，峰谷定价段跨区引用 48 个，durable gate 36 个。真按模块切，等于要同时改这几百处引用。
+- **测试是冲着产物写的**。40 多个测试用 `fs.readFileSync('client.js')` 切片断言（余额胶囊、渠道额度、峰谷窗口、等高线、水印层叠……），另有若干把 `client.js` 复制到临时目录、用 `<script src>` 在无头 Chrome 里跑。产物一变形，这些断言就得整体重写。
+- **DSH 只加载一个 bundle**。`package.json` 的 `exports["./client"]` 指向单文件，运行时没有模块解析这一步，拆成多个文件并不减少任何加载次数。
+
+所以拆分做的是**切片**：产物内容一个字不改，源码按功能分区存进 `src/`，由构建脚本按清单拼回去。
+
+### 拼接规则
+
+`scripts/lib/bundle-build.js` 是唯一的拼接器，`scripts/build-client.js` / `scripts/build-host.js` 只是它的两个入口。规则与原因：
+
+| 规则 | 原因 |
+| --- | --- |
+| 顺序来自 `src/client/manifest.js` / `src/host/manifest.js` | 顶层 `const` 之间有 TDZ 依赖，顺序不能随手改 |
+| 片段路径相对 manifest 所在目录解析 | 这样 `src/client/manifest.js` 里才能写 `'../styles/theme.css'` |
+| 每个片段先归一化成 LF 再拼 | 编辑器保存、`core.autocrlf` 各行其是，归一化后结果才是确定的 |
+| 产物行尾沿用现有产物文件（CRLF 工作区就写 CRLF） | 否则 `git diff` 会把整个文件标成改动 |
+| 非末段片段必须以换行结尾 | 否则两段粘成一行，而 `--check` 只能告诉你「第一个差异字符」 |
+| 拼完先 `new vm.Script(out)` 解析一次 | 拼接错误在语法层就报出来，不用等浏览器 |
+| `--check` 严格相等，并报出第一个差异所在行 | 只报「有差异」没用，要能直接跳到出问题的那一行 |
+
+片段名前缀就是执行顺序：`00-shell-head` 文件头与 `insertCss`，`1x` 偏好存储与观察器，`14-durable-gate` 落盘门，`20`/`22` 等高线，`3x` 启动屏 / 雷霆大字 / 胶囊 / 渠道额度，`4x` 峰谷定价与挂载点，`5x` 设置页，`99-shell-tail` 收尾。
+
+### 等高线 worker 是特例
+
+`src/contour-worker.js` + `src/contour-webgl.js` 由 `npm run build:worker` 把 9 个 kernel 函数抠出来，嵌成 `src/client/21-contour-worker.embed.js` —— **那是生成物，不要手改**。它整块是一行 `JSON.stringify` 出来的字符串，所以 `check.js` 的样式表护栏看不见它；改了 `src/contour-worker.js` 就必须重新生成。
+
+### 门禁与报错
+
+三个 `--check` 串在 `npm run check` 与 `npm run test:ci` 的链首，CI 的 static job 里另有一步。产物过期时直接说清第一个差异行：
+
+```text
+client.js is stale (first difference at line 4096); run npm run build:client
+```
+
+照提示跑那条命令即可；**不要直接改产物文件**，下一次 `--check` 还是会红。
 
 ---
 
@@ -823,3 +870,62 @@ fO69Vq_addButton / _3nPmjq_addButton    （旧 `:not()` 排除的两个）
 ### 无头环境的 rAF 不能用来采样性能
 
 headless 会挂起 / 合并 rAF，导致无论怎么设虚拟时钟都只采到 **n=1**，而没有分布支撑的数字不算测量。`contour-perf.test.js` 因此按函数名把算法源码从 `client.js` 里**原样切出**后在紧循环里计时，并丢弃前两次采样（冷启动含 JIT 预热，否则会把启动成本报成稳态成本）。
+
+### 幂等标志会把「改了代码但页面没变」变成一次静默空转
+
+`apply()` 顶部的 `window.__dshThemeEndfieldApplied` 布尔守卫是为重复挂载写的（boot loader + cordis 组合都会挂一次）。但 `dsh-client-modules` 的 `rebuilt()` / HMR 会把新 bundle 送进**已经跑过旧 build** 的长驻标签页，而这条路**不会走 dispose**：页面同时持有旧样式表和旧构建写下的布尔标志，于是新代码的 `apply()` 在第一行返回，旧 CSS 一直挂到标签页关闭。不报错、不写日志，用户看到的就是「弹窗还是没变」，而源码、门禁、`node check.js` 全是绿的。
+
+修法是给标志配一个 build marker（`SHEET_MARKER`，同时以注释形式落在样式表首行）：同 build 重复挂载照旧短路，而「标志在、marker 缺失或不等」正是重建换装的签名，`apply()` 会先摘掉旧样式表再正常安装。marker 写在样式表里还有个副作用是好事——挂的是哪一版可以直接读出来：
+
+```js
+document.querySelector('style[data-plugin="dsh-theme-endfield"]').textContent.slice(0, 80)
+```
+
+`test/theme-sheet-refresh.test.js` 分两部分：源码侧钉住接线（每次置标志必须同时记 marker、dispose 必须一起释放、样式表首行注释必须等于 marker 字面量——`check.js` 禁止样式表里出现模板插值，两者只能靠这条断言同步）；真实 DOM 侧跑三段行为（全新挂载 = 一张表带 marker；同 build 重复 `apply()` 不换表；删掉 marker 后再 `apply()` 必须换表）。live 复核（`live-probe15.js`）在真实 GUI 上重放了长驻标签页：保留标志、删掉 marker、把已挂样式表改成旧内容，再执行服务器当场下发的 bundle，旧表被摘掉、新表带上 marker。
+
+同源的投递事实一并记下：combo 的 `rev` 随内容变（本次 `b0a8114dfd13` → `94f9c40e7ee8`），所以**普通重载**就能拿到新代码；但**旧 rev 的 URL 是 `immutable, max-age=31536000`**，只要标签页还捧着旧 URL，浏览器永远不会自己去取新的——这也是「服务端明明是新代码、页面却是旧样式」的一半原因（另一半就是上面那个标志）。
+
+### 形状结论只能来自像素，命中测试量不出 border-radius
+
+「两端到底是半圆还是圆角矩形」这件事上，`document.elementFromPoint` 逐行扫左边界给出的是**假象**：同一套例程对准一个显式 `border-radius: 999px` 的纯 `div`，得到的 profile 与真按钮**逐字节相同**（`maxOffset=10`、`firstMaxIndex=35`）。该几何下命中测试根本分辨不出半径，第一版据此报出的「radius 6px / ROUNDED RECTANGLE」是测量假象。
+
+可用的判据是截图逐行找最左深色像素（自己用 `zlib` 解码 PNG + 逐行反滤波即可，不必引依赖），而且**三条对照必须在同一张截图里**：真按钮 / `border-radius:999px` / `border-radius:10px`，同为 190×36。结果真按钮与 999px 只差前 3 行 1–4px（由 664.5 这种次像素对齐解释），而 10px 那条的直线段长达 32 设备行，明显分离。标定也吻合：r=18px 时「边界 <0.33px」的平台约 10 个设备行（实测 12），r=10px 时约 32 行（实测 32）。**两条教训**：形状类断言不要走命中测试；对照实验里被测变量之外的每一维都必须相同。
+
+### 「渲染器不可靠」是个昂贵的结论，先查投递和挂载的是哪一版
+
+余额胶囊曾经把「两端被渲染成 squircle」归因为**该渲染器不可靠**（`border-radius` 的 14px → 999px 写回被判定为不可信），于是改用两只 `radial-gradient` 圆盘加中间渐变带来画端点。径向渐变实现本身没问题（它不依赖半径命中，端点半径随高度补间也更好控），但**那个理由站不住**：本轮像素复核显示同一个渲染器把 999px 和渐变端点都渲染成了真体育场（轮廓一致，首行偏移恰好等于半径），而当时更可能的真相是 round 模式下主题的 blanket 直角化整段不生效、上游 `--dsw-radius-md` 的小圆角露了出来；再往后「已提交版本里根本没有那几条胶囊规则」又叠了一层。
+
+归因顺序因此固定为：**① 页面挂的是哪一版样式表**（marker / 与工作区逐字节比对）→ **② 投递层**（combo `rev` / 缓存头 / 是否走了 dispose）→ **③ 才轮到渲染器**。前两步都能拿到硬证据，而「渲染器不可靠」既不能证伪，又会劝退后来人对 `border-radius` 的使用。
+
+
+### 「渲染器不可靠」后来真的抓到了：是 app 根上的 `corner-shape: superellipse(1.5)`
+
+上一节的结论（「同一个渲染器把 999px 渲染成了真体育场」）只在**当时的渲染器**上成立。2026-10-06 在用户的浏览器（Chrome 154）上复核「确认启用完全权限？」胶囊时拿到了完整的因果链，两个渲染器都对，分歧在于 **CSS `corner-shape`（Chrome 139+ 实现）**：
+
+- DSH 自带的样式表里有一段 `@supports (corner-shape:superellipse(1.5)) { :root { --dsw-corner-shape: superellipse(1.5); } *, ::before, ::after { corner-shape: var(--dsw-corner-shape); } }` —— **全元素默认方圆角**，然后 app 对自己的胶囊/开关/圆点逐个 `corner-shape: round` 找补；
+- 所以 computed `border-radius: 999px`（钳到 h/2=18px）**没有任何异常**，但画出来是 superellipse 曲线：36px 按钮的圆等效端头只有 ~14px，逐行 inset 与用户截图逐点吻合（9,6,5,4,3,2）；
+- 同页对照实验：`999px`、`18px`、`9999px` 三个纯 div 画出来**逐字节相同**（拟合 r≈12.5），只有 `14px` 分离——说明钳制正确、是曲线形状被换了；补上 `corner-shape: round` 后同一按钮拟合 r=17.8，恢复真体育场；
+- 桌面端的 Chromium 若未实现 `corner-shape`，`@supports` 整段跳过， stadium 依旧为真——这就是两轮测量「都对」而结论相反的原因。
+
+主题侧的修法（本次 `corner-shape: round` 一批）：审批面板与确认框的胶囊对、Cordis 开关/动作按钮、50% 圆形化通道（avatar/spinner/dot），以及余额胶囊根规则（badge/ring/clock/brand-mark 靠继承）——**每条要「半圆/正圆」的规则必须在同一规则里声明 `corner-shape: round`**，形状只在与非零半径同元素时才有意义。在不支持该属性的渲染器上这些声明会被当作未知属性丢弃，零成本。回归守卫：`test/corner-shape.test.js`（源码级：999px/50% 规则体里必须带 `corner-shape: round`，余额胶囊家族按继承豁免）。
+
+余额胶囊「用渐变画端点」的方案因此依然成立但理由更新：它不是绕开「不可靠的渲染器」，而是绕开「宿主把圆角形状全局改成了 superellipse」这一**按规范实现的特性**。
+
+### 确认框第二轮：白条两端全宽、上下遮罩、胶囊骑在白条下沿上（2026-10-06）
+
+用户对着 Endfield 参考图复核确认框，落定三条事实：白条只横向通宽；上下是遮罩不是全屏；**胶囊对骑在白条的下沿上——上半在白条里、下半落在遮罩上**；且**深色模式下白条也得是白的**。
+
+实现上的三个关键点，都来自对真实 DOM/CSS 的核对：
+
+- **遮罩的真实来源**：Modal 的变暗不是 `_mask_o6lrb_18` 元素本身（它只出 `backdrop-filter`），而是它的 `::after` 画 `var(--dsw-alias-bg-mask-1)`（实测 `#00000080`）。胶囊下半的「落在遮罩上」因此不需要主题画任何东西——对话框盒子下缘以下的部分只要**透明**，遮罩自然透出来。
+- **骑缝的做法**：白条是背景不是伪元素——`padding-bottom: 0`（对话框盒子终止在胶囊下缘）+ `background: linear-gradient(#f5f5f0,#f5f5f0) 0 0 / 100% calc(100% - 18px) no-repeat`（18px = 36px 胶囊的半高）。用背景而不用 `z-index:-1` 伪元素，避开「绝对定位伪元素盖住流内内容」和「负 z-index 掉进祖先层叠上下文」两个坑。投影随之换成 `drop-shadow`：`box-shadow` 包住整个盒子会在悬空的下半截下面浮出一圈假影，`drop-shadow` 跟随**绘制出的剪影**（白条边缘 + 胶囊形状），正是参考图的画法。胶囊半高是从按钮实测来的（padding 9px×2 + 20px 圆盘 = 36px），18px 在 live 上验证 bandBottom 与按钮中点 delta = 0。
+- **深色模式白底黑字**：白条直接钉死字面量 `#f5f5f0`（Endfield 白；浅色 paper `#e8e8e2` 略灰，两档统一取参考图的亮白）。墨色靠**在对话框作用域内重声明 label tokens**（`body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] { --dsw-alias-label-primary: #101110; … }`）——应用文案全是 var() 引用，作用域内换 token 一次翻全所有引用，而自带颜色的元素（危险红警告行）不受影响；标题/正文/关闭按钮再补显式 `!important` 兜底。
+
+上一轮的灰白格纹角标（`--endfield-check` + 对话框 `::before/::after`）按用户要求整体移除，对话框的伪元素随之空闲。
+
+### 确认框第三轮：深色遮罩压到黑、禁用胶囊按部件减淡（2026-10-06）
+
+用户复核深色模式，报了两条：遮罩发灰；未勾选时确认胶囊「变灰而不是半透明」。两条的根都在**半透明叠了两种底**上：
+
+- **遮罩灰**：app 的遮罩 token 在深色档是黑 50%（浅色 24%），叠在 `#101110` 页面上只把内容压到中灰——实测遮罩下最亮的文字还有 rgb(118,118,116)，整片背景读作灰蒙蒙而不是压黑。修法是把确认框自己 root 里的 mask `::after` 钉到 `rgba(0,0,0,0.8)`，实测最亮内容掉到 rgb(47)，白条重新「浮」在近黑上。mask 元素本身是 hash 类名，无 hash 的抓手是「确认框 root 的直接 `aria-hidden` 子元素」（root 的孩子只有 mask + dialog）。作用域挂在 `:has(> [role='dialog'][class*='_confirmation'])` 上，其他弹窗与浅色档（保持原生 24%）不受影响。
+- **禁用胶囊灰**：app 的禁用画法是**元素级 `opacity: 0.4`**，主题原来也跟了一个 0.45——但这只胶囊骑在白条和黑遮罩两种底上，半透明黄叠白变浅卡其、叠黑变暗橄榄，一只按钮两截脏色，读作「灰」。修法是禁用态**整体不透明、按部件分别减淡**：底色烘死成「半透明黄叠白条」的等价色 `color-mix(in srgb, var(--edge-accent) 42%, #f5f5f0)`（上半截观感与旧 45% 透明完全一致），文字降到 `rgba(16,17,16,0.45)`，keyline 和 ◎ 盘用伪元素**自己的** `opacity: 0.35` 减淡，阴影去掉。两截从此同色，黄也不再变灰。
