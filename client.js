@@ -28,6 +28,27 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
+/* ---------- Build marker: new code must be able to displace old CSS ----------
+   The page-level idempotency flag (window.__dshThemeEndfieldApplied) exists
+   because the installed bundle is mounted twice on some boots (boot loader +
+   cordis composition); only the first mount may own tokens and the sheet.
+
+   A BOOLEAN flag cannot tell those duplicate mounts apart from a REBUILD
+   SWAP: dsh-client-modules puts changed bundles into a live tab through its
+   rebuilt()/HMR hook, i.e. the module is re-evaluated in a page that already
+   ran the previous build, without our dispose ever running. That page carries
+   the flag but the OLD stylesheet, so a plain `if (flag) return` froze the tab
+   on the previous CSS forever — 「代码明明改了，页面还是老样子」, with no error
+   anywhere and no amount of reloading-by-hand in between.
+
+   So the flag is paired with this marker. The window property is written ONLY
+   by this build; a pre-marker build wrote the flag alone, which makes "flag set
+   but no marker" the exact signature of a stale swap and lets apply() fall
+   through and re-install. The marker also rides in the sheet as a comment, so
+   which build is mounted can be read straight out of devtools. Bump it whenever
+   the stylesheet changes. */
+const SHEET_MARKER = 'endfield-build/2026-10-06-darker-dim'
+
 function insertCss(css) {
   // Dynamic Cordis runner provides the `styles` global; standalone bundle does not.
   if (typeof styles !== 'undefined' && styles && typeof styles.insert === 'function') {
@@ -51,12 +72,25 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     // The flag is RELEASED by the run's dispose (see the ctx.effect cleanup below), so
     // a dispose followed by a re-apply in the same page session mounts the theme again
     // instead of staying dead until a hard reload.
-    if (typeof window !== 'undefined' && window.__dshThemeEndfieldApplied) return
+    if (typeof window !== 'undefined' && window.__dshThemeEndfieldApplied) {
+      // Same build mounted again (boot loader + cordis composition): the first
+      // mount owns tokens/styles, so leave it alone. A DIFFERENT build means this
+      // module was swapped into a live tab by the rebuilt()/HMR path without a
+      // dispose: the old sheet is still mounted and the flag would freeze the tab
+      // on the old CSS. Drop that stale sheet and fall through to a fresh apply.
+      if (window.__dshThemeEndfieldBuild === SHEET_MARKER) return
+      try {
+        document.querySelectorAll('style[data-plugin="dsh-theme-endfield"]').forEach((old) => old.remove())
+      } catch (e) { /* no inspectable DOM (tests, non-browser host): nothing to clean */ }
+    }
     // Claim the flag only once the theme service is actually there: a boot order where
     // it is still missing must not lock the flag in place and kill every later apply.
     const theme = ctx.get('theme')
     if (theme === undefined) return
-    if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = true
+    if (typeof window !== 'undefined') {
+      window.__dshThemeEndfieldApplied = true
+      window.__dshThemeEndfieldBuild = SHEET_MARKER
+    }
 
     /* ---------- Durable preference store (replaces localStorage) ----------
        The theme's switches used to persist through `localStorage`, which DSH
@@ -4664,17 +4698,17 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       if (balanceEl !== null) return
       const el = document.createElement('div')
       el.setAttribute('data-endfield-balance', '')
-      /* The pill's silhouette is DRAWN by its background gradients (see the
-         stylesheet section): two end discs + a band, correct in every renderer.
-         border-radius must therefore be ZERO, pinned inline with priority: any
-         radius — even the 999px this file used to write — clips those gradients
-         by the rounded box, which is exactly how a renderer that mis-rounds
-         999px into a squircle stranded this capsule twice (measured: a settled
-         32px pill with ~14px caps while the dial's gradient ring in the same
-         screenshot was a perfect circle). With no clip box, nothing can shave
-         the drawn caps; the zero-radius pass and any host !important both lose
-         to an inline !important. Guarded because a jsdom-ish host hands back a
-         createElement() node whose style object carries no setProperty. */
+        /* The pill's silhouette is DRAWN by its background gradients (see the
+           stylesheet section): two end discs + a band, correct in every renderer.
+           border-radius must therefore be ZERO, pinned inline with priority: the
+           host roots corner-shape at superellipse(1.5) (Chrome 139+), and the
+           squircle it draws for any radius — even a correctly clamped 999px —
+           is exactly what stranded this capsule twice (measured: a settled
+           32px pill with ~14px caps while the dial's gradient ring in the same
+           screenshot was a perfect circle). With no clip box, nothing can shave
+           the drawn caps; the zero-radius pass and any host !important both lose
+           to an inline !important. Guarded because a jsdom-ish host hands back a
+           createElement() node whose style object carries no setProperty. */
       const bootAnimated = forceBoot === true || isBalanceBootAnimated()
       if (el.style && typeof el.style.setProperty === 'function') {
         el.style.setProperty('border-radius', '0', 'important')
@@ -4921,6 +4955,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     })
 
     disposeStyles = insertCss(`
+      /* endfield-build/2026-10-06-darker-dim — read this to tell which build's sheet is mounted.
+         Kept literal (no template interpolation): check.js requires the stylesheet literal to be
+         interpolation-free. test/theme-sheet-refresh.test.js pins it equal to SHEET_MARKER. */
       /* ================= typography: SCOPED to the theme's own elements =====
          The theme used to redeclare the app's two font TOKENS at :root:
              --dsw-font-family: Arial, ...      -> dropped, see below
@@ -5365,6 +5402,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body:not(.theme-endfield-round) [class*='actionButton' i],
       body:not(.theme-endfield-round) [class$='_iconButton'] {
         border-radius: 50% !important;
+        /* The host roots corner-shape at superellipse(1.5) (Chrome 139+ draws
+           corners as squircles). 50% of a square is only a CIRCLE when the
+           shape is round, so every re-circled element must say so too. */
+        corner-shape: round !important;
       }
       /* Hover feedback should track the pointer immediately; the app's broad
          transition rule otherwise makes colour changes feel delayed. */
@@ -5701,7 +5742,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          (body:not(.theme-endfield-round) [class], 0,2,1 !important) and the
          plain button rule both try to flatten these, so every radius here
          rides (0,2,2) with !important — and the stadium holds in BOTH corner
-         modes, exactly like the balance pill. */
+         modes, exactly like the balance pill. corner-shape: round is what
+         actually draws the 「半圆」: the host roots corner-shape at
+         superellipse(1.5), which renders even a correctly clamped 999px
+         radius as a squircle with ~3/4-radius caps (measured on Chrome 154:
+         a 36px button drew 14px caps), so the declaration must be undone
+         right here, on the same element that asks for the stadium. */
       [data-approval-key] [class*='_actionRow'] {
         justify-content: center;
         gap: 28px;
@@ -5712,6 +5758,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         min-width: 190px;
         padding: 9px 26px !important;
         border-radius: 999px !important;
+        corner-shape: round !important;
         border: none !important;
         font-size: 14px;
         font-weight: 700;
@@ -5747,14 +5794,18 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         content: '◎';
         margin-left: 10px;
       }
-      /* ---------- 完全权限确认框：同款全屏白条 + 上下遮罩 ----------
+      /* ---------- 完全权限确认框：通栏白条（左右到屏幕边缘）+ 上下遮罩 ----------
          The 「确认启用完全权限？」 box is NOT the approval panel above: it is
          the shared ui-primitives Modal (a portal on <body>: role=presentation
          root > mask + role=dialog card) wrapped by RiskConfirmation, whose
          ONLY semantic mark is the _confirmation class it adds to the dialog.
-         Same band shape: the dialog runs edge to edge on paper and the
-         existing full-viewport mask — already there, already behind the card
-         — only ever shows above and below it. Scoping is exact: every rule
+         Reference shape (Endfield's own confirm dialog): the paper band runs
+         edge to edge HORIZONTALLY only — vertically it is one content-high
+         strip centred in the viewport, the existing full-viewport mask —
+         already there, already behind the card — shows above and below it,
+         and the capsule pair STRADDLES the band's bottom edge (upper half on
+         paper, lower half over the dim). NOT a full-screen white takeover,
+         and the band stays the bright paper in the dark palette too. Scoping is exact: every rule
          hangs under [role='dialog'][class*='_confirmation'], and the one
          rule that must reach the shared root (its 24px side padding would
          strand the band short of the screen edges) addresses it through
@@ -5771,15 +5822,56 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         max-width: none !important;
         max-height: none !important;
         box-sizing: border-box;
-        gap: 14px;
-        padding: 26px 0 24px !important;
+        gap: 16px;
+        /* no bottom padding: the capsule pair is the last content, so the box
+           ends at the capsules and the band can stop through their middle */
+        padding: 28px 0 0 !important;
         border: none !important;
         /* flat band in BOTH corner modes: the square pass already zeroes it,
            and round mode must not hand back --dsw-radius-panel */
         border-radius: 0 !important;
-        background: var(--edge-paper) !important;
-        box-shadow: 0 6px 32px rgba(0, 0, 0, 0.4) !important;
+        /* The reference band is the bright paper in BOTH palettes — in the dark
+           scheme the app's paper token is #101110, so var(--edge-paper) painted
+           a dark strip and the band stopped reading as 白条. Pinned literal
+           #f5f5f0 (the theme's Endfield white) instead. The fill covers all but
+           the bottom 18px of the box — half of the 36px capsule — so the caps
+           straddle the band's bottom edge: upper half on paper, lower half over
+           the dim mask that already sits behind the card. */
+        background: linear-gradient(#f5f5f0, #f5f5f0) 0 0 / 100% calc(100% - 18px) no-repeat !important;
+        /* A box shadow would wrap the whole box and float under the hanging
+           caps; drop-shadow follows the PAINTED silhouette — band edge and
+           capsule shapes — which is the shadow the reference draws. */
+        box-shadow: none !important;
+        filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
         font-family: var(--edge-font);
+      }
+      /* Ink side of the paper: in the dark palette the app's labels are
+         #f5f5f0 (paper-on-dark) and would vanish on the white band, so the
+         dialog scope re-declares the label tokens as ink — every var() the
+         copy references flips at once, while elements carrying their own
+         colour (a danger-red warning line) keep it. The explicit hooks catch
+         the title and close glyph even if they switch token names. */
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] {
+        --dsw-alias-label-primary: #101110;
+        --dsw-alias-label-secondary: #4a4c48;
+        --dsw-alias-label-primary-bluish: #101110;
+        color: #101110;
+      }
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] [class*='_title'],
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] [class*='_body'],
+      body[data-ds-dark-theme] [role='dialog'][class*='_confirmation'] [class*='_close'] {
+        color: #101110 !important;
+      }
+      /* The dark scheme needs a DARKER dim. The app's mask token is black at
+         50% (light 24%), which over the #101110 page leaves the transcript
+         behind the band fully legible — the dim reads as grey haze, not
+         blackout, so the band stops floating. Pinned to black at 80% so the
+         band sits on near-black like the reference. Scoped to this modal's
+         root only (the mask element itself is hash-named; the only hash-free
+         mark it carries is aria-hidden) — every other modal keeps the app's
+         own dim, and the light palette is untouched. */
+      body[data-ds-dark-theme] [role='presentation']:has(> [role='dialog'][class*='_confirmation']) > [aria-hidden='true']::after {
+        background: rgba(0, 0, 0, 0.8) !important;
       }
       [role='dialog'][class*='_confirmation'] [class*='_header'] {
         position: relative;
@@ -5787,8 +5879,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         padding: 0 56px !important;
       }
       [role='dialog'][class*='_confirmation'] [class*='_title'] {
-        font-size: 17px;
+        font-size: 19px;
         font-weight: 700;
+        letter-spacing: 0.02em;
         text-align: center;
       }
       [role='dialog'][class*='_confirmation'] [class*='_close'] {
@@ -5825,13 +5918,16 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          the blanket square pass, exactly like [data-approval-key] above. The
          confirm button is disabled until the checkbox is ticked; the app's
          own disabled paint is replaced with a dim so the yellow never turns
-         into an app-grey slab. */
+         into an app-grey slab. corner-shape: round undoes the host's
+         superellipse(1.5) root default — without it the 999px radius draws
+         as a squircle, not the reference's semicircular caps. */
       body [role='dialog'][class*='_confirmation'] [class*='_modalAction'],
       body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
         flex: none;
         min-width: 190px;
         padding: 9px 26px !important;
         border-radius: 999px !important;
+        corner-shape: round !important;
         border: none !important;
         font-size: 14px;
         font-weight: 700;
@@ -5852,8 +5948,92 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:hover:not(:disabled) {
         background: var(--edge-accent-deep) !important;
       }
+      /* Disabled until the checkbox is ticked. The app dims disabled buttons
+         with element-level opacity — but this capsule straddles TWO backdrops,
+         and translucent yellow goes chalky over the white band and muddy olive
+         over the dim below it: one button, two dirty colours, read as 灰色.
+         So the disabled look is painted part by part at FULL opacity instead:
+         the fill is baked to the exact colour translucent yellow makes over
+         the white band (color-mix with the band paper — the upper half then
+         matches the old 45%-over-paper look exactly), the label drops its
+         alpha, and the keyline/disc dim through their own pseudo opacity. Both
+         halves render identically and the yellow never turns grey. */
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:disabled {
+        opacity: 1 !important;
+        background: color-mix(in srgb, var(--edge-accent) 42%, #f5f5f0) !important;
+        color: rgba(16, 17, 16, 0.45) !important;
+        box-shadow: none;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:disabled::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:disabled::after {
+        opacity: 0.35;
+      }
       body [role='dialog'][class*='_confirmation'] button:disabled {
         opacity: 0.45;
+      }
+      /* Reference dressing for both capsule pairs (approval band + this box):
+         a thin light keyline inset ~3px inside the silhouette, the trailing
+         icon sitting in its own disc, and a soft drop shadow — the Endfield
+         dialog's capsules all carry these three. The keyline and the disc are
+         rounded shapes, so they pin corner-shape: round against the host's
+         superellipse(1.5) default just like the capsule itself. */
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::after {
+        content: '✕';
+        font-weight: 700;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
+        content: '◎';
+      }
+      body [data-approval-key] [class*='_actionRow'] button,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction'],
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
+        position: relative;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+      }
+      body [data-approval-key] [class*='_actionRow'] button::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::before {
+        content: '';
+        position: absolute;
+        inset: 3px;
+        border-radius: 999px !important;
+        corner-shape: round !important;
+        border: 1px solid rgba(245, 245, 240, 0.32);
+        pointer-events: none;
+      }
+      /* On the accent capsule the keyline reads white (paper-on-yellow in the
+         reference); on the dark capsule the same ink-white at lower alpha. */
+      body [data-approval-key] [class*='_actionRow'] button:last-child::before,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::before {
+        border-color: rgba(255, 255, 255, 0.7);
+      }
+      /* The trailing glyph lives in its own disc: darker-than-button for the
+         dark capsule (white ✕), ink disc with accent glyph for the yellow one
+         — the reference's ◎ target. */
+      body [data-approval-key] [class*='_actionRow'] button::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        margin-left: 10px;
+        border-radius: 999px !important;
+        corner-shape: round !important;
+        font-size: 11px;
+        line-height: 1;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:first-child::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']::after {
+        background: #211f1d;
+        color: #f5f5f0;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child::after,
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
+        background: #1c1b19;
+        color: var(--edge-accent);
       }
       /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
       [class*='tableScroll' i] th,
@@ -5917,6 +6097,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body:not(.theme-endfield-round) [data-cordis-switch],
       body:not(.theme-endfield-round) [class*='actionButton' i] {
         border-radius: 999px !important;
+        /* Same squircle trap as the approval stadium above: 999px only reads
+           as a pill when the corner SHAPE is round. */
+        corner-shape: round !important;
       }
       /* ---------- Session header actions (agent preset / subagent / jobs) ---------- */
       [class$='_trigger']:hover:not(:disabled),
@@ -6927,16 +7110,22 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         height: 32px;
         padding: 0 1px 0 14px;
         /* ZERO on purpose: the background is always clipped by the border
-           radius, so a renderer that mis-rounds 999px into a squircle would
-           shave the drawn caps' corners. With no radius to clip by, the
-           gradient layers below ARE the silhouette — see the section comment. */
+           radius, and the host's root corner-shape: superellipse(1.5) drew
+           that clip as a squircle — measured: a settled 32px pill with ~14px
+           caps. With no radius to clip by, the gradient layers below ARE the
+           silhouette — see the section comment. */
         border-radius: 0;
+        /* Covers every circle INSIDE the pill (badge, ring, clock, brand
+           mark): they inherit the host's superellipse(1.5) like everything
+           else, and a 999px radius only draws a true disc when the shape is
+           round. The pill itself needs no shape — its radius is zero. */
+        corner-shape: round;
         /* The silhouette is DRAWN (see the section comment): two discs at the
-           ends + a band between their centres. A plain colour would show the
-           squircle of a renderer that mishandles border-radius; this way the
-           outline IS the gradient, correct wherever gradients paint. The
-           transparent stops repeat the fill colour at alpha 0 — plain
-           'transparent' would fringe grey through the 0.5px feather. */
+           ends + a band between their centres. A plain colour would be clipped
+           by the host's superellipse corner shape; this way the outline IS the
+           gradient, correct wherever gradients paint. The transparent stops
+           repeat the fill colour at alpha 0 — plain 'transparent' would fringe
+           grey through the 0.5px feather. */
         background:
           radial-gradient(circle at var(--endfield-balance-cap) 50%,
             #312f30 calc(var(--endfield-balance-cap) - 0.5px),
@@ -8736,7 +8925,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       unmount()
       // Release the idempotency flag so a re-apply after this dispose can mount
       // the theme again; leaving it set killed the theme until a hard reload.
-      if (typeof window !== 'undefined') window.__dshThemeEndfieldApplied = false
+      // The build marker goes with it: a disposed page must look un-mounted to
+      // the next apply() no matter which build performs it.
+      if (typeof window !== 'undefined') {
+        window.__dshThemeEndfieldApplied = false
+        delete window.__dshThemeEndfieldBuild
+      }
       if (watermarkObserver) watermarkObserver.disconnect()
       /* A deferred observer install may still be waiting on DOMContentLoaded when
          the run ends; drop the pending listener so a disposed run is not wired

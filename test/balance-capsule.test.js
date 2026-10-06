@@ -196,12 +196,13 @@ check('boot: the pill opens at the reference panel size (448x72), stadium shape 
   !/\[data-endfield-balance\]\[data-endfield-balance-boot\] \{[^}]*border-radius/.test(css))
 check('boot: the box geometry is what animates, so the pose is one object changing shape',
   /* window is generous: the base rule now carries the drawn-stadium background
-     (three gradient layers + comments) before its transition list */
-  /\[data-endfield-balance\] \{[\s\S]{0,3400}transition:[\s\S]{0,200}height 420ms/.test(css) &&
+     (three gradient layers + comments) before its transition list — and since
+     the corner-shape round pass it also documents the host squircle default */
+  /\[data-endfield-balance\] \{[\s\S]{0,4200}transition:[\s\S]{0,200}height 420ms/.test(css) &&
   /* and border-radius is NOT in the list: the clip is zero for the pill's
      whole life and the drawn caps ride the height tween through
      --endfield-balance-cap, so the shape needs no radius animation */
-  !/\[data-endfield-balance\] \{[\s\S]{0,3400}transition:[\s\S]{0,400}border-radius/.test(css))
+  !/\[data-endfield-balance\] \{[\s\S]{0,4200}transition:[\s\S]{0,400}border-radius/.test(css))
 check('boot: the brand block is absolutely placed over the row, hidden when the pose is off',
   /* The window has to clear the rule's own box + comment block, which is longer
      than the declaration list it documents. */
