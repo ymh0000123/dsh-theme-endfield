@@ -8,4 +8,3 @@
       document.addEventListener('visibilitychange', onContourVisibility)
       ctx.effect(() => () => document.removeEventListener('visibilitychange', onContourVisibility))
     }
-

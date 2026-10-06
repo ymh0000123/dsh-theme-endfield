@@ -1,3 +1,4 @@
+
     /* --- Durable write gate -----------------------------------------------
        A scope snapshot from @deepseek-ai/dsh-client-ui-settings carries three
        flags that must ALL hold before a scope.set can durably land:
@@ -543,4 +544,3 @@
       if (mode === 'round') document.body.classList.add('theme-endfield-round')
       else document.body.classList.remove('theme-endfield-round')
     }
-

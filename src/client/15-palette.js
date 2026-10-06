@@ -1,3 +1,4 @@
+
     /* ---------- accent palette: 谷地黄 (default) / 武陵青 ----------
        The palette is ONE class on <body>; the stylesheet defines both variable
        sets, so switching is a class flip with no restyling work here. Because the
@@ -28,4 +29,3 @@
       if (isEnabled() && readPalette() === 'wuling') document.body.classList.add(PALETTE_CLASS)
       else document.body.classList.remove(PALETTE_CLASS)
     }
-

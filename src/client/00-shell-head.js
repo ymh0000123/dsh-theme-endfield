@@ -91,4 +91,3 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       window.__dshThemeEndfieldApplied = true
       window.__dshThemeEndfieldBuild = SHEET_MARKER
     }
-

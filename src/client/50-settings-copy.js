@@ -1,3 +1,4 @@
+
     /* ---------- Settings page copy: zh / en dictionaries ----------
        The panel followed DSH's language setting for nothing before this: every
        label was a hardcoded Chinese literal, so an English UI showed a wholly
@@ -352,4 +353,3 @@
         localeReady = true
       }
     }
-

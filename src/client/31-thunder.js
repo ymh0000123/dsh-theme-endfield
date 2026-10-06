@@ -1,3 +1,4 @@
+
     /* ---------- 雷霆大字 (娱乐模式, default OFF) ----------
        A task-boundary announcement: when a turn starts, 「任务开始」 slams into the
        middle of the screen in heavy white type; when it ends, 「任务完成」 does the
@@ -317,4 +318,3 @@
       // there is nothing to check here — being switched on is the whole condition.
       thunderRebind()
     }
-

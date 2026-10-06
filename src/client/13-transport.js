@@ -187,4 +187,3 @@
       if (onPrefsSettled) try { onPrefsSettled() } catch (e) { /* keep going */ }
     }
     const dbg = (...a) => { try { if (typeof console !== 'undefined' && console.warn) console.warn('[dsh-theme-endfield:prefs]', ...a) } catch (e) { /* noop */ } }
-

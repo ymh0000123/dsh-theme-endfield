@@ -39,6 +39,11 @@ function assemble(root, manifest) {
       if (i < entries.length - 1 && !text.endsWith('\n')) {
         throw Error('Fragment must end with a newline: ' + entry.file)
       }
+      // 片段末尾的裸空行会被 CI 的 git diff --check 判为 "new blank line at EOF"，
+      // 所以分区之间的空行一律算下一段的开头——产物本身末尾也不留空行。
+      if (/(^|\n)\n$/.test(text)) {
+        throw Error('Fragment must not end with a blank line: ' + entry.file)
+      }
       return text
     })
     .join('')

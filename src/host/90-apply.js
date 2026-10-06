@@ -1,3 +1,4 @@
+
 function apply(ctx, config) {
   /* Diagnostics, once per mount. Without a volatile Config this entry has no
      settings form, so the browser half reads and writes its preferences
@@ -104,4 +105,3 @@ function apply(ctx, config) {
     startAudio(scope);
   });
 }
-

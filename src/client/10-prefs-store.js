@@ -1,3 +1,4 @@
+
     /* ---------- Durable preference store (replaces localStorage) ----------
        The theme's switches used to persist through `localStorage`, which DSH
        Desktop broke on every restart: Desktop binds a fresh random localhost

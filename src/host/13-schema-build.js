@@ -122,4 +122,3 @@ function buildSchema(volatileFields) {
  * reload, so apply() reports it instead of staying quiet.
  */
 const Config = buildSchema(true);
-

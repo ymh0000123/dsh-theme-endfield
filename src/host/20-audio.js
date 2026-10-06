@@ -1,3 +1,4 @@
+
 /* ------------------------------------------------------------------ *
  * Audio notification host half
  * ------------------------------------------------------------------ */
@@ -293,4 +294,3 @@ function installAudio(ctx, settingsScope) {
   console.log(`${LOG_TAG} ready (host half)`);
   return audio;
 }
-

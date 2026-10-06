@@ -1,3 +1,4 @@
+
 /* ---------------------------------------------------------------------------
  * Balance bridge — GET /theme-endfield/balance
  *
@@ -99,4 +100,3 @@ function configPrefScope(ctx, config) {
     },
   };
 }
-

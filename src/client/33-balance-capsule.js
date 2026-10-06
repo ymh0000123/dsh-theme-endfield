@@ -1,3 +1,4 @@
+
     /* ---------- 顶部余额胶囊 ----------
        A fixed capsule at the top center of the frame showing the account
        balance AND the API's peak/off-peak pricing window, styled after the
@@ -144,4 +145,3 @@
       setText('data-endfield-balance-frac', data.frac === '' ? '' : '.' + data.frac)
       setText('data-endfield-balance-currency', data.currency === 'USD' ? '$' : '¥')
     }
-

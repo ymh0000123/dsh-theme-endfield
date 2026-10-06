@@ -1,3 +1,4 @@
+
 /** File name of the failure report written next to the profile patch. */
 const DIAGNOSTIC_FILE = 'theme-endfield-diagnostic.json';
 
@@ -123,4 +124,3 @@ function clearStaleDiagnostic(ctx) {
     if (fs.existsSync(target)) fs.unlinkSync(target);
   } catch (e) { /* nothing to clean up */ }
 }
-

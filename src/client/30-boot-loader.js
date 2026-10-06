@@ -1,3 +1,4 @@
+
     /* ---------- boot loading screen (settings-toggleable, default OFF) ----------
        Recreates the Endfield launcher boot screen: a full-viewport black plate with
        an 8px signal-yellow progress rail down the left edge, a meter group (tick +
@@ -337,4 +338,3 @@
       if (!isLoaderOn()) return
       runLoader()
     }
-

@@ -1,3 +1,4 @@
+
     /* ---------- 需要你回应 watcher ----------
        A coarse poll rather than a MutationObserver. The reason is the failure mode
        rather than the cost: an observer watching a container that the app later
@@ -90,4 +91,3 @@
     // callback in a browser) without a real MutationObserver.
     module.exports.__attentionCheck = audioAttentionTick
     module.exports.__attentionSchedule = audioAttentionSchedule
-

@@ -1,3 +1,4 @@
+
     /* ---------- 渠道额度渲染 (dsh-codearts-auth / jet-hub) ----------
        Two display modes share one capsule. The wallet read above is the
        DeepSeek mode; when the session's model directory names a jet-hub
@@ -310,4 +311,3 @@
       }
       attempt()
     }
-

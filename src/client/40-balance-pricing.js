@@ -1,3 +1,4 @@
+
     /* ---------- 峰谷定价窗口（本地计算） ----------
        The published rule (api-docs.deepseek.com pricing): Beijing time Mon-Fri
        9:00-12:00 and 14:00-18:00 are PEAK; everything else — nights, weekends,
@@ -386,4 +387,3 @@
       // while already mounted just re-asserts the same state.
       showBalanceCapsule()
     }
-

@@ -1,3 +1,4 @@
+
     /* ---------- background ENDFIELD watermark (settings-toggleable) ----------
        Two independent switches:
          WATERMARK_KEY  — the watermark itself (default ON), shown on the hero page.
@@ -306,4 +307,3 @@
     else if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('DOMContentLoaded', watermarkObserverLate, { once: true })
     }
-
