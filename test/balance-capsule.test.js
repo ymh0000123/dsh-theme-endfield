@@ -77,7 +77,13 @@ check('markup: countdown run holds the phase label INSIDE it (「低谷时段剩
   markup.indexOf('data-endfield-balance-window') < markup.indexOf('data-endfield-balance-phase') &&
   markup.indexOf('data-endfield-balance-phase') < markup.indexOf('data-endfield-balance-remain'))
 check('markup: the countdown run carries the static 时段剩余 glue itself',
-  markup.indexOf('</span>时段剩余') > -1)
+  markup.indexOf('>时段剩余<span data-endfield-balance-remain>') > -1)
+/* The glue lives inside a wrapper so a phone can drop the countdown tail and
+   keep the 高峰/低谷 label — a text node has no selector to hide. */
+check('markup: 「时段剩余…倒计时」 is its own group inside the countdown run',
+  markup.indexOf('data-endfield-balance-phase') < markup.indexOf('data-endfield-balance-remain-run') &&
+  markup.indexOf('<span data-endfield-balance-remain-run>时段剩余<span data-endfield-balance-remain>') > -1 &&
+  markup.indexOf('data-endfield-balance-remain-run') < markup.indexOf('data-endfield-balance-pct'))
 check('markup: elapsed read sits between the countdown run and the dial',
   markup.indexOf('data-endfield-balance-remain') < markup.indexOf('data-endfield-balance-pct') &&
   markup.indexOf('data-endfield-balance-pct') < markup.indexOf('data-endfield-balance-badge'))
@@ -161,6 +167,25 @@ check('pill: a narrow window drops the countdown rather than clipping the dial',
   /* The breakpoint must sit BELOW the pill's natural width (300 + 16 slack), or
      the reference layout would lose its countdown at the width it was shot at. */
   316 <= 300 + 16 && 316 > 300)
+/* Phones are wider than 316px, so the desktop breakpoint alone never hid the
+   countdown there — it just overflowed. The tail yields first, the whole grey
+   run only below 316px. */
+check('pill: a phone width hides the 时段剩余 countdown but keeps the 高峰/低谷 label',
+  /@media \(max-width: 480px\) \{[\s\S]{0,320}\[data-endfield-balance-remain-run\] \{\s*display: none;/.test(css) &&
+  /* the phone rule must not touch the phase slot, and must come before the
+     harder 316px cut so the two read as a ladder */
+  !/@media \(max-width: 480px\)[\s\S]{0,320}\[data-endfield-balance-phase\]/.test(css) &&
+  css.indexOf('max-width: 480px') < css.indexOf('max-width: 316px') &&
+  /* a phone is narrower than the conventional ceiling but wider than 316, so
+     the two steps cover disjoint bands instead of one masking the other */
+  480 > 316)
+/* With the countdown gone the 300px floor is pure whitespace: the elapsed
+   read's margin-left:auto swallows every spare pixel, so the pill would stay
+   exactly as wide. The floor yields to the content in the SAME media block;
+   the boot pose keeps its floor via the attribute selector, which outranks
+   the bare [data-endfield-balance] rule on specificity. */
+check('pill: a phone width drops the 300px floor so the pill actually shrinks',
+  /@media \(max-width: 480px\) \{[\s\S]{0,140}\[data-endfield-balance\] \{\s*min-width: 0;[\s\S]{0,200}remain-run\] \{\s*display: none;/.test(css))
 
 /* --- BOOT: the brand pose that collapses into the balance row ------------ */
 check('boot: the pill opens at the reference panel size (448x72), stadium shape kept',

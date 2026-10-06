@@ -4699,8 +4699,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         // off-peak windows are a DeepSeek API concept, so the credits mode
         // hides the whole run via the same mode attribute.
         '<span data-endfield-balance-window>' +
-        '<span data-endfield-balance-phase>低谷</span>时段剩余' +
+        '<span data-endfield-balance-phase>低谷</span>' +
+        // The 「时段剩余hh:mm:ss」 tail is its own group so a phone can drop
+        // the countdown while the 高峰/低谷 label survives: the static glue
+        // text has no node of its own and could not be hidden any other way.
+        '<span data-endfield-balance-remain-run>' +
+        '时段剩余' +
         '<span data-endfield-balance-remain></span>' +
+        '</span>' +
         '</span>' +
         // The right-hand slot carries one read per mode: the elapsed pricing
         // share (wallet) or the channel's consumption share (credits). Two
@@ -5622,6 +5628,232 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       }
       [data-cordis-decline]:hover:not(:disabled) {
         background: #d6281d !important;
+      }
+      /* ---------- 审批弹窗：全屏白条 + 上下遮罩（Endfield 寻访确认框） ----------
+         The shipped panel is a rounded warn-bordered card parked inside the
+         composer column (max-width: --dsh-chat-content-width). The reference
+         dialog is a different shape entirely: a PAPER BAND that runs from the
+         left screen edge to the right, vertically centred, with the dimming
+         only above and below it. That is reproduced without touching React's
+         tree: the panel's own root becomes a fixed full-viewport flex layer
+         whose translucent black background is the mask, and the card is
+         stretched to the band. The band paints opaque over the middle of the
+         mask, so the darkening only ever shows above and below it — the
+         「上下有遮罩，不是全屏」 shape, with zero extra DOM.
+         Selectors are hash-free by project law (test/selector-guard.test.js):
+         the root is pinned by its SEMANTIC data-approval-key attribute (the
+         same anchor the attention watcher uses) and the children by their
+         CSS-module SUFFIXES, each rule scoped under the root so a generic
+         '_card' / '_body' elsewhere in the app is untouched.
+         position:fixed escapes the composer column's width cap and the
+         frame's overflow clip; no ancestor between the seat and the viewport
+         carries a transform/filter, and if a future one did, the band simply
+         stays in flow — degraded position, never a broken dialog. */
+      [data-approval-key] {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 1000;
+        display: flex !important;
+        flex-direction: column;
+        justify-content: center;
+        align-items: stretch;
+        padding: 0 !important;
+        background: rgba(6, 6, 6, 0.62);
+      }
+      /* The band: square, full-bleed, paper. The zero-radius pass in round
+         mode would restore the app's --dsw-radius-xl here, and a rounded band
+         contradicts the reference — pin it flat with priority. */
+      [data-approval-key] > [class$='_card'] {
+        width: 100%;
+        max-width: none !important;
+        box-sizing: border-box;
+        border: none !important;
+        border-radius: 0 !important;
+        background: var(--edge-paper) !important;
+        box-shadow: none !important;
+        padding: 26px 24px 22px !important;
+      }
+      /* 「等待审批」 strip: the reference top line is a bare centred caption,
+         not a tinted bar — drop the warn fill, keep the dot + copy. */
+      [data-approval-key] [class*='_strip'] {
+        justify-content: center;
+        background: transparent !important;
+        padding: 0 0 6px !important;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+      }
+      [data-approval-key] [class*='_body'] {
+        align-items: center;
+        text-align: center;
+        padding: 4px 0 0 !important;
+        gap: 8px !important;
+      }
+      [data-approval-key] [class*='_headline'] {
+        font-size: 17px;
+        line-height: 1.5;
+      }
+      [data-approval-key] [class*='_command'] {
+        text-align: center;
+        word-break: break-all;
+      }
+      /* Two stadium actions straddling the band's lower half, cancel-left /
+         confirm-right like the reference. The blanket square pass
+         (body:not(.theme-endfield-round) [class], 0,2,1 !important) and the
+         plain button rule both try to flatten these, so every radius here
+         rides (0,2,2) with !important — and the stadium holds in BOTH corner
+         modes, exactly like the balance pill. */
+      [data-approval-key] [class*='_actionRow'] {
+        justify-content: center;
+        gap: 28px;
+        padding: 22px 0 2px !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button {
+        flex: none;
+        min-width: 190px;
+        padding: 9px 26px !important;
+        border-radius: 999px !important;
+        border: none !important;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+      }
+      /* 拒绝 = the dark capsule with a white ✕; 允许一次 = the signal-yellow
+         capsule with the ◎ target. Ink-on-accent contrast is the same pairing
+         test/palette-contrast.test.js pins at AA for every other solid chip. */
+      body [data-approval-key] [class*='_actionRow'] button:first-child {
+        background: #33312e !important;
+        color: #f5f5f0 !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:first-child:hover:not(:disabled) {
+        background: #46433f !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child {
+        background: var(--edge-accent) !important;
+        color: #101110 !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child:hover:not(:disabled) {
+        background: var(--edge-accent-deep) !important;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:disabled {
+        opacity: 0.45;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:first-child::after {
+        content: '✕';
+        margin-left: 10px;
+        font-weight: 700;
+      }
+      body [data-approval-key] [class*='_actionRow'] button:last-child::after {
+        content: '◎';
+        margin-left: 10px;
+      }
+      /* ---------- 完全权限确认框：同款全屏白条 + 上下遮罩 ----------
+         The 「确认启用完全权限？」 box is NOT the approval panel above: it is
+         the shared ui-primitives Modal (a portal on <body>: role=presentation
+         root > mask + role=dialog card) wrapped by RiskConfirmation, whose
+         ONLY semantic mark is the _confirmation class it adds to the dialog.
+         Same band shape: the dialog runs edge to edge on paper and the
+         existing full-viewport mask — already there, already behind the card
+         — only ever shows above and below it. Scoping is exact: every rule
+         hangs under [role='dialog'][class*='_confirmation'], and the one
+         rule that must reach the shared root (its 24px side padding would
+         strand the band short of the screen edges) addresses it through
+         :has() so plain modals elsewhere keep the app's compact card.
+         This module's class names put the semantic word in the MIDDLE
+         (_header_o6lrb_71), unlike the suffix form used above, so the child
+         hooks are [class*='_word'] substrings — still hash-free and still
+         pinned by test/selector-guard.test.js. */
+      [role='presentation']:has(> [role='dialog'][class*='_confirmation']) {
+        padding: 0 !important;
+      }
+      [role='dialog'][class*='_confirmation'] {
+        width: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        box-sizing: border-box;
+        gap: 14px;
+        padding: 26px 0 24px !important;
+        border: none !important;
+        /* flat band in BOTH corner modes: the square pass already zeroes it,
+           and round mode must not hand back --dsw-radius-panel */
+        border-radius: 0 !important;
+        background: var(--edge-paper) !important;
+        box-shadow: 0 6px 32px rgba(0, 0, 0, 0.4) !important;
+        font-family: var(--edge-font);
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_header'] {
+        position: relative;
+        justify-content: center;
+        padding: 0 56px !important;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_title'] {
+        font-size: 17px;
+        font-weight: 700;
+        text-align: center;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_close'] {
+        position: absolute;
+        right: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_body'] {
+        align-items: center;
+        gap: 16px;
+        margin-top: 0;
+        padding: 0 24px !important;
+      }
+      /* The warning copy and the checkbox row stay left-aligned (they are
+         paragraphs), but the column of them is centred on the band. */
+      [role='dialog'][class*='_confirmation'] [class*='_warning'],
+      [role='dialog'][class*='_confirmation'] [class*='_acknowledgement'] {
+        max-width: 640px;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_acknowledgement'] {
+        margin-top: 0;
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_acknowledgement'] input {
+        accent-color: var(--edge-accent);
+      }
+      [role='dialog'][class*='_confirmation'] [class*='_footer'] {
+        justify-content: center;
+        gap: 28px;
+        padding: 0 !important;
+      }
+      /* Same capsule pair as the approval band — cancel dark, confirm signal
+         yellow. The (0,3,1)+!important route keeps the stadium alive through
+         the blanket square pass, exactly like [data-approval-key] above. The
+         confirm button is disabled until the checkbox is ticked; the app's
+         own disabled paint is replaced with a dim so the yellow never turns
+         into an app-grey slab. */
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction'],
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
+        flex: none;
+        min-width: 190px;
+        padding: 9px 26px !important;
+        border-radius: 999px !important;
+        border: none !important;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        cursor: pointer;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction'] {
+        background: #33312e !important;
+        color: #f5f5f0 !important;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_modalAction']:hover {
+        background: #46433f !important;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction'] {
+        background: var(--edge-accent) !important;
+        color: #101110 !important;
+      }
+      body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']:hover:not(:disabled) {
+        background: var(--edge-accent-deep) !important;
+      }
+      body [role='dialog'][class*='_confirmation'] button:disabled {
+        opacity: 0.45;
       }
       /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
       [class*='tableScroll' i] th,
@@ -7018,6 +7250,29 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         background: #262425;
         transform: rotate(25deg);
         transform-origin: 50% 100%;
+      }
+      /* Phones: drop the 「时段剩余hh:mm:ss」 tail first and keep the
+         高峰/低谷 label. A seconds-precision countdown is the read nobody
+         glances at on a one-hand viewport, and it is also the WIDEST token
+         run in the pill — at phone widths (390–480px) it alone would push
+         the capsule past the header tabs it floats over. The breakpoint is
+         the conventional phone ceiling, comfortably above the pill's 300px
+         natural width, so desktop and tablet layouts are untouched.
+         The width floor goes with the tail it was sized for: 300px exists to
+         hold the gap between the countdown and the elapsed share, so leaving
+         it in place would only stretch the pill back out with whitespace
+         (margin-left: auto on the elapsed read swallows every spare pixel).
+         Zero lets the box shrink-to-fit its remaining reads, and the fixed
+         6px gap owns the spacing. The boot pose keeps its own wider floor:
+         that rule carries the -boot attribute and outranks this one, so the
+         opening panel still morphs. */
+      @media (max-width: 480px) {
+        [data-endfield-balance] {
+          min-width: 0;
+        }
+        [data-endfield-balance] [data-endfield-balance-remain-run] {
+          display: none;
+        }
       }
       /* Narrow windows: the countdown is the least load-bearing read of the
          three, so it is the one that yields before a nowrap overflow can push

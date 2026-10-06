@@ -92,6 +92,20 @@ const hooks = [
   ["[class$='_composerSeat'], [class$='_composerHero']) [class*='_arrow']",
     'attachment carousel arrow (composer-scoped)'],
   ["[class*='_dangerButton']", 'danger button ink'],
+  // Approval dialog restyle (Endfield full-bleed band). The root is pinned by
+  // its semantic data attribute — the SAME anchor the attention watcher uses —
+  // and every child rule is scoped under it by CSS-module suffix, so a generic
+  // '_card'/'_body' elsewhere can never be hit.
+  ["[data-approval-key] > [class$='_card']", 'approval band: card scoped under the panel root'],
+  ["[data-approval-key] [class*='_actionRow']", 'approval actions row hook'],
+  ["body [data-approval-key] [class*='_actionRow'] button:last-child", 'approval confirm capsule ink'],
+  // Risk-confirmation modal (「确认启用完全权限？」): a body-portal Modal whose
+  // only semantic mark is the _confirmation class on its dialog. Every child
+  // hook is scoped under [role='dialog'][class*='_confirmation'], so plain
+  // modals elsewhere are untouched.
+  ["[role='dialog'][class*='_confirmation']", 'risk modal: dialog scoped by its confirmation class'],
+  ["[role='presentation']:has(> [role='dialog'][class*='_confirmation'])", 'risk modal: root padding reached via :has'],
+  ["body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']", 'risk modal confirm capsule ink'],
 ]
 for (const [needle, label] of hooks) {
   if (src.includes(needle)) pass('hook present: ' + label)

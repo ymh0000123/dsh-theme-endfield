@@ -511,6 +511,13 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 ### 节假日名只出现在开场 pose
 胶囊宽 300px，窄屏断点 316px 正是按它推出的，所以 **settled 行的文案一个字都不能加**。「今天是国庆节」只在开场品牌 pose 的标题里体现（`DeepSeek 国庆节低谷`，普通日子仍是 `DeepSeek 当前低谷`）；`test/balance-capsule.test.js` 直接断言 `win.holiday` 只被**一行**读取、且那一行在 brand-title 块内，防止它以后爬进 settled 行把胶囊撑宽。
 
+### 窄屏是两级阶梯，不是一刀切
+316px 那一级只保护桌面布局——手机（390–480px）根本到不了它，「低谷时段剩余42:08:13」照样把胶囊撑到表头标签之上。所以拆成两级：**≤480px** 隐藏「时段剩余hh:mm:ss」（`data-endfield-balance-remain-run`，秒级倒计时是手机上最没人看的读数，也是最宽的 token 串），高峰/低谷 标签保留；**≤316px** 再把整段灰色读数（含标签）删掉，守住 300px 药丸的原始契约。要做到只砍尾巴，静态胶水文案「时段剩余」必须有自己的元素——文本节点没有可隐藏的 selector，因此它在标记里被包进 `remain-run`，`phase` 留在外面。
+
+480px 那一格里 `min-width` 必须**跟着一起让**：300px 地板是为「倒计时 ↔ 已过百分比」之间那段参考稿间距存在的，尾巴删掉后它的 `margin-left: auto` 会把全部富余像素吞进读数左边的空白——**读数少了，胶囊却纹丝不动**。手机格里写 `min-width: 0` 让盒子收缩到内容，间距回到 6px gap。开场 pose 不受影响：它的规则带 `[data-endfield-balance-boot]` 属性，特异性 (0,2,0) 压过裸 `[data-endfield-balance]` 的 (0,1,0)，媒体查询本身不加特异性，所以 448px 地板在手机上照常morph（`min(448px, 100vw - 16px)` 自行封顶）。
+
+
+
 算术本身（节假日 / 周末 / 工作日各读到什么窗口、倒计时多少）钉在 `test/balance-window.test.js`；守卫与注入用例见 [testing.md](testing.md#顶部余额胶囊)。
 
 ---
