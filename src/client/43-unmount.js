@@ -22,6 +22,11 @@
       // transparency rules it depends on both live in that stylesheet, so leaving
       // it mounted would drop two raw canvases into the app's layout flow.
       contourTeardown()
+      /* The output-scroll animator holds a transform on the transcript column. The
+         theme does not style that column, so an orphaned offset would survive as a
+         permanently shifted transcript — the one thing here that must be released
+         even though it is invisible to the stylesheet. */
+      destroyScrollAnim()
       /* The announcement plate is styled entirely by that stylesheet too, so an
          in-flight word would become an unstyled, un-positioned block of text in the
          document flow. Stop watching as well: with the theme off there is nothing to
@@ -56,6 +61,10 @@
       // frame to exist; syncContour is a no-op until both are true and the
       // watermark's MutationObserver retries it as the app renders.
       syncContour()
+      // Output-scroll animation: a no-op until the app renders a conversation
+      // scrollport. The same observer retries it as the app mounts one, so opening
+      // a session later needs no reload.
+      syncScrollAnim()
       // Boot animation: only on a real page load, only when switched on, and only
       // after the stylesheet above exists (mount() inserted it).
       if (isLoaderOn()) runLoader()
@@ -97,6 +106,7 @@
         syncPaletteClass()
         syncWatermarkVisibility()
         syncContour()
+        syncScrollAnim()
         syncThunder()
         // Same reason: it re-reads both switches and starts or stops the poll.
         syncAudioAttentionWatch()

@@ -44,6 +44,9 @@ module.exports = [
   { file: '21-contour-worker.embed.js' },
   { file: '22-contour-visibility.js' },
 
+  /* ---- 输出滚动动画（流式跟随柔性化；在 43-* 的挂载/拆除里接线） ---------- */
+  { file: '23-scroll-anim.js' },
+
   /* ---- 开机屏 / 雷霆大字 / 观察器 / 余额胶囊 / 渠道额度 -------------- */
   { file: '30-boot-loader.js' },
   { file: '31-thunder.js' },

@@ -8,7 +8,7 @@
 
 历史内存风格：这些开关最初存浏览器 `localStorage`。由于浏览器存储按「协议 + 主机 + 端口」的 origin 隔离，而 DSH Desktop 每次启动都在 127.0.0.1 绑定一个**随机临时端口**，端口一变 origin 就变，上次保存的设置永远读不到，表现为「重启后恢复默认」。已改用 DSH 官方的用户设置命名空间：
 
-- **DSH 0.2.0-rc.2 / 0.1.7-rc.1 及以后（当前）**：**Host 端（index.js）** 导出 schemastery `Config`，27 个字段全部 `.volatile()`——这两代都只把 volatile 字段投影成可编辑表单；命名空间就是本插件在 `cordis.patch.yml` 里那一行的 profile entry id（`theme-endfield`）。**浏览器端（client.js）** 用 `ctx.configForms.get('theme-endfield')` 读/写/订阅，值由 DSH 的设置服务写进 profile patch `<profile>/cordis.patch.yml`。另外 Host 会调用 `ctx.settings.configure({ auto: false }, ctx.fiber)` 告诉 DSH 本插件自带设置页，不要再自动生成一份。0.2 的这套接缝与 0.1.7 完全相同，本插件侧不需要改动；0.2 真正改掉的是三个**应用侧**细节（回合状态标签的类名与着色机制、右侧栏列名、插件卡片文案来源），见 [engineering-notes.md § DSH 0.2.0-rc.2](engineering-notes.md#dsh-020-rc2-上失效的三处应用侧钩子v116-已跟进)。
+- **DSH 0.2.0-rc.2 / 0.1.7-rc.1 及以后（当前）**：**Host 端（index.js）** 导出 schemastery `Config`，31 个字段全部 `.volatile()`——这两代都只把 volatile 字段投影成可编辑表单；命名空间就是本插件在 `cordis.patch.yml` 里那一行的 profile entry id（`theme-endfield`）。**浏览器端（client.js）** 用 `ctx.configForms.get('theme-endfield')` 读/写/订阅，值由 DSH 的设置服务写进 profile patch `<profile>/cordis.patch.yml`。另外 Host 会调用 `ctx.settings.configure({ auto: false }, ctx.fiber)` 告诉 DSH 本插件自带设置页，不要再自动生成一份。0.2 的这套接缝与 0.1.7 完全相同，本插件侧不需要改动；0.2 真正改掉的是三个**应用侧**细节（回合状态标签的类名与着色机制、右侧栏列名、插件卡片文案来源），见 [engineering-notes.md § DSH 0.2.0-rc.2](engineering-notes.md#dsh-020-rc2-上失效的三处应用侧钩子v116-已跟进)。
 - **≤ 0.1.5-rc.2（旧宿主，仍兼容）**：Host 通过 `ctx.settings.register('dsh-theme-endfield', schema)` 声明命名空间，由 `@deepseek-ai/dsh-settings-file` 落到 `<dshHome>/settings.yaml`；浏览器端用 `ctx.settingsScope` 的 `bind({ namespace, decode })` 读写。client 在找不到 `configForms` 时自动回落到这条路径。
 
 两代的落盘位置都由 DSH 决定（`$DSH_HOME` 或 `~/.dsh/...`），与浏览器 origin/端口无关，因此在 **dsh web（浏览器、固定/默认端口）** 和 **DSH Desktop（随机临时端口）** 两种运行方式下设置都能正确持久化——它们跑的都是 127.0.0.1 loopback 页面，DSH 会把连接解析为 `host` 持久化模式。
@@ -36,7 +36,9 @@
 | | 滚动暂停 | 开 | `contourScrollPause` |
 | | 背景水印 | 开 | `watermark` |
 | | 水印保持显示 | 关 | `watermarkPersist` |
-| 03 动画 | 启动加载动画 | 关 | `loader` |
+| 03 动画 | 输出滚动动画 | 开 | `scrollAnim` |
+| | 动画强度 | 标准 | `scrollAnimLevel` |
+| | 启动加载动画 | 关 | `loader` |
 | 04 娱乐 | 雷霆大字 | 关 | `thunder` |
 | | 大字入场动画 | 关 | `thunderAnim` |
 | | 顶部余额胶囊 | 关 | `balanceCapsule` |
@@ -121,6 +123,36 @@
 ---
 
 ## 03 动画
+
+### 输出滚动动画（默认开启）
+
+模型流式输出时，应用会把对话栏**整段钉到底部**——一次一大格，中间没有过渡帧。这个开关把那一步摊成逐帧滑动：流式输出看起来是「滑」上去的，而不是「跳」上去的。
+
+**它不改动应用自己的滚动位置。** 补偿只施加在对话栏的 `translateY` 上，随后逐帧衰减归零，因此应用读回的滚动位置分毫未变、它对「读者是否还在跟随」的判断不受影响，跟随不会中断。这也是它默认开启的原因：升级到带本功能的版本不会破坏任何既有行为，只是输出变顺滑。
+
+选型、实测数字与那条 `scroll-behavior: smooth` 否决见 [engineering-notes.md § 输出滚动动画](engineering-notes.md#输出滚动动画为什么不能改-scrolltop-的写后回读语义)。
+
+**动画强度**（`soft` / `standard` / `snappy`，默认 `standard`）是同一个衰减曲线上的三个速度，选的是**顺滑与滞后的取舍**，不是三个不同的效果：
+
+| 档位 | 观感 | 单步上限 |
+| --- | --- | --- |
+| 柔和 | 最顺滑，最新一行离底部最远 | 420px |
+| 标准（默认） | 出厂档位：平滑与跟随之间的折中 | 300px |
+| 轻快 | 最跟手，平滑幅度最小 | 200px |
+
+「单步上限」是**安全检查而非观感旋钮**：一次位移超过它的步进（恢复会话、跳到一个回合这类）按原样瞬时呈现。真实代价是**一次落一大块**时可能落空——一个几百 px 的代码块或工具结果在一步里落地，在 `标准` 下会退回硬跳（实测 400px：`标准` 瞬时、`柔和` 仍平滑）。把这一步摊成动画意味着内容要从 300px 以下滑上来三分之一秒，那比它要替代的硬跳更显眼，所以上限就设在这里；想让它也平滑就选 `柔和`，三个档位因此不是三份观感而是三个位置。
+
+滞后是这套做法的固有代价，不是可调掉的缺陷，而且**它取决于流速**：实测在真实流式速率（每 250ms 一行 24px，约 `96px/s`）下最新一行只落后视口底约 `3px`（不足一行行高）；只有在刻意夸张的 `1600px/s` 合成速率下才会到约 `110–160px`。关闭该功能时两个速率都是 `0px`。三个档位只是在同一根「顺滑 ↔ 滞后」旋钮上取三个点。
+
+**这些情形一律保持瞬时**，不做任何补偿：向上滚动、从阅读位置跳转（打开历史会话、跳到一个回合）、单步位移超过该档上限、用户自己的滚轮 / 触摸 / 指针 / 键盘手势，以及页面处于隐藏状态。
+
+**展开思考 / 工具详情这类布局重排也一律瞬时**：折叠区展开会让整列在数百 px 量级上变高，应用的 `ResizeObserver` 随之重钉底——这一步在几何上和流式增长几乎一样（同样从底部出发、同样向下、同样可能小于上限），但**屏幕上既有内容其实没有被移动**，所以补偿它只会造出一次多余的下坠再滑回来。运行时因此不假设「滚动量就是视觉位移」，而是实测布局自己贡献了多少再相减（详见 [engineering-notes.md § 布局重排](engineering-notes.md#布局重排展开思考块为什么抽搐)）。
+
+**尊重系统「减少动态效果」**：`prefers-reduced-motion` 下完全不补偿，输出回到原生硬滚动——即使开关是开的。此时设置行会说明是系统偏好在生效，而不是让开关看起来失灵。系统偏好在运行中翻转也会即时生效并清掉残留位移。
+
+**关闭即零开销**：关掉时不留监听、不留逐帧循环，位移立即释放。
+
+回归测试见 [testing.md § 输出滚动动画](testing.md#输出滚动动画)。
 
 ### 启动加载动画（默认关闭）
 

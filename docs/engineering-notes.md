@@ -14,6 +14,8 @@
 - [样式表是一整个模板字符串](#样式表是一整个模板字符串)
 - [层叠与挂载点](#层叠与挂载点)
 - [等高线背景](#等高线背景)
+- [输出滚动动画：为什么不能改 scrollTop 的写后回读语义](#输出滚动动画为什么不能改-scrolltop-的写后回读语义)
+- [布局重排：展开思考块为什么抽搐](#布局重排展开思考块为什么抽搐)
 - [启动加载屏](#启动加载屏)
 - [设置页国际化](#设置页国际化)
 - [峰谷定价窗口与法定节假日](#峰谷定价窗口与法定节假日)
@@ -51,7 +53,7 @@
 
 关键差异，逐条都有对应的防护：
 
-- **只有 `.volatile()` 字段可编辑。** `ctx.settings` 只把 volatile 路径投影成表单，写非 volatile 路径会直接报 `Config field "x" is not volatile`；整份 schema 一个 volatile 字段都没有时该条目**根本不出现**在设置里。所以 `index.js` 的 `Config` **27 个字段全部 `.volatile()`**，`test/settings-config-forms.test.js` 会逐字段断言这一点（漏一个就是「设置保存不了」的现代写法）。
+- **只有 `.volatile()` 字段可编辑。** `ctx.settings` 只把 volatile 路径投影成表单，写非 volatile 路径会直接报 `Config field "x" is not volatile`；整份 schema 一个 volatile 字段都没有时该条目**根本不出现**在设置里。所以 `index.js` 的 `Config` **31 个字段全部 `.volatile()`**，`test/settings-config-forms.test.js` 会逐字段断言这一点（漏一个就是「设置保存不了」的现代写法）。
 - **两个 schemastery 必须区分。** DSH 同时装了带 `.volatile()` 的 `@deepseek-ai/schemastery`（3.18.4）和不带它的旧 `schemastery`（3.18.0）。`index.js` 的 `loadSchemastery(true)` 会逐个候选检查 `.volatile` 是否真的存在，找不到就返回 `undefined`（本插件退化成无需配置，而不是挂一个假表单）。
 - **命名空间是 entry id，不是包名。** `theme-endfield` 这个串同时出现在 `cordis.patch.yml` 的 `id:`、`index.js` 的 `SETTINGS_ENTRY` 和 client 的 `PREFS_ENTRY`；三者由新测试交叉校验。client 另外会依次尝试 `include:` 前缀等几种安装别名，优先选真正被 Host served（`status:'ready'`）的那个拼写；一个都没 served 时先绑定首选拼写（表单只是共享镜像的懒视图，早绑定才能等到迟到的 section）。此后每次镜像重载都会让每个表单重新派生，`unavailable`→`ready` 的转变会把「另一个拼写被 served」通知过来，此时自动切过去；万一镜像只更新却不通知（表单快照存储丢弃等价快照），还有**有界 settle watch**（20 × 500ms）自己轮询兜底。两种情况下切换期间 held 的编辑都会补写到新拼写上。
 - **`settings.yaml` 已废弃。** DSH 启动时把已有的 `settings.yaml` 改名为 `settings.yaml.imported`，并只迁移 `LEGACY_SECTION_ENTRIES` 里那几段。旧的主题段落名 `dsh-theme-endfield` 不等于 entry id `theme-endfield`，因此**不在迁移之列**，需要用户在设置页重设一次；这是 DSH 侧的行为，不是本插件丢的。旧值仍留在 `settings.yaml.imported` 里可手工对照。
@@ -61,7 +63,7 @@
 
 1. **声明**（Host `index.js`）：0.1.7-rc.1 导出 `Config`（`z.object({ 每个字段: z.string().default(...).volatile() })`）；同时用 `ctx.inject(['settings'], sctx => sctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber)))` 关掉自动生成的设置页（本插件自带四组页面）。旧宿主则在 `settings.register` 存在时执行 `register('dsh-theme-endfield', schema, { applies:'live' })`。schema 每个字段都是**字符串**字段并带 `.default(...)`：default-ON 存 `'1'`（读作 `!== '0'`），default-OFF 存 `'0'`（读作 `=== '1'`）；palette/radius/fps/speed 各存一个文档里写明的字面量。字符串化让三代存盘点位的值模型完全一致，client 的键表、面板与测试都不必随 transport 改动。
 2. **写**（浏览器 `client.js`）：设置面板每个 toggle 调用内部 `prefsSet(field, value)` → 只有当快照是 **durably served**（`mode:'host' && status:'ready' && writable`）时才调用 transport 的 `set(field, value)`，Host 收到后原子写盘。只凭 `writable` 判写是一个坑：host 模式的快照即便本命名空间**尚未被 served** 也会返回 `writable:true` 与 `status:'unavailable'`（`commit radius = round … status= unavailable` 就是这么打出来的）——旧代码照写不误、清了脏标记但什么都没落盘，刷新即丢。现在这种写被**拦下并标脏**（页面内仍生效），等快照在后续 ready 回相（Host 文档提交、镜像重载）时由 subscription 自动补写；`configForms.set()` 明确返回 `false`（Host 拒绝/跳过）时同样重新标脏等待下次回相，而不是假装写成功。
-3. **读 / 生效**：transport 的 `getSnapshot().value` 就是已由 schema 校验并合并默认值的整段（client 再经 `prefsResolveSection()` 归一化到 27 个声明字段）；主题层的 `isEnabled()` 与其它 getter 每次调用都 `prefsGet(field)` 现读本段，天然随值变化。
+3. **读 / 生效**：transport 的 `getSnapshot().value` 就是已由 schema 校验并合并默认值的整段（client 再经 `prefsResolveSection()` 归一化到 31 个声明字段）；主题层的 `isEnabled()` 与其它 getter 每次调用都 `prefsGet(field)` 现读本段，天然随值变化。
 4. **订阅同步**：`form.subscribe(...)` / `scope.subscribe(...)` 在每次落盘/镜像变化时唤醒，client 再跑一遍 `reconcileFromPrefs()`，把主题开关（enabled → mount/unmount token+样式表）、圆角/配色 class、水印、等高线、雷霆大字重新对齐。这样同 profile 里**另一个窗口/设备**编辑落盘文件（或本轮写入被 Host 回相确认）都不需要刷新即可热生效。订阅返回的 disposer 现在会被保存并在 run 拆除时调用：`ConfigForm` 是 provider 拥有、跨插件共享的实例，漏掉它会把这一个监听器泄漏给同页面的下一次 run。
 5. **启动恢复**：`apply()` 早于 transport 就绪时，读 schema 默认值（内存镜像），一旦 `status:'ready'` 的第一个真值镜像到达就切换到持久值——即使 Desktop 在随机端口上启动，也能立刻恢复到上次的设置。
 
@@ -486,6 +488,165 @@ client.js is stale (first difference at line 4096); run npm run build:client
 早前版本的文档与测试里写着第三个「光点移动」开关（光点沿等高线流动）。**该功能从未实现过**（`git log -S` 查无任何提交），相关文档与测试断言属于描述未落地的设计——`settings-rows` 测试因此在每次全新签出时都必然失败。这些断言已删掉；一个默认就是红的测试提供不了任何信息。
 
 设计阶段留下的一条结论仍有价值，记录在此备将来参考：**光点若要落地，抽搐会是索引失配而不是缺动画。** 等值线提取每帧**整个重建**折线数组，而随着场变形环线会合并 / 分裂——折线的**顺序和数量都不稳定**。实测 120 帧里数量在 81–87 之间跳动、有 27 帧发生变化；一旦光点靠数组下标记住「自己在哪条线上」，那个下标很快就指向另一条曲线。正确做法有两条：每帧按**最近几何**重新认领曲线，以及万一接不上就在 **alpha 为 0 时**换位重生。
+
+---
+
+## 输出滚动动画：为什么不能改 scrollTop 的写后回读语义
+
+### 成因：应用用「写后回读」判断自己还要不要跟随
+
+DSH 流式输出时不是滚动，而是**直接赋值钉底**（`useScrollFollow.jump`）：
+
+```js
+element.scrollTop = metrics.floor
+const landed = { ...metrics, top: element.scrollTop }
+this.following = this.nearBottom(landed)        // 25px 阈值
+```
+
+第二次读取**不是**出于好奇——`follow intent` 就是从它算出来的。因此凡是改变「写完 `scrollTop` 之后立刻读回什么」的方案，都在动应用的跟随状态机。
+
+平台基线实测（用发布版 ChatView / ChatReading 的代码搭的夹具）：一次增长步进把端口移动恰好 **+60px，且没有任何中间帧**、0 次 smooth `scrollTo`。这就是「硬生生滚动」的全部：内容一整段瞬移，眼睛看到的是一格一格跳。
+
+### 那条否决：`scroll-behavior: smooth`
+
+这是最显眼的一行式写法，也是这里**最危险**的一行。实测：smooth 下应用写完 `scrollTop` 后立刻回读，拿到的是**旧位置**（`403`，而目标是 `4409`），因为只有动画的**起点**被同步提交。这个回读喂进 `nearBottom()` 后，`floor - oldTop > 25` 让应用认定「读者已经离开底部」，于是**放弃跟随**——输出会静默地不再跟随自己，没有任何报错。
+
+**任何改变「写后回读语义」的机制都被否决**，无论它在 CSS 里看起来多诱人。
+
+### 修法：不写端口，只在 scroll 事件里补偿对话栏
+
+新机制**从不写端口**。它监听端口的 `scroll` 事件，只对对话栏（`[data-chat-flow]`）施加一个补偿性 `translateY`，再逐帧把它衰减归零：
+
+```js
+offset += (top_after - top_before)
+column.style.transform = 'translateY(' + offset + 'px)'
+```
+
+补偿量正好抵消应用刚做的那一步，所以内容在屏幕上**停在原地**，随后几帧里滑回应用给的位置——眼睛看到的是滑行，而应用执行的仍是跳转。实测（同一页面、96px 步进 / 60ms，功能关 vs 功能开）：
+
+| | 功能关（控制组） | 功能开 |
+| --- | --- | --- |
+| 最差单帧屏上位移 | 96px | 约 20–38px（多次运行区间） |
+| 应用 `scrollTop` 回读误差 | 0px | **0px**（跟随意图不受影响） |
+| 静止时 transform | — | 已清空 |
+| 端口相对应用自己的 floor 的残差 | 0 | **0** |
+
+控制组这一列就是负向对照，它证明夹具**真的**能复现那个硬跳：关掉功能时 `maxStep == rawStride`（96px）且零 transform。没有这一列，「平滑了」只是夹具的自证。
+
+同页另一次实测确认了第二条不变式：`translateY(240px)` **不会**改变端口的 `scrollHeight`，也不改变 floor——应用自己那条 `overflow: visible clip` 链把位移兜住了，因此补偿永远不可能反馈进应用的算术。
+
+### 为什么是 `scroll` 事件，而不是 patch `scrollTop` 访问器
+
+直觉上遮蔽访问器更「精确」，但同一循环下实测：
+
+| 应用的写入口 | `scroll` 事件 | patch 访问器 |
+| --- | --- | --- |
+| `scrollTop = v` | 21.88px | 21.87px（持平） |
+| `scrollTo({ behavior:'instant' })` | **21.88px** | 32.0px（**完全看不到**） |
+
+差距的来源是时序：Chrome 在渲染步骤里、**rAF 与绘制之前**派发 `scroll`，所以处理函数里的写能赶上这一帧；而 patch 只能看到走 setter 的那一条路径。除此之外，监听还有两个非性能的理由：它**不遮蔽任何 DOM 访问器**（避免把「应用自己的读写」也变成我们的责任），并且能**跨 React 重建元素存活**。
+
+同理，补偿必须**写在处理函数里**，不能挪进 `requestAnimationFrame` 或任何调度回调：第一版就是在下一帧才写 transform，实测 `maxStep` 等于原始步进——等于没有动画。
+
+### 衰减常数：`tau` 是「顺滑换滞后」的唯一旋钮
+
+`offset *= exp(-dt/tau)` 里的 `tau` 同时决定两件事：越大越顺滑，也越大越滞后。稳态滞后有闭式解
+
+```text
+lag = stride / (1 - e^(-interval / tau))
+```
+
+所以这不是一个可以「调到既顺滑又不滞后」的参数——档位之间的差别就是这条取舍线上的位置。
+
+`tau` 必须**远大于一帧**（约 16.7ms），否则 offset 在下次绘制之前就已经归零，补偿静默地退化成空操作。
+
+`standard`（`tau` 70ms）是默认值。实测与闭式解吻合，因此可以放心引用**两个**速率（只测一个会误导，这正是本节留下的一条教训）：
+
+| 速率 | 闭式解 | 实测 |
+| --- | --- | --- |
+| 真实流式（每 250ms 一行 24px，约 96px/s） | 6.7px | **3.1px**（不足一行行高） |
+| 刻意夸张的合成速率（每 60ms 一步 96px，约 1600px/s） | 167px | **163px** |
+
+也就是说：真实速率下滞后在「一行以内」，夸张速率下才到 ~110–160px。功能关闭时两个速率都是 **0px**。
+
+> **量滞后本身就是个陷阱**（改那条断言前值得先读）。滞后必须读成「尾部相对端口下缘的**正值**距离」，且基线要在**屏幕上没有 offset 时**取。取早了——`scroll` 事件在渲染步骤里投递，不与写入同步——就会把那一次钉底的 offset 留在基线里，让**之后每个样本都偏低**，低到可以报出**负滞后**（内容跑到视口上方，物理上不可能）。本仓库真的踩过：基线早了 9.6px，指标读到 -12px。现在测试先等两帧再排空，并断言 `minLag >= -1`，让这个指标不能再往「看起来更安全」的方向说谎。
+
+
+### 0.5px epsilon：让静止态**可达**，而不只是「趋近」
+
+指数衰减是渐近的，永远到不了零。加 epsilon 之前实测：offset 卡在 `translateY(0.09px)`，端口**一直停在 `active` 状态**、transform 永远不清除——一个看不见的位移，却永久持有合成层。
+
+因此衰减到 `0.5px` 以下就**直接归零并清空 transform**。取 0.5 是 CSS 像素而不是设备像素：任何 DPR ≥ 1 时它至多半个设备像素，且就在到达它的那一帧被移除，所以静止几何与应用自己的几何**完全相同**，而不是「差不多」。
+
+### 为什么不做上限截断（clamp），而是拒绝过大的步进
+
+第一版把 `offset` 钳到上限，听起来更安全，实测却更糟：**被 clamp 的变体 `stepMax` 等于原始步进（192/192，即完全没有平滑）**，而未 clamp 的曲线是 **43.9px**。原因是钳制只让内容「少走一点」，那点缺口会在**下一帧变成一次瞬时跳**——把要消除的东西原样还回来。
+
+所以上限不是用来塑形的旋钮，而是**安全检查**：超过该档 `cap` 的步进被整条拒绝、瞬时呈现。`cap` 远高于任何真实内容块（一个落地的工具结果或代码围栏是几百 px），所以那些——本功能真正存在的理由——仍然会滑，只有恢复会话、跳转到某个回合这类荒谬的大步进绕过动画。
+
+### 门控：几何 + 布局测量，且刻意不读上游属性
+
+一个步进会被柔化，当且仅当：**步进前端口已在底部**（应用自己的 25px 容差，再加一点余量到 40px，好让晚到一帧的步进仍算数）、**方向向下**、**不超过该档 `cap`**、**且这一步是纯增长而不是布局重排**（最后一条见下一节，它是后补的，因为前三条曾经不够）。
+
+这个判据不需要任何上游钩子。前三条能排除掉大多数情形：加载更早的历史、恢复会话、跳到某个回合都**不是**从底部出发；向上移动永远不满足；读者自己的滚轮位移也不可能「从底部出发并向下」，因为底下已经没有可滚的东西了。
+
+> **但前三条并不充分——这是被用户实测推翻的一个结论，值得留在这里。** 原本这里写的是「从底部出发、向下的位移只可能是应用在钉新长出来的内容」。**展开思考块**就是反例：它同样从底部出发、同样向下、同样可能小于 `cap`，但它是**布局重排**而不是增长。当时因此把一个 159px 的重排当成增长去补偿，用户看到的就是「展开时明显抽搐」。判据缺了一条，详见 [布局重排的补偿](#布局重排展开思考块为什么抽搐)。
+
+应用确实有一个语义相同的 `data-chat-following-tail` 属性，但**刻意不用**：我们自己加的无哈希属性加几何判据，在上游改名后仍然工作；而依赖上游契约会把一次改名变成「功能静默死掉」。
+
+其余一律保持瞬时，且这条清单是**行为契约**而不是实现细节：向上滚动、从阅读位置跳转、超大步进、`wheel` / `touchstart` / `pointerdown` / `keydown` 手势、`prefers-reduced-motion`、页面隐藏（页面隐藏这一条同时也防止冻结的 rAF 把一大段 offset 晾在那里、等回来时再补算）。
+
+### 布局重排：展开思考块为什么抽搐
+
+**现象**（用户报告）：展开思考（reasoning）时对话区明显抽搐一下。
+
+**成因**：补偿量的数学前提错了。真实被补偿的量是**眼睛看到的位移**：
+
+```text
+visual = layoutDelta - delta
+```
+
+`delta` 是应用钉底的位移，`layoutDelta` 是**布局自身**在同一步里移动既有内容的距离。纯流式追加时 `layoutDelta` 恒为 0，所以 `visual == -delta`，补偿 `+delta` 正好把画面按回原位、再衰减滑到新位置。但展开不是追加：`ReasoningRow` 折叠时是一个固定 24px 的盒子（`contain:size layout`），展开时**整段 markdown body 一次性挂载**，列在数百 px 的量级上变高，而这个增长发生在**尾部内容之上**——布局把尾部往下推了 `H`，应用又把它往上钉了差不多的量，两者几乎抵消，**屏幕上内容根本没动**。此时再补 `+delta`，等于凭空造出 `H` 的位移，然后再花 0.6 秒滑回来。
+
+实测（默认档位 `standard`，展开 8 行思考）：
+
+| | 关闭功能 | 修复前 | 修复后 |
+| --- | --- | --- | --- |
+| 尾部最大位移 | 39.5px（一帧掠过） | **159.5px** | 39.5px |
+| 之后的滑行 | 无 | **659ms** | 无 |
+| 最大 transform | 0 | 159px | **0** |
+
+**修法**：不再假设「`scrollTop` 的增量就是视觉位移」，而是**测量**布局自己贡献了多少：
+
+```js
+const layout = anchor.getBoundingClientRect().top - column.getBoundingClientRect().top
+const layoutDelta = layout - entry.lastLayout      // 同一节点才相减
+const visual = delta - layoutDelta
+```
+
+`anchor` 取**列的最后子节点**（流式就是在它这一段追加，所以底部追加不能移动它的顶边）。两个 rect 都包含我们自己写的 transform，相减时**恰好抵消**，所以量到的只有布局位移。
+
+**踩过的三个坑**（都是测量纠正的，不是推理出来的，所以写在这里）：
+
+1. **锚点不能用「端口」做参照。** 端口不随 transform 移动，于是两次 stride 之间**我们自己 offset 的衰减**（`tau=70ms` 下每步几十 px）被当成布局重排，动画被中途拆掉——测试立刻抓到：`maxStep` 156px 而原始步进只有 96px。改为相对**列自身顶边**后，transform 在两者中相等而抵消。
+2. **锚点不能用最深的最后一个后代。** 那正是展开时自己会变形的节点（markdown body），实测对 159px 的重排只报 0.5px——完全瞎。
+3. **空列不能回退成「列自己」。** 列相对自己的偏移恒为 0，于是基线被永久钉在 0，第一次大重排就会被读成 `layoutDelta 0` 而照旧动画——正是这个 gate 要防的场景。
+
+**护栏**：`test/scroll-anim.test.js` 里有一条专门的展开回归断言——用真实 `ReasoningRow` 的形状（折叠 24px 盒子 + 展开挂载 body）、用应用自己的 `ResizeObserver` 触发重钉底，断言展开时**不得比关闭功能时多位移**、且**不得产生任何 transform**；同时保留「流式必须仍然动画」那一半，因为一个「见到 resize 就整个关掉」的 gate 也能通过前一半。变异验证里 **M4 就是把补偿改回 `visual = delta`**（即修复前的代码），该断言报 `151.5px vs 0.5px` 并变红。
+
+
+### 副作用审计：transform 的包含块与滚动溢出
+
+在对话栏上加 `transform` 不是零成本的原语，落地前对着发布版 bundle 核过两件事：
+
+- **包含块**：`transform` 会给 `position: fixed` 后代创建包含块。对话子树里**没有**这样的后代（chat / conversation 两个 bundle 里的 `position: fixed` 属于 portal 出去的统计对话框，渲染在这棵树之外；唯一一处 JS `style.transform` 属于回合轨的虚拟化器，它的元素是对话栏的**兄弟**），而粘性元素（输入区座位、回合轨、分组标题）同样都是兄弟而不是后代，因此都不受影响。
+- **滚动溢出**：如上所述，`translateY` 不改变 `scrollHeight` 与 floor，应用测到的仍是它预期的那个 floor。
+
+### 护栏
+
+`test/scroll-anim.test.js` 把上面每一条都变成断言：A 部分在**源码切片**上钉接线（片段里不得出现任何 `scrollTop` 赋值或 `scrollTo(` 调用、必须挂 passive 的 `scroll` 监听、只用无哈希的 `data-*` 钩子、门控表达式与 prefs 契约都在）；B 部分在**真实浏览器**里跑真实 `client.js`，并在**同一页**上先取下负向对照（功能关时 96px 一步跳满、零 transform），再断言功能开的 96px → 约 38px、回读误差 0px、静止时 transform 清空且端口落在 floor 上、滞后在合理速率下不超过一行、`translateY(240px)` 不改变 `scrollHeight` 与 floor。
+
+`scroll-behavior: smooth` 那条否决因此有一个可执行的形式：**回读误差必须是精确的 0**。一旦有人把机制换成任何「写后回读语义变了」的写法，这条断言会直接红。
 
 ---
 

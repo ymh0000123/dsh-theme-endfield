@@ -38,6 +38,8 @@
           const [contourFps, setContourFps] = R.useState(readContourFps())
           const [contourSpeed, setContourSpeed] = R.useState(readContourSpeed())
           const [contourScrollPause, setContourScrollPause] = R.useState(isContourScrollPauseOn())
+          const [scrollAnim, setScrollAnim] = R.useState(isScrollAnimOn())
+          const [scrollAnimLevel, setScrollAnimLevel] = R.useState(readScrollAnimLevel())
           const [thunderOn, setThunderOn] = R.useState(isThunderOn())
           const [thunderAnim, setThunderAnim] = R.useState(isThunderAnimOn())
           const [balanceOn, setBalanceOn] = R.useState(isBalanceCapsuleOn())
@@ -107,6 +109,8 @@
               setContourFps(readContourFps())
               setContourSpeed(readContourSpeed())
               setContourScrollPause(isContourScrollPauseOn())
+              setScrollAnim(isScrollAnimOn())
+              setScrollAnimLevel(readScrollAnimLevel())
               setThunderOn(isThunderOn())
               setThunderAnim(isThunderAnimOn())
               setBalanceOn(isBalanceCapsuleOn())
@@ -149,6 +153,10 @@
             R.useEffect(() => { refreshHostState() }, [])
           }
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
+          /* Which copy key names each 动画强度 level. The level ids are the stored
+             literals (SCROLL_ANIM_LEVELS, shared with the runtime), so a level can
+             never be stored under a name the row cannot render. */
+          const SCROLL_ANIM_LEVEL_COPY = { soft: 'scrollAnimLevelSoft', standard: 'scrollAnimLevelStandard', snappy: 'scrollAnimLevelSnappy' }
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
           // Sub-label explaining what a switch does, so the row is self-describing.
           const hintStyle = { display: 'block', color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', fontWeight: 400, lineHeight: '1.5', marginTop: '2px' }
@@ -283,8 +291,23 @@
               contourApplySwitches()
             }
           }
-          const toggleWm = () => {
-            const next = !isWatermarkOn()
+          /* 输出滚动动画. syncScrollAnim() reads the pref store, so the write above is
+             what it acts on: turning it off must RELEASE the offset immediately (a
+             disabled feature that leaves a transform on the transcript is worse than
+             never having had the feature). Turning it on attaches to whatever port is
+             already on screen, so the next streamed step is already smooth. */
+          const toggleScrollAnim = () => {
+            const next = !isScrollAnimOn()
+            prefsSet(SCROLL_ANIM_KEY, next ? '1' : '0')
+            setScrollAnim(next)
+            syncScrollAnim()
+          }
+          const setScrollAnimLevelValue = (level) => {
+            if (SCROLL_ANIM_LEVELS.indexOf(level) === -1) return
+            prefsSet(SCROLL_ANIM_LEVEL_KEY, level)
+            setScrollAnimLevel(level)
+          }
+          const toggleWm = () => {            const next = !isWatermarkOn()
             prefsSet(WATERMARK_KEY, next ? '1' : '0')
             setWmOn(next)
             syncWatermarkVisibility()
@@ -695,9 +718,46 @@
                 }, t(wmPersist ? 'wmPersistOff' : 'wmPersistOn'))
               ]),
             ]),
-            /* --- 03 动画：启动加载动画 --- */
+            /* --- 03 动画：输出滚动动画 + 启动加载动画 --- */
             R.createElement('div', { key: 'group-anim' }, [
               groupTitle('03', 'groupAnim', false),
+              row('scroll-anim', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('scrollAnimRow') + t('sep') + stateOf(scrollAnim),
+                  R.createElement('span', { style: hintStyle },
+                    // Say so when the OS preference is overriding the switch, rather
+                    // than letting it look like the toggle is broken.
+                    (scrollAnim && prefersReducedMotion())
+                      ? t('scrollAnimHintReduced')
+                      : t(scrollAnim ? 'scrollAnimHintOn' : 'scrollAnimHintOff')
+                  )
+                ),
+                R.createElement('button', {
+                  type: 'button',
+                  onClick: toggleScrollAnim,
+                  style: btnStyleFor(scrollAnim),
+                }, t(scrollAnim ? 'scrollAnimOff' : 'scrollAnimOn'))
+              ]),
+              /* 动画强度 is a level, not a polarity: the three values are points on
+                 one smoothing/lag trade-off, so they get a segmented row like FPS
+                 and 速度 rather than a toggle. Disabled while the feature is off,
+                 because a level for a disabled animation is not a choice. */
+              row('scroll-anim-level', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('scrollAnimLevelRow') + t('sep') + t(SCROLL_ANIM_LEVEL_COPY[scrollAnimLevel]),
+                  R.createElement('span', { style: hintStyle }, t('scrollAnimLevelHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '4px', flex: '0 0 auto' } },
+                  ...SCROLL_ANIM_LEVELS.map((level) => R.createElement('button', {
+                    key: 'scroll-level-' + level,
+                    type: 'button',
+                    onClick: () => setScrollAnimLevelValue(level),
+                    style: btnStyleFor(scrollAnimLevel === level, !scrollAnim),
+                    disabled: !scrollAnim,
+                    title: scrollAnim ? '' : t('scrollAnimNeedOn'),
+                  }, t(SCROLL_ANIM_LEVEL_COPY[level])))
+                )
+              ]),
               row('loader', true, [
                 R.createElement('span', { style: labelStyle },
                   t('loaderRow') + t('sep') + stateOf(loaderOn),

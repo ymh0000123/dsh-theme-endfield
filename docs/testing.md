@@ -188,6 +188,59 @@ node test/balance-capsule.test.js    # 胶囊标记 / CSS / 绘制 / 设置行�
 
 ---
 
+## 输出滚动动画
+
+```bash
+npm run test:scroll                   # node test/scroll-anim.test.js
+```
+
+这个功能有两种**完全相反**的失败方式，而显而易见的那种实现恰好会踩中第二种：**没有可见效果**（补偿晚了一帧，原始硬跳照常绘制——看起来像个死功能），以及**跟随被破坏**（`scroll-behavior: smooth` 或任何写 `scrollTop` 的写法：实测回读拿到旧位置、`floor - oldTop > 25` 把跟随意图翻成「读者已离开」，于是输出静默地不再跟随自己）。因此这份测试的断言必须同时守住两侧，而且每一条视觉结论都要配一个**在同一页里取到的**负向对照。
+
+**A 部分——源码接线，不用浏览器。** 从 `client.js` 里切出本功能的片段（而不是整个 bundle：整个 bundle 本来就没写 `scrollTop`，切片才让「这段代码从不移动端口」成为关于**设计**的陈述，而不是当前文件的巧合）。断言：片段里**不得**出现任何 `scrollTop` 赋值或 `scrollTo(` 调用（应用的跟随意图就是从写后回读推出来的）；必须挂的是 passive 的 `scroll` 监听；端口与对话栏都只能用无哈希的 `data-conversation-scroll` / `data-chat-flow` 钩子；片段里不得出现任何哈希类名；`prefers-reduced-motion`、`wasAtFloor` 与 `delta <= 0.5` 这几个门控表达式必须真实存在；卸载与挂载路径必须分别调到 `destroyScrollAnim()` / `syncScrollAnim()`，且页面观察器的钩子必须在每一次渲染后重新挂上。最后是 prefs 契约：两个新字段必须在 `FIELD_DEFAULTS` 里声明（`scrollAnim` 出厂为 `'1'`，即默认开启）、且 UI 键必须映射到声明字段（issue #15 那一类 bug：字段名对不上就静默落盘到没人读的地方）。
+
+**B 部分——真实浏览器里的真实产物。** 夹具按**发布版 bundle 里的真实链条**搭（类名、以及那条 `overflow: visible clip` 包含关系都是照抄的——「transform 会不会把端口撑大」正是这个设计依赖的前提）。每次跑都先做控制组、再做功能开，两趟走同一段代码路径：
+
+| 断言 | 内容 |
+| --- | --- |
+| 挂上了 | 端口被标成 `idle`，说明运行时真的接上了真实滚动容器 |
+| **负向对照**（功能关） | 一个步进必须画成整段硬跳：`maxStep == rawStride`（96px），且零 transform——**这一条失败就说明夹具根本没有复现它声称要消除的那个硬跳**，后面所有「平滑了」的结论都不成立 |
+| 平滑 | 最差单帧屏上位移 96px → 约 20–38px（低于控制组的 80%），且最大 transform > 5px（真的动了对话栏） |
+| **时机** | 从静止起单独做一次钉底，**下一帧**必须已经看到 transform：这条守的是「补偿必须写在 `scroll` 处理函数里，不能挪进 `rAF`」——一个把绘制延后一帧的变体在本夹具上能骗过平滑断言（实测在更大夹具上退化到 224px），却会在这一条上直接红（见下方变异验证） |
+| 诚实 | 应用写 `scrollTop` 后的回读误差**恰好为 0**（并统计回读次数，确保这条路真的被走到过）——这就是 `scroll-behavior: smooth` 那条否决的可执行形式 |
+| 静止 | transform 被清空、端口回到 `idle`、且相对应用自己的 floor 残差为 0（不是「差不多」） |
+| 滞后 | **两个速率**各测一次：真实流式（96px/s）中位数 ≤24px（实测约 3px），夸张合成速率（1600px/s）只要求有界（实测约 110px）；并断言**最小值不得为负**——负滞后物理上不可能，出现即说明基线取早了、整个指标不可信（本仓库踩过：基线早 9.6px → 指标读到 -12px） |
+| 被兜住 | `translateY(240px)` 后 `scrollHeight` 与 floor 都不变 |
+| React 替换 | 在 offset **飞行中**替换对话栏 / 整个端口：旧节点必须不留 transform 与状态钩子，新节点必须接上并且能动画 |
+| 多端口 | 第二个滚动容器（嵌入视图）必须能挂上、独立动画、被移除时干净卸载 |
+| **布局重排** | 按真实 `ReasoningRow` 的形状（折叠 24px 盒子 + 展开挂载 body）展开，并用应用自己的 `ResizeObserver` 触发重钉底：位移**不得比关闭功能时更多**、且**不得产生任何 transform**。这条是为用户报告的「展开思考时抽搐」补的回归 |
+
+**门控**在同一页里逐条实测，且必须**两侧都成立**：流式步进必须真的产生 offset（门控不能太紧——把正常跟随也判成「非流式」就是一种静默失效），而滚轮手势、向上滚动、从阅读位置跳转、超大步进**必须**保持瞬时。
+
+> 这条门控测试自己踩过一个坑，值得记下：第一版「增长内容再钉底」是把 `scrollTop` 写在一个**已经钉在底部**的端口上，于是写入被钳制成零位移，门控根本没被测到、还报了一次假失败。现在的 `streamStep()` 先把内容长高、再让应用去钉底，也就是流式真正的形状：端口**结束**在 floor 上、**开始**时在它上方 d px。
+>
+> 「从阅读位置跳转」那一条还踩过第二个坑，更隐蔽：第一版先退 700px 再跳回底部，可 700px 本来就超过 `cap`、会被**另一条**门控拒绝，于是把 `wasAtFloor` 整段删掉测试照样全绿。现在这一条让读者停在离底 100px、由应用钉一段 250px 的内容（低于 `cap`、且只有「端口确实在底部」才能成立），`wasAtFloor` 因此成了唯一能拒绝它的判据。
+>
+> 而「布局重排」那一条是**被用户实测补上来的**：原有四条几何门控看似充分（从底部出发 + 向下 + 不超 cap），但展开折叠区同样满足这三条。少了这一条时，展开思考块会凭空多出 159px 位移并花 659ms 滑回来。它的判别力由变异 **M4**（把补偿改回 `visual = delta`，即修复前的代码）验证——该断言报 `151.5px vs 0.5px` 变红。
+
+
+**reduced-motion** 用替换 `matchMedia` 的方式让 `prefers-reduced-motion` 答「是」，断言开关仍是开的时候补偿**完全不发生**（系统偏好压过开关）。
+
+**关闭即释放**：先让 offset 真的存在（同样是「长高再钉底」的形状，写在一个已钉底的端口上会没有东西可释放），再把开关拨到 `'0'`，断言 offset 立即清空、之后保持惰性、且端口上的状态钩子被摘掉——一个变成孤儿的 transform 会让对话栏在本次会话余下的时间里一直偏移。
+
+> **变异验证 2 类，都必须报错**（这两条正是由一个独立复核者先发现「测试抓不住」才补上的）：
+>
+> | 注入 | 症状 | 现在由哪条断言抓住 |
+> | --- | --- | --- |
+> | 把 `scrollAnimPaint` 从 `scroll` 处理函数挪进 `requestAnimationFrame` | 本夹具上**完全看不出**（平滑断言照过），但更大的夹具上最差单帧退到 **224px** | **时机**那条：从静止起单次钉底，下一帧必须已经有 transform |
+> | 删掉 `!wasAtFloor` | 读者停在历史中间时被强行动画（250px 被摊成 51px 帧步） | **门控**里「从阅读位置跳转」那条（重构后 `wasAtFloor` 是唯一能拒绝它的判据） |
+>
+> 注入脚本在 `.dsh-vision-toolkit/tmp/mutation-check.js`（本地探针，不入库）。注意它**不用 `git checkout` 还原**：本片段是新文件、不在 HEAD 里，而暂存区当时还是旧版本，`git checkout --` 会静默复活一个已经修掉的缺陷。它改为按字节备份并在结束时校验 SHA256 一致。
+
+
+> 与其它浏览器用例一样，脚本最后断言页面**没有报任何错误**；它 spawn 本机 Chrome 做无头渲染（见开头的运行环境说明）。
+
+---
+
 ## 设置页
 
 ```bash
@@ -203,14 +256,14 @@ node test/host-esm-entry.test.js    # ESM 宿主入口：default 上的转出面
 
 **`settings-rows.test.js`** 不用浏览器也不用 React：以**记录型 `React` / `slots` + 假的设置 transport**（`test/fixtures/settings-scope.js`）在进程内跑一次真实 `apply()`，抓下设置面板真正的元素树。设置页是用户唯一能碰到这些开关的入口，而那里的错误（抛异常、漏 key、开关写错了 DSH 设置的字段）check.js 与画布测试都看不见。
 
-> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置服务**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 transport：除 `settings-config-forms.test.js` 之外的用例走旧世代 `ctx.settingsScope`（fixture 的 `settingsScopeStub`，在内存里扮演 `<settings.yaml>` 的命名字段节），新世代由 `configFormsStub` 扮演 `ctx.configForms`（命名空间 = profile entry id）。断言 27 行齐全且归入 5 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐 / 05 音频）与配色样式规则都在、配色行默认显示谷地黄且按钮提供「切换武陵青」、点击把 `palette` 写成 `wuling`、存了 `wuling` 时反向提供「切换谷地黄」并标注 `#14d0d0`、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
+> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置服务**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 transport：除 `settings-config-forms.test.js` 之外的用例走旧世代 `ctx.settingsScope`（fixture 的 `settingsScopeStub`，在内存里扮演 `<settings.yaml>` 的命名字段节），新世代由 `configFormsStub` 扮演 `ctx.configForms`（命名空间 = profile entry id）。断言 31 行齐全且归入 5 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐 / 05 音频）与配色样式规则都在、配色行默认显示谷地黄且按钮提供「切换武陵青」、点击把 `palette` 写成 `wuling`、存了 `wuling` 时反向提供「切换谷地黄」并标注 `#14d0d0`、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
 
 **`settings-durable-hold.test.js`**（旧世代 `settingsScope` 路径；0.1.7 上同一份写入 gate / 补写契约由 `settings-config-forms.test.js` 覆盖）用**两阶段假 `ctx.settingsScope`** 复现那条历史告警：宿主半部 `ctx.settings.register(...)` 尚未跑、命名空间还没进 Host 的 served 列表前，scope 快照是 `{ status:'unavailable', writable:true, mode:'host' }`——单看 `writable` 会照写不误却落不到盘。它先在未就绪态切「圆角 / 武陵青」，断言**没有任何 `scope.set` 出线**（旧 bug 会打 `commit … status= unavailable` 并静默丢脏）；随后模拟文档 committed、命名空间进入 served 列表、快照翻为 `status:'ready'`，断言订阅路径把两份 held 编辑**自动补写**进文档，且不会重复写两遍（replay 有 re-entrancy 护栏）。
 
 **`settings-config-forms.test.js`** 守的是 0.1.7-rc.1 换掉整套 settings API 之后最容易「看起来正常、其实没保存」的几处：它用假 `configForms` 服务（fixture 的 `configFormsStub`，只有被 `serve()` 过的命名空间才报 `status:'ready'`）驱动真实 client，断言
 
 - **两半的 entry id 一致**：`client.js` 的 `PREFS_ENTRY` == `index.js` 的 `SETTINGS_ENTRY` == `cordis.patch.yml` 里那一行的 `id`（命名空间是 entry id，任一处对不上就全程读不到）；
-- **Host `Config` 真的可编辑**：27 个字段齐全、无多余字段、**每个字段都带 `.volatile()`** 且默认值等于 `FIELD_DEFAULTS`——漏一个 volatile 就是 0.1.7 版的「设置保存不了」（该断言在拿不到 schemastery 的环境里自动跳过，CI 无 DSH 时不会误报——**也正因为会跳过，它没能在唯一要紧的环境里发现问题**：本机 web profile 恰好就是「拿不到可用的 schemastery」这台机器，于是这一整段断言空跑，`Config` 缺失一路绿灯。字段契约与选择顺序现由 `settings-config-fallback.test.js` 无条件断言）；
+- **Host `Config` 真的可编辑**：31 个字段齐全、无多余字段、**每个字段都带 `.volatile()`** 且默认值等于 `FIELD_DEFAULTS`——漏一个 volatile 就是 0.1.7 版的「设置保存不了」（该断言在拿不到 schemastery 的环境里自动跳过，CI 无 DSH 时不会误报——**也正因为会跳过，它没能在唯一要紧的环境里发现问题**：本机 web profile 恰好就是「拿不到可用的 schemastery」这台机器，于是这一整段断言空跑，`Config` 缺失一路绿灯。字段契约与选择顺序现由 `settings-config-fallback.test.js` 无条件断言）；
 - **被 served 的表单会被绑定并采纳**（存档里的 `palette: wuling` 直接落到 `<body>` 的 class）；
 - **entry id 是探测出来的**：只 served `include:theme-endfield` 时写入也落在那个拼写上；
 - **拒写与未就绪都算 held**：`set()` 解析为 `false`、或命名空间尚未 served 时，编辑不改变文档、也不假装保存；一旦拒写解除（下一次快照）或命名空间进入 served，held 编辑被自动补写；

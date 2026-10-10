@@ -161,12 +161,12 @@ const buttons = nodes.filter((n) => n.type === 'button')
    contour-renderer rows (16) plus this branch's 11 audio rows. The count is
    asserted below against the rendered tree as well, so a row that exists in the
    page but not in this list still fails. */
-const ROW_KEYS = ['theme', 'palette', 'glass', 'radius', 'contour', 'contour-anim', 'contour-trail', 'contour-renderer', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim', 'balance-capsule', 'credit-display', 'audio', 'audio-boot', 'audio-start', 'audio-done', 'audio-volume', 'audio-attention', 'audio-fail', 'audio-source', 'audio-dir', 'audio-human', 'audio-diag']
+const ROW_KEYS = ['theme', 'palette', 'glass', 'radius', 'contour', 'contour-anim', 'contour-trail', 'contour-renderer', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'scroll-anim', 'scroll-anim-level', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim', 'balance-capsule', 'credit-display', 'audio', 'audio-boot', 'audio-start', 'audio-done', 'audio-volume', 'audio-attention', 'audio-fail', 'audio-source', 'audio-dir', 'audio-human', 'audio-diag']
 const rows = nodes.filter((n) => n.type === 'div' && n.props && ROW_KEYS.includes(n.props.key))
 const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.props && /^group-/.test(c.props.key))
 
-if (rows.length === 29) pass('panel has all 29 setting rows')
-else fail('expected 29 rows, found ' + rows.length)
+if (rows.length === 31) pass('panel has all 31 setting rows')
+else fail('expected 31 rows, found ' + rows.length)
 
 /* Count the rows the way the PAGE defines them — every direct child of a group
    container — so an unlisted new row shows up as a mismatch instead of vanishing. */

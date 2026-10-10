@@ -115,6 +115,12 @@ const FIELD_DEFAULTS = {
   contourRenderer: 'canvas', // opt-in Worker/WebGL; original backend by default
   contourTrail: '0',        // optional mouse deformation, default off
   contourScrollPause: '1',  // 滚动暂停 —— default on
+  // 输出滚动动画 —— default ON. It leaves the app's own scroll bookkeeping
+  // untouched (the scrollTop read-back stays exact, so stream following survives)
+  // and only compensates the transcript column visually, so an install that
+  // upgrades into it gets smoother streaming output with nothing to configure.
+  scrollAnim: '1',
+  scrollAnimLevel: 'standard', // 动画强度 —— soft / standard / snappy
   watermark: '1',           // 背景水印 —— default on
   watermarkPersist: '0',    // 水印保持显示 —— default off
   loader: '0',              // 启动加载动画 —— default off

@@ -278,6 +278,12 @@
        later is in its temporal dead zone during apply() — and `typeof` does NOT
        protect against a TDZ ReferenceError the way it does for an undeclared name. */
     let contourSyncHook = () => {}
+    /* Same seam for the output-scroll animator: it too has to attach to nodes the
+       app renders asynchronously (the conversation scrollport), and the observer
+       below is already the page's "something changed, re-attach" channel. Declared
+       here as a real binding and assigned in the fragment that defines it, for the
+       TDZ reason given above. */
+    let scrollAnimSyncHook = () => {}
     /* The bundle can be evaluated before <body> exists (the same window runLoader
        defends with a DOMContentLoaded deferral). The old code created the observer
        only when body was already there and never retried, so an early-boot apply
@@ -294,6 +300,7 @@
         // fires on every DOM change on the page, including every streaming token,
         // so the hook's first act is an O(1) "still attached?" check.
         contourSyncHook()
+        scrollAnimSyncHook()
       })
       watermarkObserver.observe(document.body, { childList: true, subtree: true })
     }
@@ -302,6 +309,7 @@
       if (watermarkObserver === null) return
       syncWatermarkVisibility()
       contourSyncHook()
+      scrollAnimSyncHook()
     }
     if (typeof document !== 'undefined' && document.body !== null) installWatermarkObserver()
     else if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {

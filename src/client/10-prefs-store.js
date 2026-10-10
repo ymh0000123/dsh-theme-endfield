@@ -77,6 +77,12 @@
       contourRenderer: 'canvas',
       contourScrollPause: '1',
       contourTrail: '0',
+      /* 输出滚动动画 —— default ON: it changes nothing about what the app decides
+         (the read-back stays exact) and only softens the streaming pin, so it is a
+         pure improvement for a feature whose whole point is that the output was
+         hard to read while it streamed. See 23-scroll-anim.js. */
+      scrollAnim: '1',
+      scrollAnimLevel: 'standard',
       watermark: '1',
       watermarkPersist: '0',
       loader: '0',
@@ -160,6 +166,13 @@
       contourRenderer: 'contourRenderer',
       'dsh-theme-endfield-contour-scroll-pause': 'contourScrollPause',
       'dsh-theme-endfield-contour-trail': 'contourTrail',
+      /* 输出滚动动画. The two keys happen to equal their schema fields, so the
+         prefix-strip fallback would also resolve them — they are listed explicitly
+         because the table is the ONE place a UI key becomes a field, and because
+         test/settings-namespace.test.js requires every declared host field to have
+         an entry here. */
+      'dsh-theme-endfield-scroll-anim': 'scrollAnim',
+      'dsh-theme-endfield-scroll-anim-level': 'scrollAnimLevel',
       'dsh-theme-endfield-watermark': 'watermark',
       'dsh-theme-endfield-watermark-persist': 'watermarkPersist',
       'dsh-theme-endfield-loader': 'loader',

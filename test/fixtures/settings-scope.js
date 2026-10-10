@@ -59,6 +59,11 @@ const FIELD_DEFAULTS = {
   contourTrail: '0',        // optional mouse deformation, default off
   contourRenderer: 'canvas',
   contourScrollPause: '1',
+  /* 输出滚动动画 — same defaults as index.js FIELD_DEFAULTS: ON, standard level.
+     Listed here because this fixture is a projection of the HOST schema and
+     settings-namespace.test.js diffs the two tables. */
+  scrollAnim: '1',
+  scrollAnimLevel: 'standard',
   watermark: '1',
   watermarkPersist: '0',
   loader: '0',
@@ -97,6 +102,8 @@ const KEY_TO_FIELD = {
   contourRenderer: 'contourRenderer',
   'dsh-theme-endfield-contour-scroll-pause': 'contourScrollPause',
   'dsh-theme-endfield-contour-trail': 'contourTrail',
+  'dsh-theme-endfield-scroll-anim': 'scrollAnim',
+  'dsh-theme-endfield-scroll-anim-level': 'scrollAnimLevel',
   'dsh-theme-endfield-watermark': 'watermark',
   'dsh-theme-endfield-watermark-persist': 'watermarkPersist',
   'dsh-theme-endfield-loader': 'loader',

@@ -39,12 +39,13 @@ dsh plugin --profile web rm dsh-theme-endfield
 - 等高线速度 `1x / 2x / 4x`；
 - 可选鼠标轨迹：鼠标附近的等高线局部变形并逐渐恢复，默认关闭；
 - 背景水印及持续显示；
+- 输出滚动动画：模型流式输出时把「整段跳一大格」摊成逐帧滑动（默认开启，强度分 `柔和 / 标准 / 轻快` 三档）；不改动应用自己的滚动位置，因此跟随不会中断，向上滚动、读者手势与系统「减少动态效果」下都保持瞬时（详见 [docs/features.md](docs/features.md)「输出滚动动画」）；
 - 启动加载动画；
 - 雷霆大字及入场动画；
 - 顶部余额胶囊：悬浮显示 DeepSeek API 余额与峰谷时段（高峰为工作日 `9-12` 点、`14-18` 点；周末、法定节假日与落在周末的调休日都按低谷半价），默认关闭；会话使用 [dsh-codearts-auth](https://www.npmjs.com/package/dsh-codearts-auth) 渠道模型时自动切换为该渠道的剩余额度与积分消耗进度，随渠道切换实时跟随，主读数可在设置中选择右侧百分比显示剩余或已用（详见 [docs/features.md](docs/features.md)「渠道额度模式」）；
 - 可选音频通知：启动音、任务开始/结束音、需要回应时提示，音量与自定义音效目录可调（默认关闭，详见 [docs/audio-notifications.md](docs/audio-notifications.md)）。
 
-所有设置由 DSH 自己的设置服务持久化，与页面 origin/端口无关：在 **DSH 0.2.0-rc.2 / 0.1.7-rc.1 及以后**，Host 半（入口 `index.mjs`，逻辑在 `index.js`）导出一份字段全部 `.volatile()` 的 schemastery `Config`（命名空间 = 本插件 profile entry id `theme-endfield`），浏览器 `client.js` 通过 `ctx.configForms` 读写并订阅，值随 `<profile>/cordis.patch.yml` 落盘；在**更旧的 DSH（≤ 0.1.5）** 上则回落到 `ctx.settings.register('dsh-theme-endfield', schema)` + `ctx.settingsScope`（`<dshHome>/settings.yaml`）。两代都与页面 origin 无关，因此 DSH web 与 DSH Desktop 都能正确保存并在重启/换端口后恢复，不再使用会被 Desktop 随机端口清空的 `localStorage`。详见 [docs/features.md](docs/features.md) 与 [docs/engineering-notes.md](docs/engineering-notes.md)；0.1.7 升级后旧设置需要在设置页重设一次（`settings.yaml` 已被 DSH 废弃，见 [engineering-notes.md § DSH 0.1.7-rc.1 换掉了整套 settings API](docs/engineering-notes.md#dsh-017-rc1-换掉了整套-settings-api-v110-已跟进)）。设置文案支持中英文；动态等高线尊重系统「减少动态效果」，动画帧率和速度可独立调整。
+所有设置由 DSH 自己的设置服务持久化，与页面 origin/端口无关：在 **DSH 0.2.0-rc.2 / 0.1.7-rc.1 及以后**，Host 半（入口 `index.mjs`，逻辑在 `index.js`）导出一份 31 个字段全部 `.volatile()` 的 schemastery `Config`（命名空间 = 本插件 profile entry id `theme-endfield`），浏览器 `client.js` 通过 `ctx.configForms` 读写并订阅，值随 `<profile>/cordis.patch.yml` 落盘；在**更旧的 DSH（≤ 0.1.5）** 上则回落到 `ctx.settings.register('dsh-theme-endfield', schema)` + `ctx.settingsScope`（`<dshHome>/settings.yaml`）。两代都与页面 origin 无关，因此 DSH web 与 DSH Desktop 都能正确保存并在重启/换端口后恢复，不再使用会被 Desktop 随机端口清空的 `localStorage`。详见 [docs/features.md](docs/features.md) 与 [docs/engineering-notes.md](docs/engineering-notes.md)；0.1.7 升级后旧设置需要在设置页重设一次（`settings.yaml` 已被 DSH 废弃，见 [engineering-notes.md § DSH 0.1.7-rc.1 换掉了整套 settings API](docs/engineering-notes.md#dsh-017-rc1-换掉了整套-settings-api-v110-已跟进)）。设置文案支持中英文；动态等高线尊重系统「减少动态效果」，动画帧率和速度可独立调整。
 
 **如果开关总是「刷新后复位」**：先看 Host 侧有没有这份 `Config`（`Config.listConfigs` 对该 entry 报 `absent` 就是没有）。没有 Config 时 DSH 不投影任何表单，Host `apply()` 会打一行 warn 并在 profile 目录留下报告文件 `theme-endfield-diagnostic.json`（`Config` 构建成功时会自动删除它；报告里的 `schemaMode` / `loaded` / `loadError` 会写明走了哪条解析路径、以及某个副本是否「解析得到却加载失败」）——排查与判据见 [docs/testing.md](docs/testing.md#设置页)。另外注意：**改 Host 半（`index.js`）必须整进程重启 DSH**，刷新页面只重载 `client.js`。
 
