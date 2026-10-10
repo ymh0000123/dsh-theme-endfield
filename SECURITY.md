@@ -30,7 +30,7 @@ locale, README.md, docs, lib, sounds, LICENSE`，外加 npm 始终包含的 `pac
 
 ### 1.1 宿主半真正拥有的能力（人工审阅从这里开始）
 
-签名扫描只会报"长得像危险"的字符串，下面三处才是需要判断的**实际权限**：
+签名扫描只会报"长得像危险"的字符串，下面四处才是需要判断的**实际权限**：
 
 1. **派生子进程放声**（`lib/audio.js:307-346`）。不直接用 `child_process`，而是取宿主的
    `subprocess` 服务、以固定 argv 表（`playerCommands`）派生系统播放器；Windows 分支走
@@ -43,9 +43,20 @@ locale, README.md, docs, lib, sounds, LICENSE`，外加 npm 始终包含的 `pac
    也就是说：**任一被扫掠目录里放一个名为 `schemastery` / `@deepseek-ai/schemastery` 的
    包，其顶层代码会在宿主进程里执行**。这是有意的降级（找不到 `Config` 等于所有设置刷新
    即丢），但它是信任边界而不是误报，扫描器不会替你判断。
-3. **一条回环 HTTP 路由**（`index.js:846-944`，`/theme-endfield/audio`）。供设置页做试听
+3. **一条回环 HTTP 路由**（`index.js:986-1056`，`/theme-endfield/audio`）。供设置页做试听
    与诊断，`POST` 分支会以 `force: true` 绕过限速直接放声。该 handler **自身不做 Origin /
    会话校验**，依赖宿主 webServer 的鉴权与前缀归属；`readJson` 有 64 KB 截断但没有超时。
+4. **宿主进程唯一的出网请求**（`index.js:1118-1184`，由路由 `index.js:1213` 上的
+   `/theme-endfield/balance` 触发）。余额胶囊先问宿主账户服务，拿不到再回退到
+   `GET https://api.deepseek.com/user/balance`（常量 `index.js:1095`）——**这是本插件第一次
+   由宿主进程而不是浏览器发起外部 HTTP**。边界如下：
+   - 目标 URL 是**写死的字面量**，不由任何输入拼接；没有跳转跟随、没有自定义 header 注入。
+   - 凭据只从宿主 `credentials` 服务按固定名 `DEEPSEEK_API_KEY`（`index.js:1094`）解析，
+     失败才看 `process.env`；**只作为 `Authorization: Bearer` 发出**，不写日志、不进响应体、
+     不落盘。响应体里最多回一个 `keySource`（`env` / `file` / `-env` 的层级，不含值）。
+   - 有 `AbortSignal.timeout(8000)` 上限，结果在模块内缓存 30 秒（失败 10 秒）。
+   - 拿到的是余额数字，**不回写任何配置**；上游失败只会变成页面上的一句话。
+
 
 ## 2. 实测扫描结果
 

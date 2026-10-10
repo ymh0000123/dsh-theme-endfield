@@ -8280,6 +8280,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       balanceHintOn: '在页面顶部中间悬浮显示账户余额与峰谷定价时段（每分钟刷新余额，时段倒计时每秒走字；右侧「预览」可重播开场动画）',
       balanceHintOff: '默认关闭；开启后悬浮显示余额与峰谷时段（高峰为工作日 9-12 点、14-18 点；周末、法定节假日全天、以及落在周末的调休上班日都按低谷半价）',
       balanceNeed: '请先开启顶部余额胶囊',
+      /* 取数失败时必须说明「为什么」：胶囊本体只有 `--`，而这是设置页唯一
+         能解释它的地方。`why` 由宿主路由给出，文案按原因分支。 */
+      balanceWhyNoKey: '胶囊显示 `--`：未登录 platform.deepseek.com，且本机没有配置 DEEPSEEK_API_KEY',
+      balanceWhyKeyRejected: '胶囊显示 `--`：DEEPSEEK_API_KEY 被上游拒绝（可能已失效或额度用尽）',
+      balanceWhyFailed: '胶囊显示 `--`：余额请求失败，稍后会自动重试',
+      balanceViaKey: '当前余额来自 DEEPSEEK_API_KEY（公共接口），不是平台账户余额',
       creditDisplayRow: '渠道额度读数',
       creditDisplayRemaining: '剩余',
       creditDisplayUsed: '已用',
@@ -8448,6 +8454,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       balanceHintOn: 'Floats a capsule at the top centre of the page showing your account balance and the API peak/off-peak pricing window (balance every minute, window countdown every second; Preview on the right replays the opening animation)',
       balanceHintOff: 'Off by default; floats a balance + pricing-window capsule (peak = weekdays 9-12 & 14-18 Beijing; weekends, Chinese statutory holidays and make-up workdays that land on a weekend are off-peak, half price)',
       balanceNeed: 'Turn on the balance capsule first',
+      balanceWhyNoKey: 'The capsule shows `--`: not signed in to platform.deepseek.com, and no DEEPSEEK_API_KEY configured on this machine',
+      balanceWhyKeyRejected: 'The capsule shows `--`: DEEPSEEK_API_KEY was rejected upstream (expired, or the account is out of credit)',
+      balanceWhyFailed: 'The capsule shows `--`: the balance request failed and will be retried automatically',
+      balanceViaKey: 'This balance comes from DEEPSEEK_API_KEY (public endpoint), not from the platform account',
       creditDisplayRow: 'Channel credits readout',
       creditDisplayRemaining: 'Remaining',
       creditDisplayUsed: 'Used',
@@ -8592,6 +8602,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           const [audioHumanOnly, setAudioHumanOnly] = R.useState(isAudioHumanOnly())
           const [audioDiag, setAudioDiag] = R.useState(isAudioDiagOn())
           const [hostState, setHostState] = R.useState(null)
+          /* 余额胶囊的诊断读数。胶囊本身失败时**保持上一次的数字**（刻意设计：
+             闪一个错误状态比留旧值更糟），所以「为什么是 --」只能由设置页回答：
+             这里读宿主路由的 { ok, source, why, account }，把来源或失败原因
+             显示在胶囊那一行下面。 */
+          const [balanceState, setBalanceState] = R.useState(null)
           const [previewNote, setPreviewNote] = R.useState('')
           const refreshHostState = () => {
             if (typeof fetch !== 'function') return
@@ -8599,6 +8614,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
               .then((res) => (res.ok ? res.json() : null))
               .then((json) => { if (json) setHostState(json) })
               .catch(() => { /* host bridge absent: the rows simply show no source */ })
+          }
+          const refreshBalanceState = () => {
+            if (typeof fetch !== 'function') return
+            fetch(BALANCE_URL, { headers: { accept: 'application/json' } })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((json) => { if (json) setBalanceState(json) })
+              .catch(() => { /* host bridge absent: the row shows no diagnosis */ })
           }
           /* Re-sync the panel onto the settings section when it finally arrives.
              Every useState above seeded itself from prefsGet() during the FIRST
@@ -8683,6 +8705,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             // at all — an unguarded call would turn "cannot refresh the source
             // read-out" into "the whole panel throws".
             R.useEffect(() => { refreshHostState() }, [])
+            /* Same one-shot read for the balance route. The panel is the only
+               surface that can explain a `--` capsule, so it asks once per mount;
+               the route itself caches for 30s, so a user toggling rows around does
+               not turn into repeated upstream calls. */
+            R.useEffect(() => { refreshBalanceState() }, [])
           }
           const rowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' }
           /* Which copy key names each 动画强度 level. The level ids are the stored
@@ -8692,6 +8719,16 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           const labelStyle = { color: 'var(--dsw-alias-label-primary)', fontSize: '13px', fontWeight: 500, lineHeight: '1.5' }
           // Sub-label explaining what a switch does, so the row is self-describing.
           const hintStyle = { display: 'block', color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', fontWeight: 400, lineHeight: '1.5', marginTop: '2px' }
+          /* The balance diagnosis line. A failure is painted in the warn colour so
+             "why is my capsule empty" is answerable at a glance; a mere
+             source note stays quiet, because a working capsule is not a warning. */
+          const balanceNoteStyle = {
+            display: 'block',
+            color: 'var(' + (balanceState !== null && balanceState.ok === false
+              ? '--dsw-alias-state-warn-primary'
+              : '--dsw-alias-label-secondary') + ')',
+            fontSize: '12px', fontWeight: 400, lineHeight: '1.5', marginTop: '2px',
+          }
           const btnStyleFor = (on, disabled) => {
             /* The switches are themed BY the theme they configure, so while the
                theme is ON the "on" fill reads from the palette variable rather
@@ -9038,6 +9075,25 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             }
             return rows.join('　·　')
           }
+          /** Why the capsule reads `--`, in the one place that has room to say it.
+              The capsule itself keeps the last number on screen (deliberately — see
+              its own comment), so a failed read is invisible there; without this the
+              user has no way to tell "not signed in" from "still loading". Returns
+              undefined when there is nothing to report, so a healthy install adds no
+              line and an unanswered probe stays silent rather than accusing. */
+          const balanceDiagnosis = () => {
+            if (balanceState === null) return undefined
+            if (balanceState.ok === true) {
+              // The account path is the normal one; only the fallback needs a label,
+              // because the number on screen then comes from a different account
+              // than the platform page the user may be looking at.
+              return balanceState.source === 'api-key' ? t('balanceViaKey') : undefined
+            }
+            const why = String(balanceState.why || '')
+            if (why === 'no-api-key') return t('balanceWhyNoKey')
+            if (why === 'api-key rejected') return t('balanceWhyKeyRejected')
+            return t('balanceWhyFailed')
+          }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
           /* The ten switches are grouped into four concerns so the page can be
              scanned instead of read as a flat list: 主题 (master switch +
@@ -9363,7 +9419,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   t('balanceRow') + t('sep') + stateOf(balanceOn),
                   R.createElement('span', { style: hintStyle },
                     t(balanceOn ? 'balanceHintOn' : 'balanceHintOff')
-                  )
+                  ),
+                  /* Only while the capsule is on: with it off there is nothing on
+                     screen to explain, and a line about `--` would describe a
+                     surface the user cannot see. */
+                  balanceOn && balanceDiagnosis() !== undefined
+                    ? R.createElement('span', { style: balanceNoteStyle }, balanceDiagnosis())
+                    : null
                 ),
                 R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
                   // Same affordance as the boot plate: the theme draws this opening

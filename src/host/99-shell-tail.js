@@ -33,5 +33,9 @@ module.exports = {
   hasVisibleText,
   installAudio,
   registerBalanceBridge,
+  /* The API-key half of the balance read, exported so a test can drive it
+     against a stub credentials service and a stub fetch — the one part of the
+     route that talks to a remote host and cannot be proven offline. */
+  readApiKeyBalance,
   configPrefScope,
 };

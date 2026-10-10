@@ -167,9 +167,17 @@ node test/menu-surface.test.js   # 真实 MenuSurface 标记 + 两种配色 + �
 ## 顶部余额胶囊
 
 ```bash
-node test/balance-window.test.js     # 峰谷窗口算术（纯函数，从 client.js 切片）
-node test/balance-capsule.test.js    # 胶囊标记 / CSS / 绘制 / 设置行（静态切片）
+node test/balance-window.test.js         # 峰谷窗口算术（纯函数，从 client.js 切片）
+node test/balance-capsule.test.js        # 胶囊标记 / CSS / 绘制 / 设置行（静态切片）
+node test/balance-bridge-api-key.test.js # 宿主余额桥：账户优先、API Key 回退、失败原因
 ```
+
+**`balance-bridge-api-key.test.js`** 是本仓库唯一**真的调用 `HOST.apply` 一半**的余额测试：它 `require('index.js')`，用桩 `credentials` 服务与桩 `fetch` 驱动 `readApiKeyBalance` 与路由 handler，**不打网络**（路由的 `fetch` 是注入的 `globalThis.fetch`，每条用例 `restoreFetch()` 复原）。35 项断言分两组：
+
+- **读函数**：无凭据服务 / `resolve` 返回 `undefined` / `resolve` 抛错，三者都必须落成 `why: 'no-api-key'` 而**不抛**；厂商信封 `{ balance_infos: [{ currency, total_balance }] }` 映射成 `{ currency, balance }` 且字符串原样透传（`11.26` 不是 `11.2600001`）；USD 与数字型 `total_balance` 都能过；**半空条目被丢弃而不是补 0**——补 0 恰好就是胶囊文档里承诺绝不画的东西；`401/403` 报 `api-key rejected`、`5xx` 报带状态码的 `balance http 500`（两者要给用户完全不同的建议）；`fetch` 抛错变成 `balance request failed: …` 前缀且不逃逸；无 `fetch` 的运行时报 `fetch unavailable`；没有凭据服务时 `process.env.DEEPSEEK_API_KEY` 是第二来源且 `source === 'env'`。另有两条**防泄漏**断言：密钥值不得出现在返回体里，`keySource` 只暴露 `env/file/-env` 层级。
+- **路由**：账户 `ready` 时 `source: 'account'` 且 API Key 端点**一次都没被调用**；账户返回 `null`（本机没登录记录——正是这次故障的现场）时回退成 `source: 'api-key'` 并给出 `keySource`；紧接着的第二次请求命中 30 秒缓存、**上游读次数不增**；两个来源都没有时仍是 `200` + `ok:false` + `why:'no-api-key'` + `account:'null'`（页面据此写出「为什么是 `--`」）；相邻路径与非 `GET` 都是 `404`；账户服务缺失时 `account: 'account service absent'`。
+
+模块作用域的缓存会让前一条用例喂饱后一条，所以每条路由用例都 `freshHost()`（清 `require.cache` 后重取 `index.js`）——这是**测试侧**的隔离手段，生产里那份缓存是要保留的（页面 60 秒轮询 + 多标签页不该变成多倍上游请求）。
 
 **`balance-window.test.js`** 把 `const BALANCE_HOLIDAY_NOTICES` 到 `const balancePaintWindow` 之间的源码切出来，在 `vm` 里用 `{ Math, Date }` 求值——切片边界本身就是断言，结构性改动会把切片挪走并响亮失败（旧版起点是 `const BALANCE_PEAK_WINDOWS`，节假日数据加在它之前后必须跟着改）。所有时刻都用 `bj(y, mo, d, h, mi, s) = new Date(Date.UTC(y, mo-1, d, h-8, mi, s))` 造成固定瞬时，因此结果与跑测试的机器时区无关。69 项断言分四组：
 
