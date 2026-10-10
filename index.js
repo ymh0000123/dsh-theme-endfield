@@ -382,21 +382,63 @@ function volatileField(leaf) {
    ONLY on a native-volatile builder, the top preference of selectBuilder, so it
    can never choose worse than the scan would. The cache key is a registry
    Symbol so re-evaluation of this module in the SAME process (plugin reload,
-   dual require/import) reuses the first scan with zero filesystem access. */
+   dual require/import) reuses the first scan with zero filesystem access.
+
+   The cache holds SUCCESSFUL scans only (see cacheableScan): a scan that found
+   nothing usable is a statement about this millisecond, not about this process,
+   and memoizing it is what converts a transient boot race into permanent
+   "settings never save". */
 const SCHEMA_SCAN_CACHE = Symbol.for('dsh-theme-endfield.schemastery.scan');
 
+/** Whether a scan result is worth memoizing process-wide.
+ *
+ *  "No usable builder right now" and "this entry has no settings form" are not
+ *  the same claim, and DSH treats the second one as permanent: an entry without
+ *  a volatile Config gets no settings form at all, so every preference stays
+ *  page-local and resets on reload. The first one, by contrast, is a property of
+ *  the moment and heals by itself:
+ *
+ *    - `require(esm)` throws ERR_REQUIRE_ESM_RACE_CONDITION while the ESM
+ *      dependency of a CJS candidate is still in flight (DSH's own concurrent
+ *      boot does exactly that to `@deepseek-ai/schemastery`, whose CJS build
+ *      requires the pure-ESM `@deepseek-ai/cosmokit`), and
+ *    - the module cache can hold a half-evaluated copy, whose `exports` is still
+ *      `{}` — truthy, so it would otherwise be recorded as a candidate that
+ *      fails every builder check in selectBuilder.
+ *
+ *  Both states clear within milliseconds, so a later evaluation (a hot reload, a
+ *  re-mounted entry) deserves a fresh scan. A successful scan is what the cache
+ *  is FOR; a failed one costs a filesystem sweep that the fast path usually
+ *  short-circuits anyway.
+ *
+ *  @param list - a candidate list, possibly one left by an earlier scan.
+ *  @returns true when at least one candidate can actually build a schema. */
+function cacheableScan(list) {
+  if (!Array.isArray(list)) return false;
+  return list.some((candidate) => {
+    const z = candidate && candidate.z;
+    return !!(z && typeof z.object === 'function' && typeof z.string === 'function');
+  });
+}
+
 function schemasteryCandidates() {
-  /* Same-process re-evaluation: the first scan's answer is still this
+  /* Same-process re-evaluation: the first USABLE scan's answer is still this
      process's answer. */
   try {
     const cached = globalThis[SCHEMA_SCAN_CACHE];
-    if (Array.isArray(cached)) return cached;
+    if (cacheableScan(cached)) return cached;
   } catch (e) { /* fall through to a fresh scan */ }
   const out = [];
   const seenBuilders = [];
   const take = (found, source) => {
     const builder = normalizeSchemastery(found);
     if (!builder) return;
+    /* Reject anything that cannot build a schema before it is recorded. A
+       half-evaluated module in the require cache exports `{}`, which is truthy
+       and would otherwise enter the list as a candidate that then fails every
+       check in selectBuilder — indistinguishable, downstream, from "this
+       process has no schemastery". */
+    if (typeof builder.object !== 'function' || typeof builder.string !== 'function') return;
     if (seenBuilders.indexOf(builder) !== -1) return;
     seenBuilders.push(builder);
     out.push({ z: builder, source });
@@ -422,7 +464,7 @@ function schemasteryCandidates() {
         const builder = normalizeSchemastery(attempt());
         if (builder && typeof builder.object === 'function' && typeof builder.string === 'function' && hasVolatile(builder)) {
           out.push({ z: builder, source });
-          try { globalThis[SCHEMA_SCAN_CACHE] = out; } catch (e) { /* cache is best-effort */ }
+          try { if (cacheableScan(out)) globalThis[SCHEMA_SCAN_CACHE] = out; } catch (e) { /* cache is best-effort */ }
           return out;
         }
       } catch (e) { /* keep trying */ }
@@ -465,7 +507,10 @@ function schemasteryCandidates() {
       take(exported, id + ' (already loaded in this process)');
     }
   } catch (e) { /* no module cache to read */ }
-  try { globalThis[SCHEMA_SCAN_CACHE] = out; } catch (e) { /* cache is best-effort */ }
+  /* Successful scans only: see cacheableScan. Leaving the slot empty makes the
+     next evaluation rescan, which is exactly what a caller that lost a race
+     needs. */
+  try { if (cacheableScan(out)) globalThis[SCHEMA_SCAN_CACHE] = out; } catch (e) { /* cache is best-effort */ }
   return out;
 }
 

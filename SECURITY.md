@@ -8,7 +8,8 @@
 
 | 文件 | 是否进入发布产物 | 运行时会加载吗 |
 | --- | --- | --- |
-| `index.js`（宿主半） | 是 | 是 |
+| `index.mjs`（宿主半的 ESM 入口） | 是 | 是（loader 通过它加载宿主半；见 `docs/engineering-notes.md` 的「宿主入口为什么必须是 ESM」） |
+| `index.js`（宿主半） | 是 | 是（由 `index.mjs` 动态 `import`，也可能被直接 `require`，例如测试） |
 | `client.js`（Web 半） | 是 | 是 |
 | `lib/`（宿主侧通知引擎：`audio.js` / `tone.js` / `slots.js`） | 是 | 是（`index.js` 顶层 `require('./lib/audio.js')`） |
 | `sounds/`（5 个 `.wav` 提示音） | 是 | 是（作为数据由 `lib/audio.js` 读取、拷贝到缓存目录后交给播放器） |
@@ -17,9 +18,9 @@
 | `README.md` / `docs/` / `LICENSE` | 是 | 否（纯文档） |
 | `check.js` / `selftest.js` / `test/` / `.github/` | **否** | **否** |
 
-发布产物由 `package.json` 的 `files` 字段定义（`index.js, client.js, cordis.patch.yml,
-locale, README.md, docs, lib, sounds, LICENSE`，外加 npm 始终包含的 `package.json`）。四个运行时
-入口（`index.js`、`client.js`、`lib/`、`cordis.patch.yml`）对 `check.js`、`selftest.js`、
+发布产物由 `package.json` 的 `files` 字段定义（`index.mjs, index.js, client.js, cordis.patch.yml,
+locale, README.md, docs, lib, sounds, LICENSE`，外加 npm 始终包含的 `package.json`）。五个运行时
+入口（`index.mjs`、`index.js`、`client.js`、`lib/`、`cordis.patch.yml`）对 `check.js`、`selftest.js`、
 `test/` **零引用**：它们只能由 `npm run check` / `npm run selftest` / `npm test` 显式启动。
 本文件本身是仓库文档，不进发布产物。
 

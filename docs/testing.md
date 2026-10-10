@@ -198,6 +198,7 @@ node test/settings-config-fallback.test.js # Host Config 字段契约与选择�
 node test/settings-namespace.test.js # 存储字段名对齐 schema + 旧拼写迁移 + 三条读/写边界
 node test/settings-off.test.js      # 关闭主题后设置页仍可读
 node test/settings-locale.test.js   # 跟随语言设置（zh/en 词典对齐 + 切换生效）
+node test/host-esm-entry.test.js    # ESM 宿主入口：default 上的转出面 + 无 schemastery 时仍能加载
 ```
 
 **`settings-rows.test.js`** 不用浏览器也不用 React：以**记录型 `React` / `slots` + 假的设置 transport**（`test/fixtures/settings-scope.js`）在进程内跑一次真实 `apply()`，抓下设置面板真正的元素树。设置页是用户唯一能碰到这些开关的入口，而那里的错误（抛异常、漏 key、开关写错了 DSH 设置的字段）check.js 与画布测试都看不见。
