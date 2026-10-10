@@ -170,6 +170,7 @@ node test/menu-surface.test.js   # 真实 MenuSurface 标记 + 两种配色 + �
 node test/balance-window.test.js         # 峰谷窗口算术（纯函数，从 client.js 切片）
 node test/balance-capsule.test.js        # 胶囊标记 / CSS / 绘制 / 设置行（静态切片）
 node test/balance-bridge-api-key.test.js # 宿主余额桥：账户优先、API Key 回退、失败原因
+node test/balance-diagnosis.test.js      # 设置行如何解释空胶囊（真实面板 + 桩路由）
 ```
 
 **`balance-bridge-api-key.test.js`** 是本仓库唯一**真的调用 `HOST.apply` 一半**的余额测试：它 `require('index.js')`，用桩 `credentials` 服务与桩 `fetch` 驱动 `readApiKeyBalance` 与路由 handler，**不打网络**（路由的 `fetch` 是注入的 `globalThis.fetch`，每条用例 `restoreFetch()` 复原）。35 项断言分两组：
@@ -178,6 +179,13 @@ node test/balance-bridge-api-key.test.js # 宿主余额桥：账户优先、API 
 - **路由**：账户 `ready` 时 `source: 'account'` 且 API Key 端点**一次都没被调用**；账户返回 `null`（本机没登录记录——正是这次故障的现场）时回退成 `source: 'api-key'` 并给出 `keySource`；紧接着的第二次请求命中 30 秒缓存、**上游读次数不增**；两个来源都没有时仍是 `200` + `ok:false` + `why:'no-api-key'` + `account:'null'`（页面据此写出「为什么是 `--`」）；相邻路径与非 `GET` 都是 `404`；账户服务缺失时 `account: 'account service absent'`。
 
 模块作用域的缓存会让前一条用例喂饱后一条，所以每条路由用例都 `freshHost()`（清 `require.cache` 后重取 `index.js`）——这是**测试侧**的隔离手段，生产里那份缓存是要保留的（页面 60 秒轮询 + 多标签页不该变成多倍上游请求）。
+
+**`balance-diagnosis.test.js`** 覆盖另一半：胶囊失败时**刻意保留上一次的数字**（闪一个错误状态比留旧值更糟），所以「为什么是 `--`」只能由设置页回答——这个文件就是把那句话钉住。它没有网络也没有浏览器，在 `vm` 里跑 `client.js`，用一个**带 `useEffect` 的记录型 React**（与 `settings-rows.test.js` 的极简桩不同，见下）渲染真实设置面板，`fetch` 换成一条固定回复，然后断言面板文字：
+
+- 账户取到余额时**一句解释都不加**——没坏就不用解释；`source: 'api-key'` 时必须写明「这个数字来自 API Key，不是平台账户」，因为用户可能正对着平台页面核对。
+- 路由能发出的每种 `why` 都对应**自己那句话**：`no-api-key`（没登录且没配 key）、`api-key rejected`（key 被上游拒绝）、其余（可重试的失败）——三者给用户的下一步动作完全不同，混成一句就等于没说。
+- 该沉默时必须沉默：胶囊关着时不为一个屏幕上看不到的surface 写解释；桥完全不通（`fetch` reject）时不指控账户；页面没有 `fetch` 时面板仍要渲染。
+- 最后一条是**行为**断言而不是文案断言：`useEffect(fn, [])` 必须只在挂载时读一次路由（三次渲染总共 2 次读取：胶囊自己 1 次 + 面板 1 次）。这条要求桩**尊重依赖数组**——最初把 `useEffect` 写成每次渲染都入队，于是正确的单次探针看起来像轮询循环，测试以错误的理由变红。
 
 **`balance-window.test.js`** 把 `const BALANCE_HOLIDAY_NOTICES` 到 `const balancePaintWindow` 之间的源码切出来，在 `vm` 里用 `{ Math, Date }` 求值——切片边界本身就是断言，结构性改动会把切片挪走并响亮失败（旧版起点是 `const BALANCE_PEAK_WINDOWS`，节假日数据加在它之前后必须跟着改）。所有时刻都用 `bj(y, mo, d, h, mi, s) = new Date(Date.UTC(y, mo-1, d, h-8, mi, s))` 造成固定瞬时，因此结果与跑测试的机器时区无关。69 项断言分四组：
 
