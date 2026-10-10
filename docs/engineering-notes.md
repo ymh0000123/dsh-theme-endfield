@@ -99,6 +99,50 @@ v1.1.4 之前的判据是「**必须**找到带 `.volatile()` 的 schemastery，
 - **判据写进自检报告**：新增 `schemaMode` 记录走了哪条路；`resolution` 每一行现在除 `resolved` / `error` 外还带 `loaded` / `loadError` / `volatile` / `marker`。「解析得到但加载失败」以前在报告里读起来像自相矛盾，现在是一行结论。
 - **不再有「默认跳过」的断言。** `settings-config-forms.test.js` 的 Host 侧断言在拿不到 schemastery 时**整段跳过**，而拿不到 schemastery 恰恰是它要守的那个场景——于是在唯一要紧的环境里它什么都没验。新的 `settings-config-fallback.test.js` 不依赖本机 schemastery：它把**显式 builder**（含「只有 `.extra()`」这一形状）交给 `buildSchemaWith()`，逐字段断言默认值与 `meta.volatile`，并断言选择顺序（native 优先、`.extra()` 兜底、两者皆无则不导出）。
 
+### 宿主入口为什么必须是 ESM：`require(esm)` 的启动竞态（v1.1.10）
+
+v1.1.5 解决的是「副本没有 `.volatile()`」，这一段解决的是**同一句 `require` 本身会失败**——两者症状一模一样（`Config === undefined`、无表单、刷新复位），但成因完全不同，且后者在**全新启动、只装本插件**的 profile 上同样复现。
+
+**抓现行。** 在真实 `dsh web` 启动里放一个探针，于模块求值期同步 `require('@deepseek-ai/schemastery')`，拿到的不是 `MODULE_NOT_FOUND`，而是 Node 的互操作竞态：
+
+```
+ERR_REQUIRE_ESM_RACE_CONDITION:
+Cannot require() ES Module <profile>/node_modules/@deepseek-ai/cosmokit/lib/index.js
+because it is not yet fully loaded.
+```
+
+**机制。** `@deepseek-ai/schemastery` 的 CJS 构建（`lib/index.cjs`）顶层 `require` 了 `@deepseek-ai/cosmokit`，而 cosmokit 是**纯 ESM**（`"type": "module"`，`exports` 只有 `default` 条件、没有 `require` 条件）。DSH 启动时**并发**挂载各 entry，而它自己的 bundle（`@deepseek-ai/cordis`、`dsh-settings`…）也在通过 ESM 加载器 import cosmokit。只要本插件模块求值的那一瞬 cosmokit 的 ESM job 还在飞，Node 就拒绝这次 CJS→ESM 的 `require`，`schemasteryCandidates()` 于是**一个候选都拿不到**，`Config` 落到 `undefined`。
+
+- 自检报告里那个看似自相矛盾的现象由此解释：`resolution` 段是在 `apply()` 里跑的，那时 cosmokit 早已加载完，**同一句 require 就成功了**——所以同一份报告里 `configBuilt: false` 与 `loaded: true, volatile: true` 能并存。`cachedSchemasteryModules: []` 才是真正的证据：求值期那次 require 从来没成功过。
+- **与第三方插件数量无关**：`dsh-base` / `dsh-web-app` 自己就 import cosmokit，所以把 profile 精简到只剩本插件也照样中招。缩减插件不是解法。
+- 与「dev-link 解析不到」也无关：那条路径下 `require.resolve` 会失败并留下 `error: MODULE_NOT_FOUND`；这里是**解析得到、require 抛错**。
+
+**为什么不能留在 CJS 里修。** `require()` 没有等待能力——必须在模块求值期同步拿到 builder（见上文 `Entry._init` 那条），而 cosmokit 的 job 还在飞就无法等待。ESM 加载器则**会排队**：同一句 `import` 会等 cosmokit 结束。
+
+**做法（v1.1.10）。** 给包加一个 ESM 入口 `index.mjs`，`package.json` 的 `main` 指向它，`exports["."]` 写成条件导出：
+
+| 条件 | 文件 | 谁走这条路 |
+| --- | --- | --- |
+| `import` | `index.mjs` | DSH 的 loader（Node 内部 ESM loader）、`--dump-config-schema`、dshmarket 的热挂载 |
+| `require` | `index.js` | 测试、以及任何直接 `require` 本包的消费者 |
+
+`index.mjs` 只做两件事：先经 ESM 加载器预热 schemastery（`@deepseek-ai/schemastery`，失败退到无 scope 的 `schemastery`，再失败就静默放行），再 `await import('./index.js')` 并原样转出。**`index.js` 一行逻辑都不用改**：它的扫描此时必然成功，自检报告也不会再写。两个约束写死在实现里：
+
+- **必须带 `default` 导出**：cordis 的 `unwrapExports()` 是 `exports.default ?? exports`，DSH 挂载的是 `default`，`Config` 必须挂在它上面。
+- **预热必须 best-effort**：宿主上一份 schemastery 都没有时要照旧降级成文档里的 no-op（由 `index.js` 报告），不能连 entry 都加载不了。
+
+**同一分支顺带修掉的第二个缺陷：负缓存。** `SCHEMA_SCAN_CACHE` 是进程级、以 registry Symbol 为键、**永不失效**，而且连失败结果也缓存。于是一次竞态失败被永久记成「本进程没有 schemastery」：插件重新挂载（模块重新求值）也救不回来——这正是「重启后的热挂载同样 `absent`」的原因。现在只有**可用**的扫描结果才入缓存（`cacheableScan`），`take()` 也拒收建不出 schema 的半求值模块（`exports` 还是 `{}` 时是 truthy，否则会被当成候选记下来）。实测：竞态后同进程重新求值仍失败 → 改为「可用才缓存」后，重新求值即可自愈。
+
+**验证（真实启动内的对照）。** 同一次 `dsh web` 启动里同时观察两条路径：
+
+| 探针动作 | 结果 |
+| --- | --- |
+| 求值期同步 `require('@deepseek-ai/schemastery')` | ❌ `ERR_REQUIRE_ESM_RACE_CONDITION` |
+| `import('@deepseek-ai/schemastery')`（ESM） | ✅ 成功，`.volatile()` 可用 |
+| 预热**之后**再 `require` 本插件 `index.js` | ✅ `Config` 建出（`nativeMarker: true`） |
+
+`test/host-esm-entry.test.js` 把入口的转出面（`default` 上的 `Config`/`apply`/`name`）与「没有 schemastery 时仍能加载」的降级路径固化成断言；真正的竞态只能在真实宿主启动里观察，所以那段对照留在本节作为判据。
+
 ### DSH 0.2.0-rc.2 上失效的三处应用侧钩子（v1.1.6 已跟进）
 
 0.2 **没有再动 settings API**：`Config` + `ctx.configForms` 那套接缝与 0.1.7 完全一致（唯一新增的语义是 `set()` 用**布尔值**回答而不是 reject，client 的写账本两种都认），所以本插件的 Host/Client 两半都不需要改。0.2 换掉的是三个**应用侧**细节，而它们的共同点是**旧写法不报错、只静默失效**——所以三处都在真实 0.2.0-rc.2 页面上实测过（scratch profile + 真运行时 + CDP 探针）：

@@ -16,7 +16,9 @@ const fs = require('fs')
 const path = require('path')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const TARGETS = ['index.js', 'client.js', 'check.js', 'selftest.js']
+/* index.mjs is the ESM host entry the loader actually imports; index.js is the
+   CommonJS half it pulls in. Both are runtime entries, so both get parsed. */
+const TARGETS = ['index.mjs', 'index.js', 'client.js', 'check.js', 'selftest.js']
 
 for (const f of fs.readdirSync(path.join(ROOT, 'test')).sort()) {
   if (f.endsWith('.js')) TARGETS.push('test/' + f)

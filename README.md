@@ -44,7 +44,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 - 顶部余额胶囊：悬浮显示 DeepSeek API 余额与峰谷时段（高峰为工作日 `9-12` 点、`14-18` 点；周末、法定节假日与落在周末的调休日都按低谷半价），默认关闭；会话使用 [dsh-codearts-auth](https://www.npmjs.com/package/dsh-codearts-auth) 渠道模型时自动切换为该渠道的剩余额度与积分消耗进度，随渠道切换实时跟随，主读数可在设置中选择右侧百分比显示剩余或已用（详见 [docs/features.md](docs/features.md)「渠道额度模式」）；
 - 可选音频通知：启动音、任务开始/结束音、需要回应时提示，音量与自定义音效目录可调（默认关闭，详见 [docs/audio-notifications.md](docs/audio-notifications.md)）。
 
-所有设置由 DSH 自己的设置服务持久化，与页面 origin/端口无关：在 **DSH 0.2.0-rc.2 / 0.1.7-rc.1 及以后**，Host `index.js` 导出一份字段全部 `.volatile()` 的 schemastery `Config`（命名空间 = 本插件 profile entry id `theme-endfield`），浏览器 `client.js` 通过 `ctx.configForms` 读写并订阅，值随 `<profile>/cordis.patch.yml` 落盘；在**更旧的 DSH（≤ 0.1.5）** 上则回落到 `ctx.settings.register('dsh-theme-endfield', schema)` + `ctx.settingsScope`（`<dshHome>/settings.yaml`）。两代都与页面 origin 无关，因此 DSH web 与 DSH Desktop 都能正确保存并在重启/换端口后恢复，不再使用会被 Desktop 随机端口清空的 `localStorage`。详见 [docs/features.md](docs/features.md) 与 [docs/engineering-notes.md](docs/engineering-notes.md)；0.1.7 升级后旧设置需要在设置页重设一次（`settings.yaml` 已被 DSH 废弃，见 [engineering-notes.md § DSH 0.1.7-rc.1 换掉了整套 settings API](docs/engineering-notes.md#dsh-017-rc1-换掉了整套-settings-api-v110-已跟进)）。设置文案支持中英文；动态等高线尊重系统「减少动态效果」，动画帧率和速度可独立调整。
+所有设置由 DSH 自己的设置服务持久化，与页面 origin/端口无关：在 **DSH 0.2.0-rc.2 / 0.1.7-rc.1 及以后**，Host 半（入口 `index.mjs`，逻辑在 `index.js`）导出一份字段全部 `.volatile()` 的 schemastery `Config`（命名空间 = 本插件 profile entry id `theme-endfield`），浏览器 `client.js` 通过 `ctx.configForms` 读写并订阅，值随 `<profile>/cordis.patch.yml` 落盘；在**更旧的 DSH（≤ 0.1.5）** 上则回落到 `ctx.settings.register('dsh-theme-endfield', schema)` + `ctx.settingsScope`（`<dshHome>/settings.yaml`）。两代都与页面 origin 无关，因此 DSH web 与 DSH Desktop 都能正确保存并在重启/换端口后恢复，不再使用会被 Desktop 随机端口清空的 `localStorage`。详见 [docs/features.md](docs/features.md) 与 [docs/engineering-notes.md](docs/engineering-notes.md)；0.1.7 升级后旧设置需要在设置页重设一次（`settings.yaml` 已被 DSH 废弃，见 [engineering-notes.md § DSH 0.1.7-rc.1 换掉了整套 settings API](docs/engineering-notes.md#dsh-017-rc1-换掉了整套-settings-api-v110-已跟进)）。设置文案支持中英文；动态等高线尊重系统「减少动态效果」，动画帧率和速度可独立调整。
 
 **如果开关总是「刷新后复位」**：先看 Host 侧有没有这份 `Config`（`Config.listConfigs` 对该 entry 报 `absent` 就是没有）。没有 Config 时 DSH 不投影任何表单，Host `apply()` 会打一行 warn 并在 profile 目录留下报告文件 `theme-endfield-diagnostic.json`（`Config` 构建成功时会自动删除它；报告里的 `schemaMode` / `loaded` / `loadError` 会写明走了哪条解析路径、以及某个副本是否「解析得到却加载失败」）——排查与判据见 [docs/testing.md](docs/testing.md#设置页)。另外注意：**改 Host 半（`index.js`）必须整进程重启 DSH**，刷新页面只重载 `client.js`。
 
@@ -76,7 +76,8 @@ src/host/          Host 侧源码片段（拼接顺序见 src/host/manifest.js�
 src/styles/        theme.css：主题样式表（那一整个模板字面量的内容）
 src/contour-*.js   等高线 worker / WebGL 源码（npm run build:worker 嵌入产物）
 client.js          Client 侧产物，由 src/client/ + src/styles/ 拼接而来
-index.js           Host 侧产物，由 src/host/ 拼接而来
+index.mjs          Host 侧入口（ESM，手写）：先经 ESM 加载器载入 schemastery，再 import 下面的产物
+index.js           Host 侧产物，由 src/host/ 拼接而来（CommonJS）
 scripts/           构建与门禁：lib/bundle-build.js 拼接器 + build-*.js 入口
 lib/               音频通知：槽位定义、WAV 合成与播放运行时
 locale/            插件卡片的展示文案（meta.title / meta.description）
@@ -90,6 +91,9 @@ docs/              设计、功能、工程与测试文档
 
 `client.js` 与 `index.js` 是**构建产物，不要直接编辑**：改 `src/` 下的片段，再跑
 `npm run build:client` / `npm run build:host`（等高线 worker 走 `npm run build:worker`）。
+`index.mjs` 是**手写的 ESM 入口**（不是产物）：它只负责先经 ESM 加载器载入 schemastery、
+再 `import` 上面那份 CommonJS 产物——原因见 [docs/engineering-notes.md](docs/engineering-notes.md)
+的「宿主入口为什么必须是 ESM」。改它同样要过 `node .github/scripts/syntax-check.js`。
 `npm run check` 与 CI 都用 `--check` 验证产物没有过期：产物与源码不一致时报出第一个差异行。
 片段划分与改动规则见 [docs/engineering-notes.md](docs/engineering-notes.md) 的「源码是真源，产物是拼出来的」。
 
