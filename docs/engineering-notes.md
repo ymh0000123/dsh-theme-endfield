@@ -99,7 +99,7 @@ v1.1.4 之前的判据是「**必须**找到带 `.volatile()` 的 schemastery，
 - **判据写进自检报告**：新增 `schemaMode` 记录走了哪条路；`resolution` 每一行现在除 `resolved` / `error` 外还带 `loaded` / `loadError` / `volatile` / `marker`。「解析得到但加载失败」以前在报告里读起来像自相矛盾，现在是一行结论。
 - **不再有「默认跳过」的断言。** `settings-config-forms.test.js` 的 Host 侧断言在拿不到 schemastery 时**整段跳过**，而拿不到 schemastery 恰恰是它要守的那个场景——于是在唯一要紧的环境里它什么都没验。新的 `settings-config-fallback.test.js` 不依赖本机 schemastery：它把**显式 builder**（含「只有 `.extra()`」这一形状）交给 `buildSchemaWith()`，逐字段断言默认值与 `meta.volatile`，并断言选择顺序（native 优先、`.extra()` 兜底、两者皆无则不导出）。
 
-### 宿主入口为什么必须是 ESM：`require(esm)` 的启动竞态（v1.1.10）
+### 宿主入口为什么必须是 ESM：`require(esm)` 的启动竞态
 
 v1.1.5 解决的是「副本没有 `.volatile()`」，这一段解决的是**同一句 `require` 本身会失败**——两者症状一模一样（`Config === undefined`、无表单、刷新复位），但成因完全不同，且后者在**全新启动、只装本插件**的 profile 上同样复现。
 
@@ -119,7 +119,7 @@ because it is not yet fully loaded.
 
 **为什么不能留在 CJS 里修。** `require()` 没有等待能力——必须在模块求值期同步拿到 builder（见上文 `Entry._init` 那条），而 cosmokit 的 job 还在飞就无法等待。ESM 加载器则**会排队**：同一句 `import` 会等 cosmokit 结束。
 
-**做法（v1.1.10）。** 给包加一个 ESM 入口 `index.mjs`，`package.json` 的 `main` 指向它，`exports["."]` 写成条件导出：
+**做法。** 给包加一个 ESM 入口 `index.mjs`，`package.json` 的 `main` 指向它，`exports["."]` 写成条件导出：
 
 | 条件 | 文件 | 谁走这条路 |
 | --- | --- | --- |
