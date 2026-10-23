@@ -2656,3 +2656,30 @@
       [data-endfield-balance][data-endfield-balance-shade][data-endfield-balance-position] {
         transform: translateY(-6px);
       }
+
+      /* ---------- Ink fills need an inverted foreground in light mode ----------
+         --dsw-alias-state-business-primary is ink in the light palette (see the
+         neutralize block above), and consumers paint it as a FILL while their
+         glyph stays on --dsw-alias-label-primary — which is ink too. Fill and
+         glyph then resolve to #101110 and the control reads as a solid black
+         rectangle: the host's active settings tab lost its own label, and
+         third-party switches lost their knob.
+
+         Fixing it here rather than by repainting the token keeps the light
+         palette's ink/paper language: the fill stays ink, only the glyph moves
+         to the host's pure white. Not --dsw-alias-label-primary-inverted: this
+         sheet already repaints that role to ink in both palettes (see the warm
+         label block), so the knob would stay invisible.
+
+         Both selectors are structural rather than hash-named where the host
+         allows it: the tab hook is the ARIA contract, the switch hook is the
+         third-party class already pinned by dsh-better-display's own build.
+         The tab hook is scoped to dialogs on purpose: the app's top-level nav
+         is role=tab too, but it sits on paper with an ink underline, so its
+         selected label must stay ink. */
+      body:not([data-ds-dark-theme]) [role='dialog'] [role='tab'][aria-selected='true'] {
+        color: var(--dsw-static-neutral-bluish-00) !important;
+      }
+      body:not([data-ds-dark-theme]) .xXul0q_switch[data-on]::after {
+        background: var(--dsw-static-neutral-bluish-00) !important;
+      }
