@@ -31,9 +31,18 @@
       groupBg: '背景',
       groupAnim: '动画',
       groupFun: '娱乐',
-      /* 折叠分组：组头是「编号 名称」加一个随展开态翻转的箭头；
-         展开后的「收起」提示放在箭头的 title 上而非行内，收起的
-         五个组头并排时行内文案会重复五次。 */
+      /* 二级折叠子节的标题（组 > 子节 > 行）。子节头是「名称 + 拉丁大写 +
+         状态摘要」加一个随展开态翻转的箭头；与组头一样，拉丁行在英文界面下
+         与中文名重复时省略。状态摘要复用各行已有的 on/off 文案，不新增词汇。 */
+      subContour: '等高线',
+      subWatermark: '水印',
+      subScrollAnim: '输出滚动动画',
+      subLoader: '启动加载动画',
+      subThunder: '雷霆大字',
+      subBalance: '余额胶囊',
+      subAudioSlots: '通知槽位',
+      subAudioSound: '音量与音源',
+      subAudioMeta: '预留与诊断',
       themeRow: '终末地主题',
       themeOn: '开启主题',
       themeOff: '关闭主题',
@@ -221,6 +230,15 @@
       groupBg: 'BACKGROUND',
       groupAnim: 'ANIMATION',
       groupFun: 'ENTERTAINMENT',
+      subContour: 'CONTOUR',
+      subWatermark: 'WORDMARK',
+      subScrollAnim: 'SCROLL',
+      subLoader: 'BOOT',
+      subThunder: 'THUNDER',
+      subBalance: 'BALANCE',
+      subAudioSlots: 'SLOTS',
+      subAudioSound: 'SOUND',
+      subAudioMeta: 'RESERVED',
       themeRow: 'Endfield theme',
       themeOn: 'Turn on',
       themeOff: 'Turn off',

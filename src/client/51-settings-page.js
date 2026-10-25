@@ -64,6 +64,15 @@
           const [audioDiag, setAudioDiag] = R.useState(isAudioDiagOn())
           const [hostState, setHostState] = R.useState(null)
           const [previewNote, setPreviewNote] = R.useState('')
+          /* 二级折叠子节的展开表。一个对象存全部子节（id -> bool），而不是每个
+             子节一个 useState：这些子节由同一个 render 函数内联构造，没有独立
+             的组件类型，逐节建 hook 既无法命名也无法稳定计数。缺省（未登记）
+             即收起，所以每次打开设置页都从最紧凑的目录开始；这是纯 UI 状态，
+             不进持久化偏好（durable section 只收功能开关）。测试桩的 setter
+             是 no-op，同样依赖「body 始终渲染、仅以 hidden 收起」来在收起态
+             下保持整棵行树可遍历。 */
+          const [openSubs, setOpenSubs] = R.useState({})
+          const toggleSub = (id) => setOpenSubs((prev) => ({ ...prev, [id]: !prev[id] }))
           const refreshHostState = () => {
             if (typeof fetch !== 'function') return
             fetch(AUDIO_STATE_URL, { headers: { accept: 'application/json' } })
@@ -580,6 +589,48 @@
           }
           /** "<row label>: <on|off>" — one spelling for every status row. */
           const stateOf = (on) => t(on ? 'on' : 'off')
+          /* 二级折叠子节（组 > 子节 > 行）。头部是全宽按钮：左侧小刻线 + 中文名
+             + 拉丁大写（与组头同一套 editorial 语言，但整体降一级），右侧可选
+             状态摘要 + 随展开态翻转的 +/− 刻字箭头；展开态同时由 aria-expanded
+             表达，提示不写进行内（收起的九个子节头会把同一段文案重复九次）。
+             body 始终渲染、仅以 hidden 属性收起：行不离开元素树，store 订阅、
+             disabled 推导与测试的树遍历都不因折叠状态而改变；status 摘要让用户
+             在收起时仍能看到该节主开关的读数。类名避开主题 hover 反转规则的
+             语义子串（item/row/card/tab…），折叠头的文字颜色全程自持。 */
+          const subSection = (id, key, status, rows) => {
+            const open = openSubs[id] === true
+            const bodyId = 'endfield-sub-' + id
+            const head = [
+              R.createElement('span', { key: 'mark', 'aria-hidden': 'true', style: { width: '3px', height: '11px', flex: '0 0 auto', background: 'currentColor', opacity: 0.55 } }),
+              R.createElement('span', { key: 'cn', style: { fontSize: '12px', fontWeight: 600, letterSpacing: '0.12em', lineHeight: '1.5' } }, t(key)),
+            ]
+            const latin = LOCALE_EN[key]
+            if (latin !== undefined && latin !== t(key)) {
+              head.push(R.createElement('span', { key: 'en', style: { fontSize: '10px', fontWeight: 500, letterSpacing: '0.18em', opacity: 0.6, lineHeight: '1.5' } }, latin))
+            }
+            head.push(R.createElement('span', { key: 'gap', 'aria-hidden': 'true', style: { flex: '1 1 auto' } }))
+            if (status !== undefined) {
+              head.push(R.createElement('span', { key: 'status', style: { fontSize: '11px', opacity: 0.66, lineHeight: '1.5' } }, status))
+            }
+            head.push(R.createElement('span', { key: 'arrow', 'aria-hidden': 'true', style: { flex: '0 0 auto', fontSize: '13px', lineHeight: '1' } }, open ? '−' : '+'))
+            return R.createElement('div', { key: 'sub-' + id, className: 'endfield-settings-sub' }, [
+              R.createElement('button', {
+                key: 'head',
+                type: 'button',
+                className: 'endfield-settings-sub-toggle',
+                onClick: () => toggleSub(id),
+                'aria-expanded': open,
+                'aria-controls': bodyId,
+                style: {
+                  display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+                  padding: '10px 0', background: 'transparent', border: 'none',
+                  borderBottom: '1px solid var(--dsw-alias-border-l1)',
+                  color: 'inherit', textAlign: 'left', cursor: 'pointer',
+                },
+              }, head),
+              R.createElement('div', { key: 'sub-body-' + id, id: bodyId, hidden: !open, className: 'endfield-settings-sub-body' }, rows),
+            ])
+          }
           const row = (key, last, children) => R.createElement('div', { key, style: last ? { ...rowStyle, borderBottom: 'none' } : rowStyle }, children)
           return R.createElement('div', { className: 'endfield-settings', style: pageStyle }, [
             /* --- 01 主题：总开关在最前，随后是配色与圆角 --- */
@@ -638,6 +689,7 @@
             /* --- 02 背景：等高线 + 水印，各自的主开关在前、附属开关在后 --- */
             R.createElement('div', { key: 'group-bg' }, [
               groupTitle('02', 'groupBg', false),
+              subSection('contour', 'subContour', stateOf(contourOn), [
               row('contour', false, [
                 R.createElement('span', { style: labelStyle },
                   t('contourRow') + t('sep') + stateOf(contourOn),
@@ -736,6 +788,8 @@
                   title: contourOn ? '' : t('contourAnimNeedLayer'),
                 }, t(contourScrollPause ? 'contourScrollPauseOff' : 'contourScrollPauseOn'))
               ]),
+              ]),
+              subSection('watermark', 'subWatermark', stateOf(wmOn), [
               row('watermark', false, [
                 R.createElement('span', { style: labelStyle }, t('watermarkRow') + t('sep') + stateOf(wmOn)),
                 R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, t(wmOn ? 'watermarkOff' : 'watermarkOn'))
@@ -756,10 +810,12 @@
                   title: wmOn ? '' : t('wmPersistNeedWm'),
                 }, t(wmPersist ? 'wmPersistOff' : 'wmPersistOn'))
               ]),
+              ]),
             ]),
             /* --- 03 动画：输出滚动动画 + 启动加载动画 --- */
             R.createElement('div', { key: 'group-anim' }, [
               groupTitle('03', 'groupAnim', false),
+              subSection('scroll', 'subScrollAnim', stateOf(scrollAnim), [
               row('scroll-anim', false, [
                 R.createElement('span', { style: labelStyle },
                   t('scrollAnimRow') + t('sep') + stateOf(scrollAnim),
@@ -797,6 +853,8 @@
                   }, t(SCROLL_ANIM_LEVEL_COPY[level])))
                 )
               ]),
+              ]),
+              subSection('loader', 'subLoader', stateOf(loaderOn), [
               row('loader', true, [
                 R.createElement('span', { style: labelStyle },
                   t('loaderRow') + t('sep') + stateOf(loaderOn),
@@ -820,10 +878,12 @@
                   R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, t(loaderOn ? 'loaderOff' : 'loaderOn'))
                 )
               ]),
+              ]),
             ]),
             /* --- 04 娱乐：雷霆大字（主开关 + 入场动画子开关） --- */
             R.createElement('div', { key: 'group-fun' }, [
               groupTitle('04', 'groupFun', false),
+              subSection('thunder', 'subThunder', stateOf(thunderOn), [
               row('thunder', false, [
                 R.createElement('span', { style: labelStyle },
                   t('thunderRow') + t('sep') + stateOf(thunderOn),
@@ -864,6 +924,8 @@
                   title: thunderOn ? '' : t('thunderNeed'),
                 }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
               ]),
+              ]),
+              subSection('balance', 'subBalance', stateOf(balanceOn), [
               /* --- 顶部余额胶囊：同样属于「娱乐」组的悬浮层 --- */
               row('balance-capsule', false, [
                 R.createElement('span', { style: labelStyle },
@@ -966,6 +1028,7 @@
                 }, CREDIT_DISPLAY_OPTIONS.map((value) => R.createElement('option', { key: value, value },
                   t(value === 'used' ? 'creditDisplayUsed' : 'creditDisplayRemaining'))))
               ]),
+              ]),
             ]),
             /* --- 05 音频：两个生效槽位 + 两个预留槽位 ---
                Every row states WHEN it fires, because that is the whole contract
@@ -973,6 +1036,7 @@
                not fire yet, so a switch that does nothing cannot read as broken. */
             R.createElement('div', { key: 'group-audio' }, [
               groupTitle('05', 'groupAudio', false),
+              subSection('slots', 'subAudioSlots', stateOf(audioOn), [
               row('audio', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioRow') + t('sep') + stateOf(audioOn),
@@ -1032,6 +1096,21 @@
                   }, t(audioDone ? 'audioDoneOff' : 'audioDoneOn'))
                 )
               ]),
+              row('audio-human', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioHumanOnlyRow') + t('sep') + t(audioHumanOnly ? 'audioHumanOnlyOn' : 'audioHumanOnlyOff'),
+                  R.createElement('span', { style: hintStyle },
+                    t(audioHumanOnly ? 'audioHumanOnlyHintOn' : 'audioHumanOnlyHintOff')
+                  )
+                ),
+                R.createElement('button', {
+                  type: 'button', onClick: toggleAudioHumanOnly,
+                  style: btnStyleFor(audioHumanOnly, !audioOn), disabled: !audioOn,
+                  title: audioOn ? '' : t('audioNeedOn'),
+                }, t(audioHumanOnly ? 'audioHumanOnlyOff' : 'audioHumanOnlyOn'))
+              ]),
+              ]),
+              subSection('sound', 'subAudioSound', String(audioVolume) + '%', [
               row('audio-volume', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioVolumeRow') + t('sep') + String(audioVolume) + '%',
@@ -1050,6 +1129,37 @@
                   R.createElement('span', { style: { ...labelStyle, minWidth: '38px', textAlign: 'right' } }, String(audioVolume) + '%')
                 )
               ]),
+              row('audio-source', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioFileRow') + t('sep') + sourceSummary(),
+                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
+                ),
+                R.createElement('button', {
+                  type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
+                  style: btnStyleFor(false),
+                }, t('audioRefresh'))
+              ]),
+              row('audio-dir', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioSoundDirRow') + t('sep') + (readAudioSoundDir() || t('audioSoundDirDefault')),
+                  R.createElement('span', { style: hintStyle }, t('audioSoundDirHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('audioSoundDirRow'),
+                    defaultValue: readAudioSoundDir(),
+                    placeholder: t('audioSoundDirDefault'),
+                    onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
+                    onBlur: (event) => applySoundDir(event.target.value),
+                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
+                  })
+                )
+              ]),
+              ]),
+              /* 预留槽位（需要你回应 / 出错）与诊断日志同节：三行都没有
+                 主开关，行内的试听按钮与诊断开关就是这一节的全部。 */
+              subSection('reserved', 'subAudioMeta', undefined, [
               row('audio-attention', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioAttentionRow') + t('sep') + stateOf(audioTestReady()),
@@ -1068,46 +1178,6 @@
                   audioTestButton('turn-fail', 'audioSlotFail')
                 )
               ]),
-              row('audio-source', false, [
-                R.createElement('span', { style: labelStyle },
-                  t('audioFileRow') + t('sep') + sourceSummary(),
-                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
-                ),
-                R.createElement('button', {
-                  type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
-                  style: btnStyleFor(false),
-                }, t('audioRefresh'))
-              ]),
-              row('audio-dir', false, [
-                R.createElement('span', { style: labelStyle },
-                  t('audioSoundDirRow') + t('sep') + (readAudioSoundDir() || t('audioSoundDirDefault')),
-                  R.createElement('span', { style: hintStyle }, t('audioSoundDirHint'))
-                ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                  R.createElement('input', {
-                    type: 'text',
-                    'aria-label': t('audioSoundDirRow'),
-                    defaultValue: readAudioSoundDir(),
-                    placeholder: t('audioSoundDirDefault'),
-                    onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
-                    onBlur: (event) => applySoundDir(event.target.value),
-                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
-                  })
-                )
-              ]),
-              row('audio-human', false, [
-                R.createElement('span', { style: labelStyle },
-                  t('audioHumanOnlyRow') + t('sep') + t(audioHumanOnly ? 'audioHumanOnlyOn' : 'audioHumanOnlyOff'),
-                  R.createElement('span', { style: hintStyle },
-                    t(audioHumanOnly ? 'audioHumanOnlyHintOn' : 'audioHumanOnlyHintOff')
-                  )
-                ),
-                R.createElement('button', {
-                  type: 'button', onClick: toggleAudioHumanOnly,
-                  style: btnStyleFor(audioHumanOnly, !audioOn), disabled: !audioOn,
-                  title: audioOn ? '' : t('audioNeedOn'),
-                }, t(audioHumanOnly ? 'audioHumanOnlyOff' : 'audioHumanOnlyOn'))
-              ]),
               row('audio-diag', true, [
                 R.createElement('span', { style: labelStyle },
                   t('audioDiagRow') + t('sep') + stateOf(audioDiag),
@@ -1116,6 +1186,7 @@
                   )
                 ),
                 R.createElement('button', { type: 'button', onClick: toggleAudioDiag, style: btnStyleFor(audioDiag) }, t(audioDiag ? 'audioDiagOff' : 'audioDiagOn'))
+              ]),
               ]),
             ]),
           ])

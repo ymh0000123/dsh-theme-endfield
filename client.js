@@ -7308,7 +7308,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
 
          Note the + is the ONLY composer element whose class contains '_add'; the
          scope cannot reach the settings wrappers, the diff lines or the address bar.
-         Verified by test/hover-check.js against real hovered pixels in both
+         Verified by test/tools/hover-check.js against real hovered pixels in both
          palettes and both schemes. */
       body[data-ds-dark-theme] :is([data-composer-seat], [class$='_composerSeat'], [class$='_composerHero']) [class*='_add'] {
         color: var(--edge-accent) !important;
@@ -7866,6 +7866,27 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body[data-ds-dark-theme] .endfield-settings-group-title {
         color: var(--edge-status-dark);
       }
+      /* ---------- Settings page: 二级折叠子节 ----------
+         折叠头是全宽 button：文字颜色继承面板自身（主题关闭时仍是 app 的
+         ink，可读性由 app 令牌保证），只有悬停/聚焦态借用组头同款的
+         palette 配色对 —— 静止的目录保持中性，交互时的反馈才着色。
+         类名避开主题 hover 反转规则的语义子串（item/row/card/tab…），
+         那条 !important 规则碰不到这个控件。
+         body 以 [hidden] 收起而非条件渲染：行不离开 DOM，display:none
+         是显式兜底，防止宿主或 UA 样式表把 hidden 覆盖回去。 */
+      .endfield-settings-sub-toggle:hover {
+        color: var(--edge-status-light);
+      }
+      body[data-ds-dark-theme] .endfield-settings-sub-toggle:hover {
+        color: var(--edge-status-dark);
+      }
+      .endfield-settings-sub-toggle:focus-visible {
+        outline: 1px solid currentColor;
+        outline-offset: 2px;
+      }
+      .endfield-settings-sub-body[hidden] {
+        display: none;
+      }
       /* ================= 雷霆大字 (娱乐模式) =================
          The task-boundary announcement. Fixed, centred, above the shell overlay
          layer and the app's own dialogs but BELOW the boot plate (2147483000), so
@@ -7884,7 +7905,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          2.11:1 on bg-layer-1, i.e. the same "on cream, #fff500 is not a colour
          choice, it is an erasure" failure this theme already documents for the
          watermark and the turn-status label — except here it was pure white. Caught
-         by rendering the plate and measuring the pixels (test/thunder-shot.js), not
+         by rendering the plate and measuring the pixels (test/tools/thunder-shot.js), not
          by reading the CSS.
 
          Measured white-vs-scrimmed-surface, ink #101110 over each light surface:
@@ -8468,16 +8489,22 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          sheet already repaints that role to ink in both palettes (see the warm
          label block), so the knob would stay invisible.
 
-         Both selectors are structural rather than hash-named where the host
-         allows it: the tab hook is the ARIA contract, the switch hook is the
-         third-party class already pinned by dsh-better-display's own build.
+         Both selectors are structural rather than hash-named: the tab hook is
+         the ARIA contract, and the switch hook matches the semantic suffix
+         every switch carries — dsh-better-display's pinned class and the
+         host's own CSS-module switches alike end in _switch, and the
+         [data-on] guard keeps the rule to the checked state, so an unchecked
+         knob keeps its ink fill. The hash form this replaces (the shape PR #37
+         first shipped) is exactly what selector-guard's part 1 fails on: the
+         suffix survives any rehash, the pinned class does not.
+
          The tab hook is scoped to dialogs on purpose: the app's top-level nav
          is role=tab too, but it sits on paper with an ink underline, so its
          selected label must stay ink. */
       body:not([data-ds-dark-theme]) [role='dialog'] [role='tab'][aria-selected='true'] {
         color: var(--dsw-static-neutral-bluish-00) !important;
       }
-      body:not([data-ds-dark-theme]) .xXul0q_switch[data-on]::after {
+      body:not([data-ds-dark-theme]) [class$='_switch'][data-on]::after {
         background: var(--dsw-static-neutral-bluish-00) !important;
       }
     `)
@@ -8641,9 +8668,18 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       groupBg: '背景',
       groupAnim: '动画',
       groupFun: '娱乐',
-      /* 折叠分组：组头是「编号 名称」加一个随展开态翻转的箭头；
-         展开后的「收起」提示放在箭头的 title 上而非行内，收起的
-         五个组头并排时行内文案会重复五次。 */
+      /* 二级折叠子节的标题（组 > 子节 > 行）。子节头是「名称 + 拉丁大写 +
+         状态摘要」加一个随展开态翻转的箭头；与组头一样，拉丁行在英文界面下
+         与中文名重复时省略。状态摘要复用各行已有的 on/off 文案，不新增词汇。 */
+      subContour: '等高线',
+      subWatermark: '水印',
+      subScrollAnim: '输出滚动动画',
+      subLoader: '启动加载动画',
+      subThunder: '雷霆大字',
+      subBalance: '余额胶囊',
+      subAudioSlots: '通知槽位',
+      subAudioSound: '音量与音源',
+      subAudioMeta: '预留与诊断',
       themeRow: '终末地主题',
       themeOn: '开启主题',
       themeOff: '关闭主题',
@@ -8831,6 +8867,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       groupBg: 'BACKGROUND',
       groupAnim: 'ANIMATION',
       groupFun: 'ENTERTAINMENT',
+      subContour: 'CONTOUR',
+      subWatermark: 'WORDMARK',
+      subScrollAnim: 'SCROLL',
+      subLoader: 'BOOT',
+      subThunder: 'THUNDER',
+      subBalance: 'BALANCE',
+      subAudioSlots: 'SLOTS',
+      subAudioSound: 'SOUND',
+      subAudioMeta: 'RESERVED',
       themeRow: 'Endfield theme',
       themeOn: 'Turn on',
       themeOff: 'Turn off',
@@ -9086,6 +9131,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           const [audioDiag, setAudioDiag] = R.useState(isAudioDiagOn())
           const [hostState, setHostState] = R.useState(null)
           const [previewNote, setPreviewNote] = R.useState('')
+          /* 二级折叠子节的展开表。一个对象存全部子节（id -> bool），而不是每个
+             子节一个 useState：这些子节由同一个 render 函数内联构造，没有独立
+             的组件类型，逐节建 hook 既无法命名也无法稳定计数。缺省（未登记）
+             即收起，所以每次打开设置页都从最紧凑的目录开始；这是纯 UI 状态，
+             不进持久化偏好（durable section 只收功能开关）。测试桩的 setter
+             是 no-op，同样依赖「body 始终渲染、仅以 hidden 收起」来在收起态
+             下保持整棵行树可遍历。 */
+          const [openSubs, setOpenSubs] = R.useState({})
+          const toggleSub = (id) => setOpenSubs((prev) => ({ ...prev, [id]: !prev[id] }))
           const refreshHostState = () => {
             if (typeof fetch !== 'function') return
             fetch(AUDIO_STATE_URL, { headers: { accept: 'application/json' } })
@@ -9602,6 +9656,48 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           }
           /** "<row label>: <on|off>" — one spelling for every status row. */
           const stateOf = (on) => t(on ? 'on' : 'off')
+          /* 二级折叠子节（组 > 子节 > 行）。头部是全宽按钮：左侧小刻线 + 中文名
+             + 拉丁大写（与组头同一套 editorial 语言，但整体降一级），右侧可选
+             状态摘要 + 随展开态翻转的 +/− 刻字箭头；展开态同时由 aria-expanded
+             表达，提示不写进行内（收起的九个子节头会把同一段文案重复九次）。
+             body 始终渲染、仅以 hidden 属性收起：行不离开元素树，store 订阅、
+             disabled 推导与测试的树遍历都不因折叠状态而改变；status 摘要让用户
+             在收起时仍能看到该节主开关的读数。类名避开主题 hover 反转规则的
+             语义子串（item/row/card/tab…），折叠头的文字颜色全程自持。 */
+          const subSection = (id, key, status, rows) => {
+            const open = openSubs[id] === true
+            const bodyId = 'endfield-sub-' + id
+            const head = [
+              R.createElement('span', { key: 'mark', 'aria-hidden': 'true', style: { width: '3px', height: '11px', flex: '0 0 auto', background: 'currentColor', opacity: 0.55 } }),
+              R.createElement('span', { key: 'cn', style: { fontSize: '12px', fontWeight: 600, letterSpacing: '0.12em', lineHeight: '1.5' } }, t(key)),
+            ]
+            const latin = LOCALE_EN[key]
+            if (latin !== undefined && latin !== t(key)) {
+              head.push(R.createElement('span', { key: 'en', style: { fontSize: '10px', fontWeight: 500, letterSpacing: '0.18em', opacity: 0.6, lineHeight: '1.5' } }, latin))
+            }
+            head.push(R.createElement('span', { key: 'gap', 'aria-hidden': 'true', style: { flex: '1 1 auto' } }))
+            if (status !== undefined) {
+              head.push(R.createElement('span', { key: 'status', style: { fontSize: '11px', opacity: 0.66, lineHeight: '1.5' } }, status))
+            }
+            head.push(R.createElement('span', { key: 'arrow', 'aria-hidden': 'true', style: { flex: '0 0 auto', fontSize: '13px', lineHeight: '1' } }, open ? '−' : '+'))
+            return R.createElement('div', { key: 'sub-' + id, className: 'endfield-settings-sub' }, [
+              R.createElement('button', {
+                key: 'head',
+                type: 'button',
+                className: 'endfield-settings-sub-toggle',
+                onClick: () => toggleSub(id),
+                'aria-expanded': open,
+                'aria-controls': bodyId,
+                style: {
+                  display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+                  padding: '10px 0', background: 'transparent', border: 'none',
+                  borderBottom: '1px solid var(--dsw-alias-border-l1)',
+                  color: 'inherit', textAlign: 'left', cursor: 'pointer',
+                },
+              }, head),
+              R.createElement('div', { key: 'sub-body-' + id, id: bodyId, hidden: !open, className: 'endfield-settings-sub-body' }, rows),
+            ])
+          }
           const row = (key, last, children) => R.createElement('div', { key, style: last ? { ...rowStyle, borderBottom: 'none' } : rowStyle }, children)
           return R.createElement('div', { className: 'endfield-settings', style: pageStyle }, [
             /* --- 01 主题：总开关在最前，随后是配色与圆角 --- */
@@ -9660,6 +9756,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             /* --- 02 背景：等高线 + 水印，各自的主开关在前、附属开关在后 --- */
             R.createElement('div', { key: 'group-bg' }, [
               groupTitle('02', 'groupBg', false),
+              subSection('contour', 'subContour', stateOf(contourOn), [
               row('contour', false, [
                 R.createElement('span', { style: labelStyle },
                   t('contourRow') + t('sep') + stateOf(contourOn),
@@ -9758,6 +9855,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   title: contourOn ? '' : t('contourAnimNeedLayer'),
                 }, t(contourScrollPause ? 'contourScrollPauseOff' : 'contourScrollPauseOn'))
               ]),
+              ]),
+              subSection('watermark', 'subWatermark', stateOf(wmOn), [
               row('watermark', false, [
                 R.createElement('span', { style: labelStyle }, t('watermarkRow') + t('sep') + stateOf(wmOn)),
                 R.createElement('button', { type: 'button', onClick: toggleWm, style: btnStyleFor(wmOn) }, t(wmOn ? 'watermarkOff' : 'watermarkOn'))
@@ -9778,10 +9877,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   title: wmOn ? '' : t('wmPersistNeedWm'),
                 }, t(wmPersist ? 'wmPersistOff' : 'wmPersistOn'))
               ]),
+              ]),
             ]),
             /* --- 03 动画：输出滚动动画 + 启动加载动画 --- */
             R.createElement('div', { key: 'group-anim' }, [
               groupTitle('03', 'groupAnim', false),
+              subSection('scroll', 'subScrollAnim', stateOf(scrollAnim), [
               row('scroll-anim', false, [
                 R.createElement('span', { style: labelStyle },
                   t('scrollAnimRow') + t('sep') + stateOf(scrollAnim),
@@ -9819,6 +9920,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   }, t(SCROLL_ANIM_LEVEL_COPY[level])))
                 )
               ]),
+              ]),
+              subSection('loader', 'subLoader', stateOf(loaderOn), [
               row('loader', true, [
                 R.createElement('span', { style: labelStyle },
                   t('loaderRow') + t('sep') + stateOf(loaderOn),
@@ -9842,10 +9945,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   R.createElement('button', { type: 'button', onClick: toggleLoader, style: btnStyleFor(loaderOn) }, t(loaderOn ? 'loaderOff' : 'loaderOn'))
                 )
               ]),
+              ]),
             ]),
             /* --- 04 娱乐：雷霆大字（主开关 + 入场动画子开关） --- */
             R.createElement('div', { key: 'group-fun' }, [
               groupTitle('04', 'groupFun', false),
+              subSection('thunder', 'subThunder', stateOf(thunderOn), [
               row('thunder', false, [
                 R.createElement('span', { style: labelStyle },
                   t('thunderRow') + t('sep') + stateOf(thunderOn),
@@ -9886,6 +9991,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   title: thunderOn ? '' : t('thunderNeed'),
                 }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
               ]),
+              ]),
+              subSection('balance', 'subBalance', stateOf(balanceOn), [
               /* --- 顶部余额胶囊：同样属于「娱乐」组的悬浮层 --- */
               row('balance-capsule', false, [
                 R.createElement('span', { style: labelStyle },
@@ -9988,6 +10095,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                 }, CREDIT_DISPLAY_OPTIONS.map((value) => R.createElement('option', { key: value, value },
                   t(value === 'used' ? 'creditDisplayUsed' : 'creditDisplayRemaining'))))
               ]),
+              ]),
             ]),
             /* --- 05 音频：两个生效槽位 + 两个预留槽位 ---
                Every row states WHEN it fires, because that is the whole contract
@@ -9995,6 +10103,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                not fire yet, so a switch that does nothing cannot read as broken. */
             R.createElement('div', { key: 'group-audio' }, [
               groupTitle('05', 'groupAudio', false),
+              subSection('slots', 'subAudioSlots', stateOf(audioOn), [
               row('audio', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioRow') + t('sep') + stateOf(audioOn),
@@ -10054,6 +10163,21 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   }, t(audioDone ? 'audioDoneOff' : 'audioDoneOn'))
                 )
               ]),
+              row('audio-human', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioHumanOnlyRow') + t('sep') + t(audioHumanOnly ? 'audioHumanOnlyOn' : 'audioHumanOnlyOff'),
+                  R.createElement('span', { style: hintStyle },
+                    t(audioHumanOnly ? 'audioHumanOnlyHintOn' : 'audioHumanOnlyHintOff')
+                  )
+                ),
+                R.createElement('button', {
+                  type: 'button', onClick: toggleAudioHumanOnly,
+                  style: btnStyleFor(audioHumanOnly, !audioOn), disabled: !audioOn,
+                  title: audioOn ? '' : t('audioNeedOn'),
+                }, t(audioHumanOnly ? 'audioHumanOnlyOff' : 'audioHumanOnlyOn'))
+              ]),
+              ]),
+              subSection('sound', 'subAudioSound', String(audioVolume) + '%', [
               row('audio-volume', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioVolumeRow') + t('sep') + String(audioVolume) + '%',
@@ -10072,6 +10196,37 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   R.createElement('span', { style: { ...labelStyle, minWidth: '38px', textAlign: 'right' } }, String(audioVolume) + '%')
                 )
               ]),
+              row('audio-source', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioFileRow') + t('sep') + sourceSummary(),
+                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
+                ),
+                R.createElement('button', {
+                  type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
+                  style: btnStyleFor(false),
+                }, t('audioRefresh'))
+              ]),
+              row('audio-dir', true, [
+                R.createElement('span', { style: labelStyle },
+                  t('audioSoundDirRow') + t('sep') + (readAudioSoundDir() || t('audioSoundDirDefault')),
+                  R.createElement('span', { style: hintStyle }, t('audioSoundDirHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('audioSoundDirRow'),
+                    defaultValue: readAudioSoundDir(),
+                    placeholder: t('audioSoundDirDefault'),
+                    onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
+                    onBlur: (event) => applySoundDir(event.target.value),
+                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
+                  })
+                )
+              ]),
+              ]),
+              /* 预留槽位（需要你回应 / 出错）与诊断日志同节：三行都没有
+                 主开关，行内的试听按钮与诊断开关就是这一节的全部。 */
+              subSection('reserved', 'subAudioMeta', undefined, [
               row('audio-attention', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioAttentionRow') + t('sep') + stateOf(audioTestReady()),
@@ -10090,46 +10245,6 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   audioTestButton('turn-fail', 'audioSlotFail')
                 )
               ]),
-              row('audio-source', false, [
-                R.createElement('span', { style: labelStyle },
-                  t('audioFileRow') + t('sep') + sourceSummary(),
-                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
-                ),
-                R.createElement('button', {
-                  type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
-                  style: btnStyleFor(false),
-                }, t('audioRefresh'))
-              ]),
-              row('audio-dir', false, [
-                R.createElement('span', { style: labelStyle },
-                  t('audioSoundDirRow') + t('sep') + (readAudioSoundDir() || t('audioSoundDirDefault')),
-                  R.createElement('span', { style: hintStyle }, t('audioSoundDirHint'))
-                ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                  R.createElement('input', {
-                    type: 'text',
-                    'aria-label': t('audioSoundDirRow'),
-                    defaultValue: readAudioSoundDir(),
-                    placeholder: t('audioSoundDirDefault'),
-                    onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
-                    onBlur: (event) => applySoundDir(event.target.value),
-                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
-                  })
-                )
-              ]),
-              row('audio-human', false, [
-                R.createElement('span', { style: labelStyle },
-                  t('audioHumanOnlyRow') + t('sep') + t(audioHumanOnly ? 'audioHumanOnlyOn' : 'audioHumanOnlyOff'),
-                  R.createElement('span', { style: hintStyle },
-                    t(audioHumanOnly ? 'audioHumanOnlyHintOn' : 'audioHumanOnlyHintOff')
-                  )
-                ),
-                R.createElement('button', {
-                  type: 'button', onClick: toggleAudioHumanOnly,
-                  style: btnStyleFor(audioHumanOnly, !audioOn), disabled: !audioOn,
-                  title: audioOn ? '' : t('audioNeedOn'),
-                }, t(audioHumanOnly ? 'audioHumanOnlyOff' : 'audioHumanOnlyOn'))
-              ]),
               row('audio-diag', true, [
                 R.createElement('span', { style: labelStyle },
                   t('audioDiagRow') + t('sep') + stateOf(audioDiag),
@@ -10138,6 +10253,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   )
                 ),
                 R.createElement('button', { type: 'button', onClick: toggleAudioDiag, style: btnStyleFor(audioDiag) }, t(audioDiag ? 'audioDiagOff' : 'audioDiagOn'))
+              ]),
               ]),
             ]),
           ])

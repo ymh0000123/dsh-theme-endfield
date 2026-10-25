@@ -169,11 +169,14 @@ const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.pr
 if (rows.length === 34) pass('panel has all 34 setting rows')
 else fail('expected 34 rows, found ' + rows.length)
 
-/* Count the rows the way the PAGE defines them — every direct child of a group
-   container — so an unlisted new row shows up as a mismatch instead of vanishing. */
-const rowsInGroups = groups.reduce((acc, g) => acc.concat(
-  (g.children || []).filter((c) => c && c.type === 'div' && c.props && c.props.key !== undefined
-    && !/^group-title-/.test(String(c.props.key)))), [])
+/* Count the rows the way the PAGE defines them. Since the folding subsections
+   landed, a row is no longer a DIRECT child of its group container — it sits
+   inside the subsection body — so the collection walks the whole tree and
+   excludes every container key (group, group title, subsection head/body).
+   递归收集保持了原有的防护：页面里新出现一个未登记的行 div，仍会在这里
+   以 mismatch 现形，而不是被静默忽略。 */
+const keyedDivs = walk(tree).filter((n) => n.type === 'div' && n.props && n.props.key !== undefined)
+const rowsInGroups = keyedDivs.filter((n) => !/^(group-[a-z]+$|group-title-|sub-)/.test(String(n.props.key)))
 if (rowsInGroups.length === rows.length) {
   pass('分组内的行数与已登记的 ROW_KEYS 一致（' + rowsInGroups.length + '）')
 } else {
@@ -184,6 +187,32 @@ if (rowsInGroups.length === rows.length) {
 
 if (groups.length === 5) pass('rows are grouped into 5 sections (主题/背景/动画/娱乐/音频)')
 else fail('expected 5 group containers, found ' + groups.length)
+
+/* --- 二级折叠子节：结构断言 ----------
+   实现约束：body 始终渲染、仅以 hidden 收起，行不离开元素树 —— 上面的
+   34 行断言才与折叠状态无关。有人把 hidden 改回条件渲染时，这里先红。
+   九个子节：背景(等高线/水印) 动画(滚动/启动加载) 娱乐(雷霆/余额胶囊)
+   音频(通知槽位/音量与音源/预留与诊断)；01 主题四行平铺不折叠。 */
+const subToggles = nodes.filter((n) => n.type === 'button' && n.props && n.props.className === 'endfield-settings-sub-toggle')
+if (subToggles.length === 9) pass('panel has 9 folding subsection headers')
+else fail('expected 9 subsection headers, found ' + subToggles.length)
+if (subToggles.length > 0 && subToggles.every((b) => b.props['aria-expanded'] === false)) {
+  pass('subsection headers default collapsed (aria-expanded=false)')
+} else fail('subsection headers should default to collapsed')
+const subBodies = walk(tree).filter((n) => n.type === 'div' && n.props && n.props.className === 'endfield-settings-sub-body')
+if (subBodies.length === 9 && subBodies.every((b) => b.props.hidden === true)) {
+  pass('subsection bodies render with hidden=true — rows stay in the tree while folded')
+} else fail('subsection bodies must render (hidden=true), not conditionally: found '
+  + subBodies.length + ' bodies')
+const subBodyIds = new Set(subBodies.map((b) => b.props.id))
+if (subToggles.every((b) => subBodyIds.has(b.props['aria-controls']))) {
+  pass('every subsection aria-controls resolves to its body id')
+} else fail('a subsection aria-controls does not resolve to a body id')
+const pageText = textOf(tree)
+for (const latin of ['CONTOUR', 'WORDMARK', 'SCROLL', 'BOOT', 'THUNDER', 'BALANCE', 'SLOTS', 'SOUND', 'RESERVED']) {
+  if (pageText.includes(latin)) pass('subsection header present: ' + latin)
+  else fail('subsection header missing: ' + latin)
+}
 
 const unkeyed = rows.filter((r) => !r.props || r.props.key === undefined)
 if (unkeyed.length === 0) pass('every row carries a React key')

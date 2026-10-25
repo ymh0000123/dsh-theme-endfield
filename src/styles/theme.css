@@ -1511,7 +1511,7 @@
 
          Note the + is the ONLY composer element whose class contains '_add'; the
          scope cannot reach the settings wrappers, the diff lines or the address bar.
-         Verified by test/hover-check.js against real hovered pixels in both
+         Verified by test/tools/hover-check.js against real hovered pixels in both
          palettes and both schemes. */
       body[data-ds-dark-theme] :is([data-composer-seat], [class$='_composerSeat'], [class$='_composerHero']) [class*='_add'] {
         color: var(--edge-accent) !important;
@@ -2069,6 +2069,27 @@
       body[data-ds-dark-theme] .endfield-settings-group-title {
         color: var(--edge-status-dark);
       }
+      /* ---------- Settings page: 二级折叠子节 ----------
+         折叠头是全宽 button：文字颜色继承面板自身（主题关闭时仍是 app 的
+         ink，可读性由 app 令牌保证），只有悬停/聚焦态借用组头同款的
+         palette 配色对 —— 静止的目录保持中性，交互时的反馈才着色。
+         类名避开主题 hover 反转规则的语义子串（item/row/card/tab…），
+         那条 !important 规则碰不到这个控件。
+         body 以 [hidden] 收起而非条件渲染：行不离开 DOM，display:none
+         是显式兜底，防止宿主或 UA 样式表把 hidden 覆盖回去。 */
+      .endfield-settings-sub-toggle:hover {
+        color: var(--edge-status-light);
+      }
+      body[data-ds-dark-theme] .endfield-settings-sub-toggle:hover {
+        color: var(--edge-status-dark);
+      }
+      .endfield-settings-sub-toggle:focus-visible {
+        outline: 1px solid currentColor;
+        outline-offset: 2px;
+      }
+      .endfield-settings-sub-body[hidden] {
+        display: none;
+      }
       /* ================= 雷霆大字 (娱乐模式) =================
          The task-boundary announcement. Fixed, centred, above the shell overlay
          layer and the app's own dialogs but BELOW the boot plate (2147483000), so
@@ -2087,7 +2108,7 @@
          2.11:1 on bg-layer-1, i.e. the same "on cream, #fff500 is not a colour
          choice, it is an erasure" failure this theme already documents for the
          watermark and the turn-status label — except here it was pure white. Caught
-         by rendering the plate and measuring the pixels (test/thunder-shot.js), not
+         by rendering the plate and measuring the pixels (test/tools/thunder-shot.js), not
          by reading the CSS.
 
          Measured white-vs-scrimmed-surface, ink #101110 over each light surface:
@@ -2671,15 +2692,21 @@
          sheet already repaints that role to ink in both palettes (see the warm
          label block), so the knob would stay invisible.
 
-         Both selectors are structural rather than hash-named where the host
-         allows it: the tab hook is the ARIA contract, the switch hook is the
-         third-party class already pinned by dsh-better-display's own build.
+         Both selectors are structural rather than hash-named: the tab hook is
+         the ARIA contract, and the switch hook matches the semantic suffix
+         every switch carries — dsh-better-display's pinned class and the
+         host's own CSS-module switches alike end in _switch, and the
+         [data-on] guard keeps the rule to the checked state, so an unchecked
+         knob keeps its ink fill. The hash form this replaces (the shape PR #37
+         first shipped) is exactly what selector-guard's part 1 fails on: the
+         suffix survives any rehash, the pinned class does not.
+
          The tab hook is scoped to dialogs on purpose: the app's top-level nav
          is role=tab too, but it sits on paper with an ink underline, so its
          selected label must stay ink. */
       body:not([data-ds-dark-theme]) [role='dialog'] [role='tab'][aria-selected='true'] {
         color: var(--dsw-static-neutral-bluish-00) !important;
       }
-      body:not([data-ds-dark-theme]) .xXul0q_switch[data-on]::after {
+      body:not([data-ds-dark-theme]) [class$='_switch'][data-on]::after {
         background: var(--dsw-static-neutral-bluish-00) !important;
       }
