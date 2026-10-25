@@ -30,14 +30,14 @@
  * would mean a broken default (e.g. the still marker never applied) still captured
  * perfectly and this test could no longer tell the two apart.
  *
- * Usage: node test/thunder-shot.js   (output: .kagent/shots/thunder-*.png)
+ * Usage: node test/tools/thunder-shot.js   (output: .kagent/shots/thunder-*.png)
  */
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
 
-const ROOT = path.resolve(__dirname, '..')
+const ROOT = path.resolve(__dirname, '../..')
 const OUTDIR = path.join(ROOT, '.kagent', 'shots')
 fs.mkdirSync(OUTDIR, { recursive: true })
 

@@ -29,7 +29,7 @@
  *      WRAPPER took the solid accent under it: 1.05:1). The hook must keep the
  *      composer scope the '_arrow' rule already uses.
  *
- * This checks the local client.js; test/live-check.js separately proves the
+ * This checks the local client.js; test/tools/live-check.js separately proves the
  * running GUI serves that exact byte stream, so the guard transitively covers
  * the live bundle too.
  *
@@ -132,7 +132,7 @@ for (const [needle, label] of hooks) {
    invisible label. The fix scopes the hook to the composer, exactly like the
    '_arrow' rule. This part keeps it scoped: any reappearance of an unscoped
    '_add' hook — a new rule, or a revert — fails here instead of turning another
-   page's text invisible. (test/hover-check.js measures the real pixels.) */
+   page's text invisible. (test/tools/hover-check.js measures the real pixels.) */
 const addUses = [...src.matchAll(/\[class\*='_add'\]/g)].map((m) => m.index)
 const unscoped = addUses.filter((i) => !/_composerSeat|_composerHero|data-composer-seat/.test(src.slice(Math.max(0, i - 200), i)))
 if (addUses.length === 0) {

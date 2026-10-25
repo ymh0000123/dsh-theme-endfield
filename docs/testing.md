@@ -126,8 +126,8 @@ npm run test:corners                          # 源码级：stadium/圆形规则
 node test/palette-contrast.test.js   # 两套配色每个角色的对比度（从真实 CSS 里读值）
 node test/palette-switch.test.js     # 真实浏览器里切换配色，22 项断言
 node test/settings-buttons.test.js   # 强调色底上的按钮文字对比度（32 项，含回归守卫）
-node test/hover-check.js             # 用 CDP 真的移动鼠标，验证真实 :hover 规则（3 个面，24 项）
-node test/verify-shots.js            # 解码四张截图统计强调色像素
+node test/tools/hover-check.js       # 用 CDP 真的移动鼠标，验证真实 :hover 规则（3 个面，24 项）
+node test/tools/verify-shots.js      # 解码四张截图统计强调色像素
 ```
 
 **`palette-contrast.test.js`** 从 `client.js` 的实际样式表里把变量读出来再验算。覆盖 27 项：实心底 + 墨色字达 AA、悬停底同样达标、回合状态四个色标对**两种**可能底色都达 AA、暗色强调色作图标墨色 ≥3、两配色的等高线合成对比度相差 ≤20% 且高于 1.06 感知下限、hero 光晕不比原品牌蓝更响（该 `*_heroGlow` 模块在 0.2 已不存在，规则保留为自愈钩子）、两配色确实不同、强调色写成 6 位十六进制，以及**武陵青的亮度必须落在 45%–56% 区间且留在青碧色轴上**。
@@ -323,7 +323,7 @@ node test/loader-late-prefs.test.js    # 设置节晚于 apply() 到达时，动
 
 ```bash
 node test/thunder-edges.test.js     # 边沿/生命周期/样式契约
-node test/thunder-shot.js           # 真实渲染截图 + 像素对比度断言
+node test/tools/thunder-shot.js     # 真实渲染截图 + 像素对比度断言
 node test/thunder-dismiss.test.js   # 点击关闭：真实指针事件 + 命中测试 + 监听器核账
 ```
 
@@ -356,7 +356,7 @@ node test/contour-perf.test.js        # 稳态帧成本（n=80）
 node test/contour-density.test.js     # 视口密度自适应（≥640px 出厂值不变，小屏递减）
 node test/contour-bounds.test.js      # 扫描边界与全扫的逐坐标等价
 node test/contour-worker.test.js      # worker 内核与主线程一致
-node test/shoot.js                    # 输出亮/暗 × 两配色共四张截图供肉眼复核
+node test/tools/shoot.js              # 输出亮/暗 × 两配色共四张截图供肉眼复核
 ```
 
 **`contour-render.test.js`** 覆盖：关闭时不创建节点且**不改动应用底色**；开启时画布挂进应用外框、图层确实上色、不透明底色已让位；正文颜色不变且仍可命中测试（图层在其**之下**）；动画开启时像素随时间变化、关闭后**完全静止**、**重新开启后再次变化**；暗色仍上色；拆除后节点归零。
@@ -381,7 +381,7 @@ node test/shoot.js                    # 输出亮/暗 × 两配色共四张截�
 
 该脚本对 24 / 60 / 120 fps **逐个**比预算，并在第一个超标处失败——所以真正卡住它的门槛是 **8.3ms（120fps）**，不是 41.7ms：报数时别只看「41.7ms 预算」那一行。
 
-> **提取到的名字必须跟着 `client.js` 走。** 这些「原样切出」的脚本按名字抓函数与常量，切出来少一个就是页面里的 `ReferenceError`，而它只会表现为 `no result` / 一行 `CONTOUR_... is not defined`。新增或重命名内核里的函数与常量时（例如 `contourStepFor`、`CONTOUR_MAX_CELLS`、`CONTOUR_MIN_BUMPSAMPLES`、`CONTOUR_SMOOTH_*`），要同步 `contour-smoothness` / `contour-cusps` / `contour-bounds` / `contour-perf` 的名单、`scripts/build-contour-worker.js` 的 `names`，以及 `src/contour-worker.js` 顶部手工镜像的常量——worker 里少一个常量同样是运行时 `ReferenceError`。
+> **提取到的名字必须跟着 `client.js` 走。** 这些「原样切出」的脚本按名字抓函数与常量，切出来少一个就是页面里的 `ReferenceError`，而它只会表现为 `no result` / 一行 `CONTOUR_... is not defined`。新增或重命名内核里的函数与常量时（例如 `contourStepFor`、`CONTOUR_MAX_CELLS`、`CONTOUR_MIN_BUMPSAMPLES`、`CONTOUR_SMOOTH_*`），要同步 `contour-smoothness` / `contour-cusps` / `contour-bounds` / `contour-perf` 的名单、`scripts/build-contour-worker.js` 的 `names`，以及 `src/contour/contour-worker.js` 顶部手工镜像的常量——worker 里少一个常量同样是运行时 `ReferenceError`。
 
 ---
 

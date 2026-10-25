@@ -134,7 +134,7 @@ git clone https://github.com/863683348/dsh-plugin-gate
 
 The opt-in renderer creates a Blob URL containing source embedded in client.js.
 The source is generated exclusively from this repository's contour functions and
-src/contour-worker.js / src/contour-webgl.js. It does not load a CDN or fetch code.
+src/contour/contour-worker.js / src/contour/contour-webgl.js. It does not load a CDN or fetch code.
 Only canvas ownership, size/phase/color instructions and completion messages
 cross the worker boundary; session content and credentials do not.
 `test/fixtures/chrome-cdp.js` launches a separate temporary browser only for tests.

@@ -4,7 +4,7 @@
  * identical — but "should be" is exactly the kind of assumption worth checking
  * before telling someone the feature is live.
  *
- * Usage: node test/live-check.js [baseUrl]
+ * Usage: node test/tools/live-check.js [baseUrl]
  */
 const fs = require('fs')
 const path = require('path')
@@ -12,7 +12,7 @@ const http = require('http')
 
 const BASE = process.argv[2] || 'http://127.0.0.1:3080'
 const URL_PATH = '/plugins/dsh-theme-endfield/client.js'
-const ROOT = path.resolve(__dirname, '..')
+const ROOT = path.resolve(__dirname, '../..')
 
 const get = (url) => new Promise((resolve, reject) => {
   http.get(url, (res) => {

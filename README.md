@@ -108,7 +108,7 @@ npm test
 | CI 阻塞门禁（`test:ci`） | Node 22 | 全量减去下面三项 |
 | CI 非阻塞 job | Node 22 | `test:perf` + `test:coverage`，`continue-on-error`，结果只写进摘要 |
 
-跑测试请用 Node 22+：浏览器 fixture 依赖全局 `WebSocket`／`fetch`，版本不足会在测试处明确报错（插件本身的运行没有这个要求）。`npm test` 比 CI 的 `test:ci` 多出 `contour-coverage`、`contour-perf`、`contour-density` 三项：前两项由 CI 的非阻塞 job 单独跑，`contour-density` 目前不在 CI 中运行。
+跑测试请用 Node 22+：浏览器 fixture 依赖全局 `WebSocket`／`fetch`，版本不足会在测试处明确报错（插件本身的运行没有这个要求）。`npm test` 比 CI 的 `test:ci` 多出 `contour-coverage`、`contour-perf` 两项：这两项重（渲染全图 / 性能计时），由 CI 的非阻塞 job 单独跑（`continue-on-error`），结果只写进 PR 摘要而不阻塞合并。
 
 ## 项目结构
 
@@ -116,8 +116,7 @@ npm test
 src/client/        Client 侧源码片段（拼接顺序见 src/client/manifest.js）
 src/host/          Host 侧源码片段（拼接顺序见 src/host/manifest.js）
 src/styles/        theme.css：主题样式表（那一整个模板字面量的内容）
-src/contour-worker.js   等高线 worker 源码（npm run build:worker 嵌入产物）
-src/contour-webgl.js    等高线 WebGL 源码（同上）
+src/contour/       等高线 worker 源码：contour-worker.js + contour-webgl.js（npm run build:worker 嵌入产物）
 client.js          Client 侧产物，由 src/client/ + src/styles/ 拼接而来
 index.js           Host 侧产物，由 src/host/ 拼接而来；package.json 的 main 与 exports["."] 都指向它
 scripts/           构建与门禁：lib/bundle-build.js 拼接器 + build-*.js 入口
@@ -127,7 +126,7 @@ sounds/            生成的通知音（npm run sound:build 重新生成）
 cordis.patch.yml   Bundle 注入配置
 check.js           样式表静态校验
 selftest.js        校验器自检
-test/              渲染、设置、配色与性能测试
+test/              渲染、设置、配色与性能测试（tools/ 为截图与目视检查脚本）
 docs/              设计、功能、工程与测试文档
 SECURITY.md        安全边界：发布产物清单与运行时权限（由 CI 的 package-check.js 与 files 白名单逐项核对）
 screenshots.json   界面截图清单（对应 assets/ 下的 webp）

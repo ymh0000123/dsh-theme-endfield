@@ -29,7 +29,7 @@
  *      the hook to the composer fixes (2) but must not delete (3), so both the
  *      rest ink (accent) and the hovered inversion (black on accent) are asserted.
  *
- * Usage: node test/hover-check.js
+ * Usage: node test/tools/hover-check.js
  */
 const fs = require('fs')
 const path = require('path')
@@ -38,7 +38,7 @@ const http = require('http')
 const zlib = require('zlib')
 const { spawn } = require('child_process')
 
-const ROOT = path.resolve(__dirname, '..')
+const ROOT = path.resolve(__dirname, '../..')
 const findChrome = () => [process.env.CHROME_PATH,
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',

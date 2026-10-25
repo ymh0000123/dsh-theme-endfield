@@ -21,13 +21,13 @@ function grab(name) {
 }
 /* The kernel list must track src/client/20-contour.js: `contourStepFor` joined it
    when the grid gained a cell cap (contourBuild reads it), and the constants it
-   and the kernel close over live in src/contour-worker.js because this script only
+   and the kernel close over live in src/contour/contour-worker.js because this script only
    extracts FUNCTIONS — a missing one is a ReferenceError inside the worker at runtime. */
 const names=['contourRng','contourStepFor','contourBuild','contourBuildCandidate','contourCoverageScore',
   'contourEvaluate','contourExtractLevel','contourExtract','contourDrawLines']
-let worker=fs.readFileSync(path.join(root,'src/contour-worker.js'),'utf8')
+let worker=fs.readFileSync(path.join(root,'src/contour/contour-worker.js'),'utf8')
 worker=worker.replace('/* CONTOUR_KERNEL */',names.map(grab).join('\n'))
-worker=worker.replace('/* CONTOUR_WEBGL */',fs.readFileSync(path.join(root,'src/contour-webgl.js'),'utf8'))
+worker=worker.replace('/* CONTOUR_WEBGL */',fs.readFileSync(path.join(root,'src/contour/contour-webgl.js'),'utf8'))
 // The artifact must be byte-stable across checkouts: JSON.stringify preserves raw
 // \r\n, so a CRLF working tree would bake \r into the embedded string and a
 // normalized LF copy of the same sources would rebuild to a different blob —

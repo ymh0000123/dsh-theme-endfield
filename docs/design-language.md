@@ -188,7 +188,7 @@ body:not(.theme-endfield-round) [class$='_iconButton'] { border-radius: 50% !imp
 
 唯一需要 JS 介入的表面是**等高线画布**——canvas 描边不能是 CSS 变量，所以它由一个监听 `<body>` class 的 `MutationObserver` 触发重绘（顺带让「别的标签页改了配色」也能跟着变）。
 
-配色切换后的实测像素占比（`test/verify-shots.js` 解码真实截图统计）：
+配色切换后的实测像素占比（`test/tools/verify-shots.js` 解码真实截图统计）：
 
 | 截图 | 黄色像素 | 青色像素 |
 | --- | --- | --- |

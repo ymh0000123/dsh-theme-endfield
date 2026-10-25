@@ -4,14 +4,14 @@
  * Correctness checks live in the .test.js files; this exists purely so the result
  * can be LOOKED at.
  *
- * Usage: node test/shoot.js
+ * Usage: node test/tools/shoot.js
  */
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { execFileSync } = require('child_process')
 
-const ROOT = path.resolve(__dirname, '..')
+const ROOT = path.resolve(__dirname, '../..')
 /* Unlike the .test.js files this one deliberately KEEPS its output (the PNGs are
    the point), so it writes to a gitignored scratch directory rather than a temp
    dir that is hard to find afterwards. */

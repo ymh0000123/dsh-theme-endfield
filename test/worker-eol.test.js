@@ -13,7 +13,7 @@ const root = path.resolve(__dirname, '..')
    is its own fragment (src/client/21-contour-worker.embed.js). */
 const INPUTS = [
   'src/client/20-contour.js', 'src/client/21-contour-worker.embed.js',
-  'src/contour-worker.js', 'src/contour-webgl.js',
+  'src/contour/contour-worker.js', 'src/contour/contour-webgl.js',
 ]
 
 /** A throwaway checkout with every input converted to `eol`. */
@@ -31,7 +31,7 @@ function checkout(eol, { stale = false } = {}) {
     path.join(dir, 'scripts/build-contour-worker.js'))
   // contour-webgl.js is embedded verbatim, so editing it makes the copy stale.
   if (stale) {
-    const src = path.join(dir, 'src/contour-webgl.js')
+    const src = path.join(dir, 'src/contour/contour-webgl.js')
     fs.writeFileSync(src, fs.readFileSync(src, 'utf8') + 'const CONTOUR_EOL_PROBE = 1' + eol)
   }
   return dir

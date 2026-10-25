@@ -283,7 +283,7 @@ body{font-family:var( --dsw-font-family, -apple-system, … )}
 
 ### 等高线 worker 是特例
 
-`src/contour-worker.js` + `src/contour-webgl.js` 由 `npm run build:worker` 把 9 个 kernel 函数抠出来，嵌成 `src/client/21-contour-worker.embed.js` —— **那是生成物，不要手改**。它整块是一行 `JSON.stringify` 出来的字符串，所以 `check.js` 的样式表护栏看不见它；改了 `src/contour-worker.js` 就必须重新生成。
+`src/contour/contour-worker.js` + `src/contour/contour-webgl.js` 由 `npm run build:worker` 把 9 个 kernel 函数抠出来，嵌成 `src/client/21-contour-worker.embed.js` —— **那是生成物，不要手改**。它整块是一行 `JSON.stringify` 出来的字符串，所以 `check.js` 的样式表护栏看不见它；改了 `src/contour/contour-worker.js` 就必须重新生成。
 
 ### 门禁与报错
 
@@ -474,7 +474,7 @@ client.js is stale (first difference at line 4096); run npm run build:client
 
 三处消费同一组函数（`contourLevelsFor` / `contourBumpsFor`，以视口短边为锚）：布隆布局 `contourBuildCandidate`、覆盖率校验 `contourCoverageScore`、抽取 `contourExtract`。其中校验器必须按「该视口**实际将画的**层级数」算墨量代理——若仍按 `CONTOUR_LEVELS` 评分，10 级的小屏会被要求 2 倍墨量，重抽循环每次都触顶。
 
-改造后 375×812 实测：路径数降到 ~54（另有种子随机性），最薄分区墨迹 **3.56%**（8×5 网格，0 空白格），嵌套环从 8~9 层降到 3~4 层。回归锁在 `test/contour-density.test.js`（≥640px 断言出厂值逐值相等；小屏断言按公式递减且能完整成图）。注意 worker 内核里 `src/contour-worker.js` 有一份**手工镜像**的同名函数——构建脚本只抠函数不抠常量，闭包名缺失会在 worker 首帧抛 ReferenceError（见 worker 一节的教训）。
+改造后 375×812 实测：路径数降到 ~54（另有种子随机性），最薄分区墨迹 **3.56%**（8×5 网格，0 空白格），嵌套环从 8~9 层降到 3~4 层。回归锁在 `test/contour-density.test.js`（≥640px 断言出厂值逐值相等；小屏断言按公式递减且能完整成图）。注意 worker 内核里 `src/contour/contour-worker.js` 有一份**手工镜像**的同名函数——构建脚本只抠函数不抠常量，闭包名缺失会在 worker 首帧抛 ReferenceError（见 worker 一节的教训）。
 
 ### 重启动画的首帧曾是空转
 
@@ -924,7 +924,7 @@ div.pI_x6G_centerCol
 
 **为什么第一次"修完"看起来像没生效。** 在浏览器控制台里量了一次真实 DOM，得到的三个值把三种可能一次分清了：`HASNEW true`（我改的规则**已经到页面**，所以不是缓存/没刷新）、`ACCENT #fff500`（变量有值，不是变量问题）、`BG rgb(36, 38, 36)`（最终仍是上游灰底）＋祖先链里那个 `DIV.`。**一条"已经生效但什么都没匹配到"的规则，和一条"根本没送到浏览器"的规则，症状完全一样**；不先在页面里量这三个值，只会在"是不是缓存"和"选择器又写错了"之间来回猜——本次就是这样多花了一整轮。
 
-**为什么整套验证都没发现。** `test/shoot.js` 的截图夹具先后把标签直接挂在 `.wSkVaW_header` 和 `.wSkVaW_headerActions` 底下，**两次都是照着当时的选择器搭的**；`test/preset-chip.test.js` 的夹具也一样漏了那层无 class 包裹层。于是选择器在夹具上命中、截图正常、测试全绿，而真实页面一个元素都没匹配到。这是本次最值得记的教训：**夹具一旦是为了"让选择器通过"而搭的，它就从验证退化成了同义反复。**
+**为什么整套验证都没发现。** `test/tools/shoot.js` 的截图夹具先后把标签直接挂在 `.wSkVaW_header` 和 `.wSkVaW_headerActions` 底下，**两次都是照着当时的选择器搭的**；`test/preset-chip.test.js` 的夹具也一样漏了那层无 class 包裹层。于是选择器在夹具上命中、截图正常、测试全绿，而真实页面一个元素都没匹配到。这是本次最值得记的教训：**夹具一旦是为了"让选择器通过"而搭的，它就从验证退化成了同义反复。**
 
 **最终修法：不再数层数，改用徽章自身的特征。**
 
@@ -990,7 +990,7 @@ fO69Vq_addButton / _3nPmjq_addButton    （旧 `:not()` 排除的两个）
 | 输入区 `+` hover（暗色） | 18.31:1（本来正常） | 18.31:1（**未因收敛作用域而丢失**） |
 | 输入区 `+` 常态墨色 | `#fff500` | `#fff500`（作用域仍命中） |
 
-`test/hover-check.js` 现在同时守这三面（编辑按钮 / 模型页添加按钮及其容器 / 输入区 `+`），`test/selector-guard.test.js` 新增第三条断言：**任何裸的 `[class*='_add']` 都要报错**，把这条钩子钉在输入区作用域里。
+`test/tools/hover-check.js` 现在同时守这三面（编辑按钮 / 模型页添加按钮及其容器 / 输入区 `+`），`test/selector-guard.test.js` 新增第三条断言：**任何裸的 `[class*='_add']` 都要报错**，把这条钩子钉在输入区作用域里。
 
 > 亮色模式本来就不受影响（该规则是 `body[data-ds-dark-theme]` 限定），测试也如实只在暗色下报红——这本身就是"作用域写对了"的证据。
 
@@ -1026,7 +1026,7 @@ fO69Vq_addButton / _3nPmjq_addButton    （旧 `:not()` 排除的两个）
 
 `settings-buttons.test.js` 读计算样式，所以它用同特异度的 `.HOVERPROBE` 类替代 `:hover`（类与伪类特异度同为 0,1,0，层叠结果不变）。这是合理的层叠等价，但**反向对照暴露了它的边界**：把主题规则里真正的 `:hover` 那一半删掉，该测试**照样全绿**——因为 `.HOVERPROBE` 那一半独自扛住了。
 
-因此补了 `test/hover-check.js`：通过 DevTools 协议**真的移动鼠标**到按钮上，再截图量字形与填充的对比度。同样的反向对照下，它如实报出 1.05:1 / 2.61:1，与反馈截图逐位吻合。
+因此补了 `test/tools/hover-check.js`：通过 DevTools 协议**真的移动鼠标**到按钮上，再截图量字形与填充的对比度。同样的反向对照下，它如实报出 1.05:1 / 2.61:1，与反馈截图逐位吻合。
 
 ### 做「有字 / 无字」差分时要保留一个零宽空格
 

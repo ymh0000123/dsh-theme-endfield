@@ -69,14 +69,14 @@ const classify = (r, g, b) => {
   return 'other'
 }
 
-const ROOT = path.resolve(__dirname, '..')
+const ROOT = path.resolve(__dirname, '../..')
 const SHOTS = path.join(ROOT, '.kagent', 'shots')
 let failures = 0
 const results = {}
 
 for (const name of ['shot-valley-light', 'shot-valley-dark', 'shot-wuling-light', 'shot-wuling-dark']) {
   const file = path.join(SHOTS, name + '.png')
-  if (!fs.existsSync(file)) { console.error('FAIL  missing ' + name + '.png (run node test/shoot.js)'); failures++; continue }
+  if (!fs.existsSync(file)) { console.error('FAIL  missing ' + name + '.png (run node test/tools/shoot.js)'); failures++; continue }
   const img = decodePng(file)
   const tally = { yellow: 0, cyan: 0, neutral: 0, other: 0 }
   for (let i = 0; i < img.data.length; i += img.channels) {
