@@ -239,13 +239,23 @@
             const next = !isEnabled()
             prefsSet(ENABLED_KEY, next ? '1' : '0')
             setEnabled(next)
-            if (next) { mount(); syncWatermarkVisibility(); syncContour() }
-            else { unmount(); syncWatermarkVisibility() }
-            /* The announcement watcher is gated on the master switch too, so it has
-               to be reconciled here. unmount() already stops it, but turning the
-               theme back ON must restart it — otherwise the feature would stay dead
-               until the next page load. */
-            syncThunder()
+            if (next) {
+              mount()
+              syncWatermarkVisibility()
+              syncContour()
+              /* The same list the initial mount block and reconcileFromPrefs run:
+                 on a scope that is NOT durably served no authoritative echo ever
+                 comes back to run reconcileFromPrefs, so every layer gated on its
+                 own switch has to be reconciled here or it stays dead until the
+                 next page load — the trap the thunder sync used to document. */
+              syncScrollAnim()
+              syncThunder()
+              syncAudioAttentionWatch()
+              syncBalanceCapsule()
+            } else {
+              unmount()
+              syncWatermarkVisibility()
+            }
           }
           const toggleContour = () => {
             const next = !isContourOn()
@@ -468,7 +478,7 @@
             title: audioOn ? '' : t('audioNeedOn'),
           }, t('audioTest') + ' · ' + t(labelKey))
           const toggleAudio = () => {
-            const next = !audioOn
+            const next = !isAudioOn()
             prefsSet(AUDIO_ENABLED_KEY, next ? '1' : '0')
             setAudioOn(next)
             // The attention watcher is gated on this switch, so it has to be
@@ -477,13 +487,13 @@
             if (next) playPreview('turn-done')
           }
           const toggleAudioStart = () => {
-            const next = !audioStart
+            const next = !isAudioStartOn()
             prefsSet(AUDIO_TURN_START_KEY, next ? '1' : '0')
             setAudioStart(next)
             if (next) playPreview('turn-start')
           }
           const toggleAudioBoot = () => {
-            const next = !audioBoot
+            const next = !isAudioBootOn()
             prefsSet(AUDIO_BOOT_KEY, next ? '1' : '0')
             setAudioBoot(next)
             // Preview the boot slot itself: the real one fires from the loader,
@@ -491,7 +501,7 @@
             if (next) playPreview('boot')
           }
           const toggleAudioDone = () => {
-            const next = !audioDone
+            const next = !isAudioDoneOn()
             prefsSet(AUDIO_TURN_DONE_KEY, next ? '1' : '0')
             setAudioDone(next)
             if (next) playPreview('turn-done')
@@ -502,12 +512,12 @@
             setAudioVolume(clamped)
           }
           const toggleAudioHumanOnly = () => {
-            const next = !audioHumanOnly
+            const next = !isAudioHumanOnly()
             prefsSet(AUDIO_HUMAN_ONLY_KEY, next ? '1' : '0')
             setAudioHumanOnly(next)
           }
           const toggleAudioDiag = () => {
-            const next = !audioDiag
+            const next = !isAudioDiagOn()
             prefsSet(AUDIO_DIAG_KEY, next ? '1' : '0')
             setAudioDiag(next)
           }
@@ -555,10 +565,11 @@
             return rows.join('　·　')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
-          /* The ten switches are grouped into four concerns so the page can be
+          /* The switches are grouped into five concerns so the page can be
              scanned instead of read as a flat list: 主题 (master switch +
-             appearance), 背景 (contour sheet + watermark), 动画 (boot loader),
-             娱乐 (雷霆大字 announcements + their entry animation).
+             appearance), 背景 (contour sheet + watermark), 动画 (output scroll
+             animation + boot loader), 娱乐 (雷霆大字 announcements), 通知 (audio
+             notifications).
              Each group is an editorial numbered header; rows keep their stable
              React keys. The last row of each group drops its divider so the next
              group header's own rule is the only line between groups.
@@ -723,7 +734,13 @@
               row('contour-trail', false, [
                 R.createElement('span', { style: labelStyle },
                   t('contourTrailRow') + t('sep') + stateOf(contourTrailOn),
-                  R.createElement('span', { style: hintStyle }, t('contourTrailHint'))
+                  R.createElement('span', { style: hintStyle },
+                    // Say so when the selected renderer cannot draw the trail,
+                    // rather than letting the switch look broken.
+                    (contourTrailOn && contourRenderer === 'worker-webgl')
+                      ? t('contourTrailHintWorker')
+                      : t('contourTrailHint')
+                  )
                 ),
                 R.createElement('button', {
                   type: 'button', onClick: toggleContourTrail,
@@ -976,11 +993,13 @@
                   t('balancePosition' + value.charAt(0).toUpperCase() + value.slice(1)))))
               ]),
               /* --- 防遮挡两个子开关：侧栏展开自动隐藏 / 指针靠近自动隐藏 ---
-                 Both ship ON because the遮挡 they answer is what the capsule
-                 rows exist for; each toggle can silence its rule individually.
-                 The switches stay enabled with the capsule off (a
-                 pre-configuration the next mount honours), mirroring the
-                 position select above; the hint states what fades and when. */
+                 Sidebar-hide ships OFF (opening the sidebar is the user's own
+                 deliberate action); hover-hide ships ON (the capsule moving out
+                 of the pointer's way is the un-asked-for behaviour). Each toggle
+                 can silence its rule individually. The switches stay enabled
+                 with the capsule off (a pre-configuration the next mount
+                 honours), mirroring the position select above; the hint states
+                 what fades and when. */
               row('balance-capsule-sidebar-hide', false, [
                 R.createElement('span', { style: labelStyle },
                   t('balanceSidebarHideRow') + t('sep') + stateOf(balanceSidebarHide),
@@ -992,7 +1011,7 @@
                   type: 'button',
                   onClick: toggleBalanceSidebarHide,
                   style: btnStyleFor(balanceSidebarHide),
-                }, t(balanceSidebarHide ? 'balanceOff' : 'balanceOn'))
+                }, t(balanceSidebarHide ? 'off' : 'on'))
               ]),
               row('balance-capsule-hover-hide', false, [
                 R.createElement('span', { style: labelStyle },
@@ -1005,7 +1024,7 @@
                   type: 'button',
                   onClick: toggleBalanceHoverHide,
                   style: btnStyleFor(balanceHoverHide),
-                }, t(balanceHoverHide ? 'balanceOff' : 'balanceOn'))
+                }, t(balanceHoverHide ? 'off' : 'on'))
               ]),
               /* --- 渠道额度读数：右侧百分比显示已用 or 剩余 ---
                  The row lives directly under the capsule switch because it only
@@ -1215,6 +1234,12 @@
       if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
         document.removeEventListener('DOMContentLoaded', watermarkObserverLate)
         document.removeEventListener('DOMContentLoaded', contourSchemeObserverLate)
+        // The boot loader's pre-body deferral too: a dead run must not be wired
+        // back in to mount an unstyled plate.
+        if (loaderDomReadyPending !== null) {
+          document.removeEventListener('DOMContentLoaded', loaderDomReadyPending)
+          loaderDomReadyPending = null
+        }
       }
       if (watermarkRaf !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(watermarkRaf)
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') window.removeEventListener('resize', onWatermarkResize)

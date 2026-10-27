@@ -62,6 +62,10 @@
        promise resolves, so a synchronous dirty mark would make every toggle
        emit a redundant second write. A late repair beats a duplicate write.
        @returns true when the write was issued (not when it was accepted). */
+    /* Set by the dispose effect below. A scope.set() promise that settles after
+       the run ended must not re-arm the retry loop: every reader it would consult
+       is nulled, so the loop would tick its full budget against a dead run. */
+    let prefsDisposed = false
     const prefsWriteField = (field, value) => {
       const scope = prefsScope
       if (!scope || typeof scope.set !== 'function') return false
@@ -73,6 +77,7 @@
       }
       if (result && typeof result.then === 'function') {
         result.then((ok) => {
+          if (prefsDisposed) return
           if (ok === false) {
             dbg('set REFUSED by the host', field, value)
             prefsDirty.add(field)
@@ -81,6 +86,7 @@
             prefsDirty.delete(field)
           }
         }, (e) => {
+          if (prefsDisposed) return
           dbg('set REJECTED', field, value, String(e && e.message || e))
           prefsDirty.add(field)
         })
@@ -148,6 +154,7 @@
       prefsRetryCount = 0
     }
     const prefsScheduleRetry = () => {
+      if (prefsDisposed) return
       // Nothing held any more: no reason to keep ticking.
       if (prefsDirty.size === 0) { prefsStopRetry(); return }
       // A durably-served scope needs no timer — its subscription replays fast.
@@ -528,6 +535,7 @@
     // provider-owned, so leaving our listener behind would leak it into the
     // next run of this plugin in the same page.
     ctx.effect(() => () => {
+      prefsDisposed = true
       prefsListeners.length = 0
       prefsReleaseSubscription()
       prefsScope = null

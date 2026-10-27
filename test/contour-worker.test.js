@@ -53,6 +53,19 @@ const root=path.resolve(__dirname,'..')
     await browser.until('__live===1 && /^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "")')
     assert.equal(await browser.evaluate('document.querySelectorAll("[data-endfield-contour-lines]").length'),1)
   }
+  // Backing-store budget: a viewport whose full-device canvas passes the
+  // worker's 8M-pixel limit (1920x1080 @ dpr 2 is ~8.3M) used to throw
+  // 'invalid frame' on its first frame, latch the failure and fall back to the
+  // main-thread painter for the life of the renderer preference. The client
+  // scales the frame's device ratio down to the budget, so the sheet stays on
+  // the off-main-thread path at exactly these viewports.
+  await browser.send('Emulation.setDeviceMetricsOverride',{width:1920,height:1080,deviceScaleFactor:2,mobile:false})
+  const bigBefore=await browser.evaluate('__frames')
+  await browser.until(`__frames>${bigBefore}`)
+  assert.match(await browser.evaluate('document.querySelector("[data-endfield-contour]").dataset.endfieldRenderer'),/^worker-(webgl2|canvas2d)$/)
+  await browser.sleep(300)
+  assert.match(await browser.evaluate('document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || ""'),/^worker-/)
+  assert.deepEqual(browser.errors,[])
   await browser.evaluate('__prefs.setItem("dsh-theme-endfield-enabled","0")')
   assert.equal(await browser.evaluate('__live===0 && !document.querySelector("[data-endfield-contour]")'),true)
   assert.deepEqual(browser.errors,[])

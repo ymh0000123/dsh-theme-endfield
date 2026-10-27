@@ -62,7 +62,7 @@
 
 ### Host ↔ Client 数据流
 
-1. **声明**（Host `index.js`）：0.1.7-rc.1 导出 `Config`（`z.object({ 每个字段: z.string().default(...).volatile() })`）；同时用 `ctx.inject(['settings'], sctx => sctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber)))` 关掉自动生成的设置页（本插件自带四组页面）。旧宿主则在 `settings.register` 存在时执行 `register('dsh-theme-endfield', schema, { applies:'live' })`。schema 每个字段都是**字符串**字段并带 `.default(...)`：default-ON 存 `'1'`（读作 `!== '0'`），default-OFF 存 `'0'`（读作 `=== '1'`）；palette/radius/fps/speed 各存一个文档里写明的字面量。字符串化让三代存盘点位的值模型完全一致，client 的键表、面板与测试都不必随 transport 改动。
+1. **声明**（Host `index.js`）：0.1.7-rc.1 导出 `Config`（`z.object({ 每个字段: z.string().default(...).volatile() })`）；同时用 `ctx.inject(['settings'], sctx => sctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber)))` 关掉自动生成的设置页（本插件自带五组页面）。旧宿主则在 `settings.register` 存在时执行 `register('dsh-theme-endfield', schema, { applies:'live' })`。schema 每个字段都是**字符串**字段并带 `.default(...)`：default-ON 存 `'1'`（读作 `!== '0'`），default-OFF 存 `'0'`（读作 `=== '1'`）；palette/radius/fps/speed 各存一个文档里写明的字面量。字符串化让三代存盘点位的值模型完全一致，client 的键表、面板与测试都不必随 transport 改动。
 2. **写**（浏览器 `client.js`）：设置面板每个 toggle 调用内部 `prefsSet(field, value)` → 只有当快照是 **durably served**（`status:'ready' && writable`，且 `mode` 不是显式的 `'memory'`）时才调用 transport 的 `set(field, value)`，Host 收到后原子写盘。`mode` 只是 **0.1.7-rc.\* 才有的可选字段**：`@deepseek-ai/dsh-client-ui-settings` 0.2.1-rc.2 连同 `persistence` 概念一起删掉了它，快照只剩 `{ status, value, base, user, revision, writable }`，写一律经 `remote.settings.mutate()` 落到 Host 文档，所以**缺省 `mode` 必须按可持久化处理**，只有显式的 `mode:'memory'`（0.1.7 非 loopback 页面）才截断写入。这正是 v1.2.2 在新版桌面「改了不保存」的根因：闸门要求 `mode === 'host'`，而新版恒为 `undefined`，于是每次 toggle 都只 held + 有界重试，约 10s 后丢弃，刷新即丢（启动报告即 `boot report … status= ready mode= undefined writable= true`）。只凭 `writable` 判写是另一个坑：host 模式的快照即便本命名空间**尚未被 served** 也会返回 `writable:true` 与 `status:'unavailable'`（`commit radius = round … status= unavailable` 就是这么打出来的）——旧代码照写不误、清了脏标记但什么都没落盘，刷新即丢。现在这种写被**拦下并标脏**（页面内仍生效），等快照在后续 ready 回相（Host 文档提交、镜像重载）时由 subscription 自动补写；`configForms.set()` 明确返回 `false`（Host 拒绝/跳过）时同样重新标脏等待下次回相，而不是假装写成功。
 3. **读 / 生效**：transport 的 `getSnapshot().value` 就是已由 schema 校验并合并默认值的整段（client 再经 `prefsResolveSection()` 归一化到 34 个声明字段）；主题层的 `isEnabled()` 与其它 getter 每次调用都 `prefsGet(field)` 现读本段，天然随值变化。
 4. **订阅同步**：`form.subscribe(...)` / `scope.subscribe(...)` 在每次落盘/镜像变化时唤醒，client 再跑一遍 `reconcileFromPrefs()`，把主题开关（enabled → mount/unmount token+样式表）、圆角/配色 class、水印、等高线、雷霆大字重新对齐。这样同 profile 里**另一个窗口/设备**编辑落盘文件（或本轮写入被 Host 回相确认）都不需要刷新即可热生效。订阅返回的 disposer 现在会被保存并在 run 拆除时调用：`ConfigForm` 是 provider 拥有、跨插件共享的实例，漏掉它会把这一个监听器泄漏给同页面的下一次 run。
@@ -470,7 +470,7 @@ client.js is stale (first difference at line 4096); run npm run build:client
 
 上面所有常量——21 条高度带、22 个凸起——都是**按桌面窗口的观感**调出来的，却按「每面积」施加：窗口缩到手机宽度，同样的线数与岛数挤进一小条竖带，嵌套环密到读作乱线。375×812 实测（暗色）：**62 条路径 / 23,890px 墨长**，单屏叠出 8~9 层同心环。
 
-杠杆选的是**层级数**：线距 = `span*2/LEVELS`，直接按比例缩放屏幕上的线间距。短边 **<640px** 时层级数从 20 向 10 线性递减（320px 触底，下限 6），凸起数从 22 向 12 同步递减（让岛屿保持分离而不是叠成靶心）；**≥640px 逐字节回到出厂值**，桌面窗口输出不变。640 这个锚点取在「手机宽（360–430）与窄分屏不再主导短边」之上，320 触底保证最小可用窗口仍是一幅完整地形。
+杠杆选的是**层级数**：线距 = `span*2/LEVELS`，直接按比例缩放屏幕上的线间距。短边 **<640px** 时层级数从 20 向 10 线性递减（320px 触底，下限 6），凸起数从 22 向 10 同步递减（让岛屿保持分离而不是叠成靶心）；**≥640px 逐字节回到出厂值**，桌面窗口输出不变。640 这个锚点取在「手机宽（360–430）与窄分屏不再主导短边」之上，320 触底保证最小可用窗口仍是一幅完整地形。
 
 三处消费同一组函数（`contourLevelsFor` / `contourBumpsFor`，以视口短边为锚）：布隆布局 `contourBuildCandidate`、覆盖率校验 `contourCoverageScore`、抽取 `contourExtract`。其中校验器必须按「该视口**实际将画的**层级数」算墨量代理——若仍按 `CONTOUR_LEVELS` 评分，10 级的小屏会被要求 2 倍墨量，重抽循环每次都触顶。
 

@@ -31,8 +31,23 @@
     let audioAttentionObserver = null
     let audioAttentionFrame = null
     let audioAttentionKind = null
+    /* Attach the observer exactly once per watch, retrying until <body> exists:
+       a first sync that ran pre-body used to start the interval with no observer
+       and every later sync short-circuited on the running timer, leaving that page
+       load on the 1s poll forever. The tick is the retry point. */
+    const audioAttentionEnsureObserver = () => {
+      if (audioAttentionObserver !== null) return
+      if (typeof MutationObserver !== 'function' || typeof document === 'undefined' || !document.body) return
+      audioAttentionObserver = new MutationObserver(audioAttentionSchedule)
+      try {
+        audioAttentionObserver.observe(document.body, { childList: true, subtree: true })
+      } catch (e) {
+        audioAttentionObserver = null
+      }
+    }
     const audioAttentionTick = () => {
       try {
+        audioAttentionEnsureObserver()
         const kind = detectPendingInteraction()
         if (kind === null) {
           audioAttentionKind = null
@@ -61,14 +76,7 @@
       if (wanted && audioAttentionTimer === null && typeof setInterval === 'function') {
         audioAttentionKind = null
         audioAttentionTimer = setInterval(audioAttentionTick, AUDIO_ATTENTION_POLL_MS)
-        if (typeof MutationObserver === 'function' && typeof document !== 'undefined' && document.body) {
-          audioAttentionObserver = new MutationObserver(audioAttentionSchedule)
-          try {
-            audioAttentionObserver.observe(document.body, { childList: true, subtree: true })
-          } catch (e) {
-            audioAttentionObserver = null
-          }
-        }
+        audioAttentionEnsureObserver()
         audioAttentionTick()
       } else if (!wanted && audioAttentionTimer !== null) {
         stopAudioAttentionWatch()

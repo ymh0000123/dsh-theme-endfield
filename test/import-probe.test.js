@@ -64,11 +64,14 @@ try { mod = loaded.factory(() => null) } catch (e) { fail('factory() threw: ' + 
 pass('factory() ran')
 if (typeof mod.apply !== 'function') fail('module has no apply()')
 
-/* apply() with a minimal ctx: theme + slots only, settings disabled path. */
+/* apply() with a minimal ctx: theme + slots only, settings disabled path.
+   The slots face needs inject (the settings section mounts through it) —
+   mount/define alone predate the seam and fail apply() for an unrelated
+   reason, which is exactly what this probe must not do. */
 const ctx = {
   get: (n) => {
     if (n === 'theme') return { overrideTokens: () => () => {} }
-    if (n === 'slots') return { mount: () => () => {}, define: () => {} }
+    if (n === 'slots') return { mount: () => () => {}, define: () => {}, inject: () => () => {} }
     return undefined
   },
   effect: () => () => {},

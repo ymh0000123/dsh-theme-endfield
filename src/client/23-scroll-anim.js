@@ -397,7 +397,11 @@
       scrollAnimRun()
     }
 
-    /* A reader gesture wins immediately — the app's own READING_INTENTS list. */
+    /* A reader gesture wins immediately: wheel, touch, pointer-down and ANY
+       keydown with focus inside the scrollport all count — the tail snaps back to
+       the app's own geometry instead of decaying. The list is deliberately broader
+       than navigation keys: a lingering lag under a text selection (Ctrl+C) reads
+       as broken rendering, not as smoothness. */
     const scrollAnimOnIntent = (entry) => { if (entry.offset !== 0) scrollAnimClear(entry) }
 
     const scrollAnimDetach = (entry) => {
@@ -465,6 +469,7 @@
        cheaper than the work the rest of this hook already does per mutation. */
     const syncScrollAnim = () => {
       if (typeof document === 'undefined') return
+      ensureScrollAnimEnvWatch()
       const on = scrollAnimActive()
       if (!on && scrollAnimPorts.size === 0) { scrollAnimStop(); return }
       const live = document.querySelectorAll('[data-conversation-scroll]')
@@ -507,18 +512,43 @@
         scrollAnimDetach(entry)
         scrollAnimPorts.delete(port)
       }
+      /* The environment watchers go with the run too. destroyScrollAnim runs on
+         every master-switch OFF (unmount) and on run dispose, while the fragment
+         itself is evaluated once per apply() — a listener registered at fragment
+         scope would survive destroy, and after a disable -> enable cycle without a
+         page load the old closure's syncScrollAnim would attach a SECOND set of
+         port listeners and a second rAF loop alongside the new run's, both writing
+         the same columns' transforms. */
+      if (scrollAnimEnvWatched) {
+        scrollAnimEnvWatched = false
+        if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+          document.removeEventListener('visibilitychange', onScrollAnimEnvironmentChange)
+        }
+        if (scrollAnimMotionQuery !== null && typeof scrollAnimMotionQuery.removeEventListener === 'function') {
+          scrollAnimMotionQuery.removeEventListener('change', onScrollAnimEnvironmentChange)
+        }
+        scrollAnimMotionQuery = null
+      }
     }
     const onScrollAnimEnvironmentChange = () => {
       if (!scrollAnimActive()) scrollAnimSnap()
       else syncScrollAnim()
     }
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-      document.addEventListener('visibilitychange', onScrollAnimEnvironmentChange)
-    }
-    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-      scrollAnimMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-      if (typeof scrollAnimMotionQuery.addEventListener === 'function') {
-        scrollAnimMotionQuery.addEventListener('change', onScrollAnimEnvironmentChange)
+    /* Attached on the first sync (which every mount/reconcile path calls) and
+       removed in destroyScrollAnim — NOT registered unconditionally at fragment
+       scope, for the ghost-animator reason destroyScrollAnim documents. */
+    let scrollAnimEnvWatched = false
+    const ensureScrollAnimEnvWatch = () => {
+      if (scrollAnimEnvWatched) return
+      scrollAnimEnvWatched = true
+      if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener('visibilitychange', onScrollAnimEnvironmentChange)
+      }
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        scrollAnimMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+        if (typeof scrollAnimMotionQuery.addEventListener === 'function') {
+          scrollAnimMotionQuery.addEventListener('change', onScrollAnimEnvironmentChange)
+        }
       }
     }
     // Let the page observer declared above re-attach as the app renders.

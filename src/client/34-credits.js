@@ -264,31 +264,34 @@
       const next = (typeof provider === 'string' && JET_HUB_PROVIDER_LABELS[provider] !== undefined)
         ? provider
         : null
-      if (next !== creditProvider || (next !== null && !creditProviderResolved)) {
+      const previous = creditProvider
+      if (next !== previous || (next !== null && !creditProviderResolved)) {
         creditProvider = next
         creditProviderResolved = next !== null
         creditPaintIdle()
       }
-      // A switch (force, from the store subscription) bypasses the rate
-      // floor so the read follows the channel immediately; the 60s poll
-      // passes force=false and is throttled by creditsApply.
-      if (next !== null) await creditsApply(next, force === true)
+      /* A switch (the resolved provider differs from the painted one) forces the
+         fetch so the read follows the channel immediately; an ordinary publish
+         resolving the SAME provider keeps the per-provider rate floor, exactly as
+         the creditsRebind note promises. Both the 60s poll and the debounced
+         store-subscription path pass force=false and rely on this detector. */
+      if (next !== null) await creditsApply(next, force === true || next !== previous)
     }
 
     /* Store events land here; a channel flip re-reads the directory and
        repaints. Debounced so a burst of publishes collapses into one read.
-       The debounce itself is also the switch detector: if the provider the
-       delayed read resolves differs from the one painted, the fetch is
-       forced — ordinary publishes (balance churn, model-list updates) keep
-       the throttle. */
+       The read passes force=false: creditsRefresh itself is the switch
+       detector — if the provider the delayed read resolves differs from the
+       one painted, the fetch is forced; ordinary publishes (balance churn,
+       model-list updates) keep the throttle. */
     const creditsRebind = () => {
       if (balanceEl === null) return
       if (creditsRebindTimer !== null && typeof clearTimeout === 'function') clearTimeout(creditsRebindTimer)
       creditsRebindTimer = null
-      if (typeof setTimeout !== 'function') { creditsRefresh(true); return }
+      if (typeof setTimeout !== 'function') { creditsRefresh(false); return }
       creditsRebindTimer = setTimeout(() => {
         creditsRebindTimer = null
-        creditsRefresh(true)
+        creditsRefresh(false)
       }, 150)
     }
 

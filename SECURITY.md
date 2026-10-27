@@ -98,7 +98,7 @@ verdict = WARN   summary = { high: 0, medium: 2, low: 25 }
 - `String.fromCharCode(96)` 只是构造一个反引号字符（自测要把它注入 CSS 注释来验证守卫），
   与字符数组混淆无关。
 
-以上改动都是行为等价的：`node check.js` 全绿，`node selftest.js` 10/10 注入用例仍被抓出。
+以上改动都是行为等价的：`node check.js` 全绿，`node selftest.js` 15/15 注入用例仍被抓出。
 
 ## 4. 有意保留的动态执行与子进程
 
@@ -107,7 +107,7 @@ verdict = WARN   summary = { high: 0, medium: 2, low: 25 }
 | 位置 | 特征 | 为什么保留 | 风险边界 |
 | --- | --- | --- | --- |
 | `test/contour-cusps.test.js:64` | `new Function(...)`（`new_function` / `function_ctor`，high） | 把 `client.js` 里**抽取出来的**等高线几何代码放进内存里跑，源码就在同文件内可读，用来验证曲线拐点回归 | 编译并执行的是本仓库自己的源码；不联网、不写盘、无外部输入 |
-| `test/*.js`（19 个文件） | `execFileSync(chrome, [...])`（`exec_sync`，high） | 无头 Chrome 渲染截图 / 取 `--dump-dom`，做像素级视觉回归 | 参数以数组传入、**无 shell**、`shell:false`；被启动的是本机浏览器，参数全部是字面量或仓库内路径 |
+| `test/`（19 个文件，`test/*.js` 与 `test/tools/`） | `execFileSync(chrome, [...])`（`exec_sync`，high） | 无头 Chrome 渲染截图 / 取 `--dump-dom`，做像素级视觉回归 | 参数以数组传入、**无 shell**、`shell:false`；被启动的是本机浏览器，参数全部是字面量或仓库内路径 |
 | `.github/scripts/*.js` | `execFileSync('git' / process.execPath, [...])`（`exec_sync`，high） | CI 里跑语法检查、`git diff --check`、测试套件 | 同上：数组参数、无 shell |
 | `selftest.js:44` | `vm.createContext` + `runInContext` | 在进程内、对着一个桩沙箱执行 `check.js` 自身，好让「守卫失效」这件事可被观测（而不是靠人眼） | 执行的是本仓库的 `check.js`；沙箱里只有 `console`/`process` 桩，无 `require` 之外的宿主能力 |
 
