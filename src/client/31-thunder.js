@@ -128,10 +128,17 @@
     let thunderRebindTimer = null
     /* Retry budget for thunderRebind, bounded like every other retry in this
        file (rebindPrefs 40, settle watch 20): a permanently absent sessions
-       service must not leave a 120 ms poll running for the life of the page.
-       A settings change re-runs syncThunder -> thunderRebind, which restarts
-       the budget. */
+       service must not leave a 120 ms poll running for the life of the page. The
+       budget is two-phase — 100 fast tries (~12s) for the ordinary cold boot, then
+       a slow phase (one service probe every 5s, bounded) for the runtime that
+       arrives later than that, e.g. on a slow mirror. Once a service IS seen the
+       counter resets, so a later service loss gets a fresh budget. */
     let thunderRebindAttempts = 0
+    /* Two-phase shape of the budget above: ~12s of fast tries, then up to twenty
+       more minutes of one cheap ctx.get probe every 5s. */
+    const THUNDER_REBIND_FAST_LIMIT = 100
+    const THUNDER_REBIND_SLOW_MS = 5000
+    const THUNDER_REBIND_SLOW_END = 340
     let thunderWatchedId = null
     // null = nothing readable observed yet, so the next value is a baseline.
     let thunderLastRunning = null
@@ -204,17 +211,21 @@
       if (thunderRebindTimer !== null && typeof clearTimeout === 'function') clearTimeout(thunderRebindTimer)
       thunderRebindTimer = null
       /* Service not there yet: keep retrying rather than giving up for good, since
-         the only reason to be here is that the feature is switched on — but only
-         within the budget above. */
+         the only reason to be here is that the feature is switched on — fast tries
+         first, then a slow probe cadence, both bounded (see the budget note). */
       if (sessions === undefined) {
-        if (thunderRebindAttempts >= 100) {
+        if (thunderRebindAttempts >= THUNDER_REBIND_SLOW_END) {
           dbg('thunder rebind gave up: no sessions service after', thunderRebindAttempts, 'tries')
           return
         }
         thunderRebindAttempts += 1
-        if (typeof setTimeout === 'function') thunderRebindTimer = setTimeout(thunderRebind, 120)
+        if (typeof setTimeout === 'function') {
+          thunderRebindTimer = setTimeout(thunderRebind,
+            thunderRebindAttempts > THUNDER_REBIND_FAST_LIMIT ? THUNDER_REBIND_SLOW_MS : 120)
+        }
         return
       }
+      thunderRebindAttempts = 0
       // The list subscription may have been skipped earlier (no service then), so
       // attach it as soon as one exists.
       thunderSubscribeList(sessions)

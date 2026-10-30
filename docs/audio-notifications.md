@@ -103,7 +103,7 @@ node scripts/build-sounds.js --check  # 校验生成物与定义一致
 
 | 平台 | 播放器 |
 | --- | --- |
-| Windows | `pwsh.exe` → `powershell.exe`（`-EncodedCommand` + `Media.SoundPlayer`） |
+| Windows | `powershell.exe`（5.1）→ `pwsh.exe`（`-EncodedCommand` + `Media.SoundPlayer`） |
 | macOS | `afplay` |
 | Linux | `paplay` → `aplay` |
 

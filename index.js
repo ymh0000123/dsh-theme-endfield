@@ -884,6 +884,13 @@ function installAudio(ctx, settingsScope) {
     const key = `${sessionId}:${data.turn}`;
     if (hasVisibleText(data.message)) terminals.set(key, true);
     else if (!terminals.has(key)) terminals.set(key, false);
+    /* The map is only reaped by agent/turn-stopping, and a turn that ends any
+       other way (agent/error, a destroyed session) never fires it — in a host
+       process that runs for days those entries would accumulate forever. Bound
+       it FIFO like playedDone below: the entries evicted earliest belong to the
+       oldest turns, and by the time 512 newer turns have been recorded, a
+       turn-stopping for the evicted one is not a live question any more. */
+    if (terminals.size > 512) terminals.delete(terminals.keys().next().value);
   });
 
   /* The two "a human has to do something" triggers, and the ONLY things that

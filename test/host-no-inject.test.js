@@ -2,7 +2,7 @@
    WAITS for it — so on a host that never provides `settings` the callback is not
    the only thing that is missing: an unprobed `ctx.inject` used to throw out of
    apply() and take the whole theme down with it. The webServer ask right above it
-   (index.js:947) is feature-detected; the settings ask was not. These cases pin
+   (index.js:1064) is feature-detected; the settings ask was not. These cases pin
    that a context without `inject` still mounts, and still gets the audio engine
    running on its shipped defaults. */
 const assert = require('node:assert/strict')

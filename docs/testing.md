@@ -356,6 +356,7 @@ node test/contour-perf.test.js        # 稳态帧成本（n=80）
 node test/contour-density.test.js     # 视口密度自适应（≥640px 出厂值不变，小屏递减）
 node test/contour-bounds.test.js      # 扫描边界与全扫的逐坐标等价
 node test/contour-worker.test.js      # worker 内核与主线程一致
+node test/contour-worker-budget.test.js # worker 背板预算：超大视口缩 dpr，普通视口逐位不变
 node test/tools/shoot.js              # 输出亮/暗 × 两配色共四张截图供肉眼复核
 ```
 

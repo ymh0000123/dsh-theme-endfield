@@ -186,6 +186,11 @@
     let contourTrailListening = false
     let contourTrailPainted = false
     let contourMotionQuery = null
+    /* A DPR change (window moved between monitors, browser zoom) leaves the CSS
+       geometry untouched, so the ResizeObserver never fires and the sheet keeps
+       rasterizing at the old device ratio. The 'resolution' query fires exactly
+       when devicePixelRatio changes. */
+    let contourResolutionQuery = null
     /* Last applied animation state. Declared HERE, above every function that touches
        it, because contourTeardown() assigns it and is itself reachable from
        unmount() — a `let` declared further down would still be in its temporal dead
@@ -201,9 +206,9 @@
        of one sheet roughly constant in frame AREA. The cap is set so every ordinary
        window keeps the shipped 6px grid byte-for-byte (1440x900 is 36k cells,
        1920x1080 is 58k); only genuinely large canvases coarsen, and the spline still
-       rounds the coarser polyline at a 1px stroke. It also keeps a large HiDPI
-       canvas inside the worker's own backing-store limit, so the sheet stays on the
-       off-main-thread path instead of falling back to the synchronous painter. */
+       rounds the coarser polyline at a 1px stroke. (The worker's backing-store
+       limit is a different axis — the canvas is frame-sized whatever the grid —
+       and is handled where frames are sent; see contourWorkerDprFor below.) */
     const CONTOUR_MAX_CELLS = 60000
     /* Bump radius floor, in grid samples. The radius was `(0.05..0.14) * min(w, h)`,
        which ties the terrain's feature size to the frame's SHORTER side: in a short
@@ -240,6 +245,25 @@
       const cells = (s) => (Math.ceil(w / s) + 1) * (Math.ceil(h / s) + 1)
       while (step < 40 && cells(step) > CONTOUR_MAX_CELLS) step += 1
       return step
+    }
+    /* DEVICE-RATIO BUDGET for the worker renderer. The worker rejects any frame
+       whose backing store would pass its 8M-pixel budget (src/contour/
+       contour-worker.js), and a canvas at the frame's full device size blows past
+       it on the common large/HiDPI viewports — 1080p@2x, 1440p@1.5x and 4K@1x are
+       all ~8.3M device pixels, so the first frame threw 'invalid frame', latched
+       the failure, and the advertised Worker/WebGL option never engaged for those
+       users at all. The sampling step cannot help: the canvas is the whole frame
+       at device resolution regardless of the grid. Scale the device ratio down to
+       the budget instead of dooming the off-main-thread renderer — the canvas
+       keeps its CSS size, and at these sizes the few percent of missing device
+       pixels are invisible at a 1px stroke. Below the budget the ratio passes
+       through unchanged, so every ordinary window is bit-identical. */
+    const CONTOUR_WORKER_PIXEL_BUDGET = 8000000
+    const contourWorkerDprFor = (w, h, dpr) => {
+      /* 99% of the budget: the worker rounds each axis to whole device pixels,
+         and the two roundings can push the product a fraction of a percent over. */
+      const budget = Math.sqrt((CONTOUR_WORKER_PIXEL_BUDGET * 0.99) / (w * h))
+      return budget < dpr ? Math.max(0.1, budget) : dpr
     }
     /* VIEWPORT-ADAPTIVE DENSITY. The shipped look was tuned on a desktop frame:
        20 levels over the +/-1.45 span and 22 gaussian bumps. Those are per-AREA
@@ -1307,7 +1331,8 @@
     const contourRefresh = (geometry) => {
       if (contourWorker !== null) {
         if (!contourGeom || document.hidden) return
-        const ratio = Math.min(2, Math.max(.1, window.devicePixelRatio || 1))
+        const ratio = contourWorkerDprFor(contourGeom.w, contourGeom.h,
+          Math.min(2, Math.max(.1, window.devicePixelRatio || 1)))
         const pending = contourWorker.pending
         contourWorker.pending = {w:contourGeom.w,h:contourGeom.h,dpr:ratio,phase:contourPhase,
           color:contourStroke(),geometry:geometry || !!(pending && pending.geometry)}
@@ -1398,6 +1423,14 @@
       contourResetTrail(true)
       contourSwitchSig = ''
       contourApplySwitches()
+    }
+    /* A DPR-only change re-rasterizes at the new ratio; a change landing during a
+       scroll pause is remembered and applied by the resume path, exactly like a
+       ResizeObserver callback. */
+    const onContourResolutionChange = () => {
+      if (contourHost === null) return
+      if (contourScrollPaused) { contourResizePending = true; return }
+      if (contourSizeTo(contourHost)) contourRefresh(true)
     }
     const contourSizeTo = (host) => {
       const r = host.getBoundingClientRect()
@@ -1504,6 +1537,10 @@
         contourMotionQuery.removeEventListener('change', onContourEnvironmentChange)
       }
       contourMotionQuery = null
+      if (contourResolutionQuery !== null && typeof contourResolutionQuery.removeEventListener === 'function') {
+        contourResolutionQuery.removeEventListener('change', onContourResolutionChange)
+      }
+      contourResolutionQuery = null
       contourDisposeWorker()
       if (contourRo !== null) {
         contourRo.disconnect()
@@ -1523,6 +1560,15 @@
          landscape would visibly snap backwards before resuming. A fresh mount at
          phase 0 has no such transient — which is exactly what this restores. */
       contourPhase = 0
+      /* A scroll pause engaged when the layer died must not outlive it: a remount
+         would come up gated by contourWantsAnim's paused check with no scrollend
+         ever coming to lift it (the scrolled element may itself be gone), so the
+         sheet would render but never morph until the user scrolled again. The
+         pending timer goes with the flags. */
+      if (contourScrollTimer !== null && typeof clearTimeout === 'function') clearTimeout(contourScrollTimer)
+      contourScrollTimer = null
+      contourScrollPaused = false
+      contourResizePending = false
       // Nothing is drawn any more, so the next mount must re-apply the switch rather
       // than trust a signature describing a canvas that no longer exists.
       contourSwitchSig = ''
@@ -1601,6 +1647,10 @@
             contourMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
             if (typeof contourMotionQuery.addEventListener === 'function') {
               contourMotionQuery.addEventListener('change', onContourEnvironmentChange)
+            }
+            contourResolutionQuery = window.matchMedia('(resolution)')
+            if (typeof contourResolutionQuery.addEventListener === 'function') {
+              contourResolutionQuery.addEventListener('change', onContourResolutionChange)
             }
           }
           contourStartWorker(line)

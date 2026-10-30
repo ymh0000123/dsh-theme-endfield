@@ -213,8 +213,9 @@ check('rate: a channel switch bypasses the floor (force skips the throttle check
 check('rate: failures re-arm at the 30s failure retry, not the full floor',
   src.indexOf('const CREDITS_FAILURE_RETRY_MS = 30000') > -1 &&
   /Date\.now\(\) - CREDITS_MIN_INTERVAL_MS \+ CREDITS_FAILURE_RETRY_MS/.test(paint))
-check('rate: the store-subscription path forces (a switch follows immediately)',
-  /creditsRebindTimer = setTimeout\(\(\) => \{\s*creditsRebindTimer = null\s*creditsRefresh\(true\)/.test(src.replace(/\r\n/g, '\n')))
+check('rate: the store-subscription path stays throttled (the switch detector in creditsRefresh forces)',
+  /creditsRebindTimer = setTimeout\(\(\) => \{\s*creditsRebindTimer = null\s*creditsRefresh\(false\)/.test(src.replace(/\r\n/g, '\n')) &&
+  /creditsApply\(next, force === true \|\| next !== previous\)/.test(src.replace(/\r\n/g, '\n')))
 check('rate: the poll heartbeat passes force=false (throttled)',
   /balanceFetch\(\)\s*creditsRefresh\(false\)/.test(src.replace(/\r\n/g, '\n')))
 

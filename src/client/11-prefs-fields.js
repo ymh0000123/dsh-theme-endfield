@@ -37,7 +37,8 @@
       const v = prefsGet(BALANCE_POSITION_KEY)
       return BALANCE_POSITION_OPTIONS.indexOf(v) >= 0 ? v : 'center'
     }
-    /* 防遮挡子开关：default-ON（!== '0'），与主开关的读取惯例一致。 */
+    /* 防遮挡子开关。两者默认值不同，读取语义也随之不同：sidebarHide 默认关
+       （读 === '1'），hoverHide 默认开（读 !== '0'）——见 10-prefs-store.js 的注释。 */
     const BALANCE_SIDEBAR_HIDE_KEY = 'balanceCapsuleSidebarHide'
     const BALANCE_HOVER_HIDE_KEY = 'balanceCapsuleHoverHide'
     const isBalanceSidebarHideOn = () => prefsGet(BALANCE_SIDEBAR_HIDE_KEY) === '1'
@@ -51,7 +52,7 @@
        so session credentials and the host-side badge cache (TTL 120s, failure
        TTL 15s) come for free; the page only ever names the provider.
        The id table IS the plugin's contract: usage.badge answers for these
-       twelve, and anything else — notably the built-in DeepSeek models — keeps
+       thirteen, and anything else — notably the built-in DeepSeek models — keeps
        the wallet display, so an absent plugin can never blank the capsule. */
     const JET_HUB_RPC_SCOPE = '/api'
     const JET_HUB_RPC_CHANNEL = 'jet-hub'

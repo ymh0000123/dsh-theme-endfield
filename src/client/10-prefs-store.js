@@ -97,15 +97,17 @@
          floating element the user did not ask for. */
       balanceCapsule: '0',
       /* 渠道额度胶囊的右侧百分比读数选「已用」还是「剩余」——两个值都有真实语义，
-         不存在默认就错的答案，所以默认 used（与插件自身徽章一致的读法）。
-         仅影响 credits 模式的右侧百分比槽位；左侧主数字始终为剩余额度。 */
+         不存在默认就错的答案，所以默认 remaining（与左侧主数字的剩余额度语义一致，
+         也与 features.md 的字段表一致）。仅影响 credits 模式的右侧百分比槽位。 */
       creditDisplay: 'remaining',
       /* 余额胶囊的停靠位 —— center（顶部居中）| left（靠左）| right（靠右）。
          仅当胶囊开启时有意义：选择靠边停靠可让开侧边栏与顶部工具栏的交叠区。 */
       balanceCapsulePosition: 'center',
       /* 防遮挡的两个子开关 —— 侧边栏展开自动隐藏 / 指针靠近自动隐藏。
-         default-ON：用户抱怨的就是遮挡，两个行为同时默认生效；单独关掉
-         其中一个的出口保留在这里（开关语义与其余 default-ON 一致：!== '0'）。 */
+         侧栏展开是主要遮挡源但属于「用户主动打开」的动作，默认关；指针靠近
+         则在用户不知情时收起内容，默认开。用户抱怨的遮挡由 hover-hide 兜底，
+         单独关掉其中一个的出口保留在这里（开关语义不一致是有意的：
+         sidebarHide 读 === '1'，hoverHide 读 !== '0'，见 11-prefs-fields.js）。 */
       balanceCapsuleSidebarHide: '0',
       balanceCapsuleHoverHide: '1',
       /* 音频通知 (host half: lib/audio.js). Two live slots — the prompt that
@@ -215,13 +217,16 @@
        buggy build already wrote: 'contourAnim' -> 'contour-anim'. Derived from
        the table (not from the schema, which cannot know it) so the two can never
        drift, and only for fields that really do have a distinct legacy double:
-       every single-word field maps to itself and is skipped. */
+       every single-word field maps to itself and is skipped, and so is the bare
+       localStorage-era key ('contourRenderer') whose prefix-strip yields the
+       empty string — it never had a legacy spelling, and admitting '' as a
+       "legacy key" would put a nonsense entry in the map. */
     const PREFS_FIELD_TO_LEGACY_KEY = (() => {
       const m = {}
       for (const field of Object.keys(PREFS_KEY_TO_FIELD)) {
         const f = PREFS_KEY_TO_FIELD[field]
         const legacy = field.slice(PREFS_NS.length + 1)
-        if (legacy !== f) m[f] = legacy
+        if (legacy !== '' && legacy !== f) m[f] = legacy
       }
       return m
     })()

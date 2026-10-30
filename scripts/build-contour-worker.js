@@ -22,12 +22,21 @@ function grab(name) {
 /* The kernel list must track src/client/20-contour.js: `contourStepFor` joined it
    when the grid gained a cell cap (contourBuild reads it), and the constants it
    and the kernel close over live in src/contour/contour-worker.js because this script only
-   extracts FUNCTIONS — a missing one is a ReferenceError inside the worker at runtime. */
-const names=['contourRng','contourStepFor','contourBuild','contourBuildCandidate','contourCoverageScore',
+   extracts FUNCTIONS — a missing one is a ReferenceError inside the worker at runtime.
+   `contourOverlayTrail` is extracted for the same reason: contourExtract calls it
+   whenever a frame carries trail samples, so the first Worker renderer that
+   forwards the (documented, not-yet-wired) trail input would otherwise die on a
+   ReferenceError instead of drawing. */
+const names=['contourRng','contourStepFor','contourOverlayTrail','contourBuild','contourBuildCandidate','contourCoverageScore',
   'contourEvaluate','contourExtractLevel','contourExtract','contourDrawLines']
 let worker=fs.readFileSync(path.join(root,'src/contour/contour-worker.js'),'utf8')
-worker=worker.replace('/* CONTOUR_KERNEL */',names.map(grab).join('\n'))
-worker=worker.replace('/* CONTOUR_WEBGL */',fs.readFileSync(path.join(root,'src/contour/contour-webgl.js'),'utf8'))
+/* The replacement is passed as a FUNCTION: with a string replacement,
+   String.replace interprets $&, $', $` and $1..$99 inside the inserted source,
+   and the kernel/webgl source is arbitrary future code — a `[class$='_frame']`
+   selector in a comment would silently splice the tail of the worker file into
+   the bundle, and the byte-equality gates would stay green while shipping it. */
+worker=worker.replace('/* CONTOUR_KERNEL */',()=>names.map(grab).join('\n'))
+worker=worker.replace('/* CONTOUR_WEBGL */',()=>fs.readFileSync(path.join(root,'src/contour/contour-webgl.js'),'utf8'))
 // The artifact must be byte-stable across checkouts: JSON.stringify preserves raw
 // \r\n, so a CRLF working tree would bake \r into the embedded string and a
 // normalized LF copy of the same sources would rebuild to a different blob —

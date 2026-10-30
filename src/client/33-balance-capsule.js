@@ -35,10 +35,9 @@
     const BALANCE_KEY = 'balanceCapsule'
     const isBalanceCapsuleOn = () => prefsGet(BALANCE_KEY) === '1'
     /* What the credits mode's RIGHT-hand percentage slot reads: 已用xx% (the
-       plugin's own badge reading) or 剩余xx%. Anything other than 'remaining'
-       reads as 'used' — the preference is a two-literal choice, stored as
-       exactly one of them, and the tolerant default mirrors how
-       readContourRenderer treats its own select. */
+       plugin's own badge reading) or 剩余xx%. Anything other than 'used' reads as
+       'remaining' — the preference is a two-literal choice, stored as exactly one
+       of them, and 'remaining' is the default the field ships with. */
     const CREDIT_DISPLAY_KEY = 'creditDisplay'
     const readCreditDisplay = () => (prefsGet(CREDIT_DISPLAY_KEY) === 'used' ? 'used' : 'remaining')
     let balanceEl = null
@@ -245,6 +244,14 @@
       creditProviderResolved = false
       creditsRebindAttempts = 0
       creditsWatchedStore = null
+      /* The per-provider fetch stamps go too. They are the throttle's memory, and
+         a destroy (preview remount, channel teardown) is a fresh load as far as
+         the capsule is concerned: keeping the stamps would throttle the first
+         post-remount fetch on the pre-destroy timestamp and leave the channel
+         read stuck on '--' for up to the whole 5-minute floor — which is exactly
+         the recovery the preview's collapse is supposed to perform, and which the
+         unthrottled wallet path already gets. */
+      for (const stampKey of Object.keys(creditLastFetch)) delete creditLastFetch[stampKey]
       if (balanceSidebarRo !== null) {
         try { balanceSidebarRo.disconnect() } catch (e) { /* already gone */ }
         balanceSidebarRo = null

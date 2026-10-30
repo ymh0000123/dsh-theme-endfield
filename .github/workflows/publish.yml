@@ -52,9 +52,16 @@ jobs:
           echo "npm $(npm --version) / node $(node --version)"
 
       # 版本纪律门禁：v1.2.1 那次 tag 与包内 version 就不一致，现有 CI 没挡住。
-      - name: 校验 tag 与 package.json 版本一致
-        if: startsWith(github.ref, 'refs/tags/')
+      # 门禁不设 tag 条件：workflow_dispatch 从分支上触发时同样要被拦下，否则
+      # 手动发布可以绕过 tag/version 一致性，发出一个没有 tag、没有 Release 的
+      # 版本——恰恰是这个门禁要防的事故。从分支 dispatch 想重发？选中对应的
+      # tag 作为 ref 再跑。
+      - name: 校验发布来源是 v* tag 且与 package.json 版本一致
         run: |
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            echo "::error title=非 tag 发布::只有 v* tag 才允许发布；workflow_dispatch 请选中对应 tag 作为 ref 运行"
+            exit 1
+          fi
           tag="${GITHUB_REF_NAME#v}"
           ver="$(node -p "require('./package.json').version")"
           echo "tag=$tag package.json=$ver"

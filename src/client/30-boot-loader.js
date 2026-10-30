@@ -29,6 +29,10 @@
     // to outlive it so a stalled flourish can still never leave the app covered.
     let loaderKill = null
     let loaderDone = false
+    /* The DOMContentLoaded deferral runLoader can install while <body> is still
+       missing; the run's dispose effect removes it (removeEventListener is a no-op
+       once a { once } listener has fired). */
+    let loaderDomReadyPending = null
     const clearLoaderTimers = () => {
       if (loaderRaf !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(loaderRaf)
       loaderRaf = null
@@ -97,7 +101,11 @@
       // animation (loaderDone stays false, so the retry is the real first run).
       if (!document.body) {
         if (typeof document.addEventListener === 'function') {
-          document.addEventListener('DOMContentLoaded', () => { runLoader() }, { once: true })
+          /* Kept in a variable the run's dispose effect can remove: a bundle that
+             evaluated pre-body and a run disposed before DOMContentLoaded must not
+             wire the dead closure back into the page. */
+          loaderDomReadyPending = () => { runLoader() }
+          document.addEventListener('DOMContentLoaded', loaderDomReadyPending, { once: true })
         }
         return
       }
