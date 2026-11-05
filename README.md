@@ -1,6 +1,7 @@
 # dsh-theme-endfield
 
 参考《明日方舟：终末地》官网风格的 DSH Web 主题插件：奶油纸底、墨黑文字、信号黄／武陵青强调色、全直角工业编辑风。
+<img src="https://raw.githubusercontent.com/kingOfSoySauce/dsh-skin-market/main/site/public/skin-screenshots/ymh0000123__dsh-theme-endfield/ada9396a957633a40bdad89ff084b0136b9515b4/home.gif" alt="dsh-theme-endfield" width="720">
 
 - **Client 侧**（`client.js`）：通过主题令牌与样式覆盖界面。
 - **Host 侧**（`index.js`）：设置持久化与可选的音频通知（派生系统播放器子进程）。
