@@ -75,9 +75,11 @@ td{padding:12px}[data-composer-card]{position:absolute;bottom:30px;left:260px;wi
 </style></head><body><div class="app_frame"><div class="app_sidebarCol" data-slot="sidebar"><div>Sidebar</div></div>
 <div class="app_centerCol"><div class="wSkVaW_root"><table class="test_tableScroll"><tbody><tr><td id="cell">Selected text inside a hovered row</td></tr></tbody></table></div></div>
 <div data-composer-card>Composer</div><div data-sidebar-right-panel="push" data-sidebar-right-open><div data-dockkit-host="dock">Docked panel</div></div></body></html>`
-async function boot(browser,root,values={},prefix='') {
-  await browser.send('Page.navigate',{url:'data:text/html,'+encodeURIComponent(HTML)})
-  await browser.until('document.querySelector("#cell") !== null')
+async function boot(browser, root, values = {}, prefix = '', page = {}) {
+  const html = page.html || HTML
+  const ready = page.ready || '#cell'
+  await browser.send('Page.navigate',{url:'data:text/html,'+encodeURIComponent(html)})
+  await browser.until('document.querySelector(' + JSON.stringify(ready) + ') !== null')
   await browser.evaluate(prefix+'\nwindow.__ModuleLoader__={load:m=>{window.__MOD__=m}}')
   await browser.evaluate(fs.readFileSync(path.join(root,'client.js'),'utf8'))
   const {BROWSER_SETTINGS_SCOPE_SNIPPET}=require(path.join(root,'test/fixtures/settings-scope.browser.js'))

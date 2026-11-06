@@ -108,6 +108,12 @@ const hooks = [
   // and every child rule is scoped under it by CSS-module suffix, so a generic
   // '_card'/'_body' elsewhere can never be hit.
   ["[data-approval-key] > [class$='_card']", 'approval band: card scoped under the panel root'],
+  // issue #41 — the band is position:fixed, so it only reaches the viewport while
+  // the composer seat is NOT a containing block for fixed descendants. 0.2.2-rc.1
+  // gave the seat `will-change: transform`; this rule has to keep existing or the
+  // band collapses to a zero-height line at the bottom edge again.
+  ["body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat'])",
+    'approval band: seat will-change released while a panel is mounted'],
   ["[data-approval-key] [class*='_actionRow']", 'approval actions row hook'],
   ["body [data-approval-key] [class*='_actionRow'] button:last-child", 'approval confirm capsule ink'],
   // Risk-confirmation modal (「确认启用完全权限？」): a body-portal Modal whose

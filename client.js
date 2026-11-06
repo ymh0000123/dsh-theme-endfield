@@ -6742,6 +6742,37 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       [data-cordis-decline]:hover:not(:disabled) {
         background: #d6281d !important;
       }
+      /* ---------- 审批白条的前提：祖先不能是 containing block（issue #41） ----------
+         The band below fills the VIEWPORT only while no ancestor between the
+         panel and the viewport is a containing block for fixed descendants.
+         DSH 0.2.2-rc.1 declared will-change: transform on the composer seat,
+         which builds that containing block exactly like a real transform does
+         (CSS Will Change: a property that would make the element generate a
+         containing block MUST do so when named in will-change). The approval
+         panel replaces the composer and therefore lives INSIDE that seat, so
+         position: fixed; inset: 0 started resolving against the seat's
+         padding box instead of the viewport. Fixed also takes the panel out of
+         flow, which left the seat with no in-flow child: its height collapsed
+         to 0, the layer resolved to the seat's width by ZERO height, and the
+         card centred on that line straddled the window's bottom edge (fixture:
+         layer 720x0, card running 95px past the viewport). Only the top strip
+         reading 「● 等待审批」 survived — the reported screenshot, and the
+         152-second approval that followed.
+         The fix is one declaration on the ancestor, not on the band: CSS
+         cannot escape a containing block, so a transformed/will-changed
+         ancestor is not something the band can style its way out of. Dropping
+         the hint only while a panel is mounted keeps the app's compositing
+         hint for every other frame. Verified live in Chrome: computed
+         will-change flips to auto and the layer measures the full viewport;
+         deleting this declaration at runtime collapses the same layer back to
+         zero height, and re-inserting it restores the viewport rect
+         (test/approval-band-transform.test.js covers both directions).
+         Both anchors are listed because the [class$=] hook dies the moment
+         upstream appends a second class to the seat, and [data-composer-seat]
+         is the e2e hook the app itself declares. */
+      body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat']) {
+        will-change: auto !important;
+      }
       /* ---------- 审批弹窗：全屏白条 + 上下遮罩（Endfield 寻访确认框） ----------
          The shipped panel is a rounded warn-bordered card parked inside the
          composer column (max-width: --dsh-chat-content-width). The reference
@@ -6759,9 +6790,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          CSS-module SUFFIXES, each rule scoped under the root so a generic
          '_card' / '_body' elsewhere in the app is untouched.
          position:fixed escapes the composer column's width cap and the
-         frame's overflow clip; no ancestor between the seat and the viewport
-         carries a transform/filter, and if a future one did, the band simply
-         stays in flow — degraded position, never a broken dialog. */
+         frame's overflow clip, and it lands on the viewport only while the
+         seat does not build a containing block — the rule above the block is
+         what keeps that true (issue #41), not the absence of ancestors with a
+         transform. An earlier revision of this note claimed a transformed
+         ancestor would merely leave the band in flow, "degraded position,
+         never a broken dialog"; that was wrong, and #41 is the proof: fixed
+         does not fall back to static, it keeps laying out against a seat that
+         has just been emptied, so the band collapses instead of degrading. */
       [data-approval-key] {
         position: fixed !important;
         inset: 0 !important;

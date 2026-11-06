@@ -51,7 +51,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 
 | DSH | 设置持久化 | 备注 |
 | --- | --- | --- |
-| **0.2.x**（在 **0.2.0-rc.2** 与 **0.2.1-rc.2** 上实测） | Host 导出 `Config`，浏览器 `ctx.configForms` | 当前支持目标 |
+| **0.2.x**（在 **0.2.0-rc.2** 与 **0.2.1-rc.2** 上实测；0.2.2-rc.1 的 composer seat 改动见下） | Host 导出 `Config`，浏览器 `ctx.configForms` | 当前支持目标 |
 | 0.1.7 – 0.1.x | 同一套 Config／configForms 接缝 | 无需改动 |
 | ≤ 0.1.5 | `ctx.settings.register` + `ctx.settingsScope` | 自动回落，无需配置 |
 
@@ -61,11 +61,12 @@ dsh plugin --profile web rm dsh-theme-endfield
 
 ### 0.2 改动（v1.1.6 已跟进）
 
-0.2 改动了三处本插件依赖的应用侧细节，旧写法在 0.2 上会**静默失效**：
+0.2 改动了四处本插件依赖的应用侧细节，旧写法在 0.2 上会**静默失效**：
 
 - **回合状态标签**（“Deep diving…”）从 `@deepseek-ai/dsh-client-ui-conversation` 的渐变文字搬到 `@deepseek-ai/dsh-client-ui-chat` 的遮罩扫光文字，不再有 `turnStatus` 类名；着色改由 `--dsw-alias-label-deep-diving` / `-shimmer` 两个令牌承担，因此旧规则已删除，改在 `theme.overrideTokens` 层换色（留着旧规则时该令牌仍是应用自带值，标签完全没有主题色）。
 - **右侧栏**列名由 `_detailsCol` 改为 `_rightbarCol`，且不透明底色移到列元素本身——等高线图层在右侧栏打开时不会再被整块盖住。
 - **插件卡片展示文案**改由 `locale/<语言>.json` 的 `meta.title` / `meta.description` 提供；`package.json` 的 `dsh.client.inject` 也不再列 0.2 已删除的 `@deepseek-ai/dsh-client-runtime` 与 `@deepseek-ai/dsh-client-ui-slots`，改为列出 0.2 真正的提供方。
+- **composer seat 的 `will-change: transform`**（0.2.2-rc.1）：它会让 seat 成为 `position: fixed` 后代的 containing block，而审批白条正是靠 fixed 铺满视口——白条因此塌成窗口底部的一条线，只剩「等待审批」可见（[#41](https://github.com/ymh0000123/dsh-theme-endfield/issues/41)）。主题在审批面板挂载期间把该提示降回 `auto`，不改 DOM、也不长期关掉上游的合成提示。
 
 细节见 [docs/engineering-notes.md](docs/engineering-notes.md)。
 

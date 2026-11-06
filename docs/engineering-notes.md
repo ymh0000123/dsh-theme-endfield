@@ -994,6 +994,33 @@ fO69Vq_addButton / _3nPmjq_addButton    （旧 `:not()` 排除的两个）
 
 > 亮色模式本来就不受影响（该规则是 `body[data-ds-dark-theme]` 限定），测试也如实只在暗色下报红——这本身就是"作用域写对了"的证据。
 
+### 九类：`will-change` 也建立 containing block（审批白条塌成一条线）
+
+审批白条是 `position: fixed; inset: 0` 的全屏遮罩 + 通栏纸带，靠「遮罩只在纸带上下露出」还原参考图。这条设计有一个从未写进铁律的前提：**面板到视口之间，没有祖先构成 containing block**。旧注释其实意识到了这件事，但结论写反了——它说「若将来有祖先带 transform/filter，纸带只是退回文档流，位置降级，不会坏」。
+
+DSH 0.2.2-rc.1 给 composer seat 加了 `will-change: transform`。按 CSS Will Change 的规定，**会让元素生成 containing block 的属性出现在 `will-change` 里时，元素必须真的生成 containing block**——所以它与真 transform 等价。审批面板替换输入框、正好住在这个 seat 内部，于是 fixed 的参照系从视口变成 seat 的 padding box；fixed 又让面板脱离文档流，seat 唯一在流内的子元素随之消失、高度塌成 0：
+
+| 量 | 修复前 | 修复后 |
+| --- | --- | --- |
+| seat 的计算值 `will-change` | `transform` | `auto` |
+| 白条（fixed 层）rect | `720×0`（列宽 × 0 高，贴在窗口底边） | `1200×800`（整个视口） |
+| 卡片 rect | `706..895`，下半截被视口裁掉 | `306..495`，居中 |
+| 胶囊 rect | 落在视口外，点不到 | `190×41`，`y=430` |
+
+「退化而不是坏掉」错在**以为 fixed 会失效退回静态定位**。fixed 不会退回：它照旧按 containing block 布局，只是那个盒子刚被自己清空。于是症状不是「位置偏了一点」，而是「整个对话框只剩一行字」。现场为此多花了 152 秒才点下审批（主题关闭时同样的操作 1–2 秒）。
+
+修法的方向也只能反过来：**CSS 无法从 fixed 后代内部逃出 containing block**，补丁必须打在祖先上，而且只在需要时打——
+
+```css
+body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat']) {
+  will-change: auto !important;
+}
+```
+
+`!important` 不是保险，是必需的：上游那条是 `.<hash>_root[data-phase=active] .<hash>_composerSeat`（0,3,0），本规则（0,2,1）压不过。`:has()` 让上游的合成提示只在「没有审批在屏幕上」的帧里失效，代价压到最小。两个钩子取并集的理由同八类：`[class$=]` 在上游给该元素追加第二个类时静默失效，`[data-composer-seat]` 是上游自己声明的 e2e 锚点。
+
+这同时解释了为什么**报告者给的补丁能修好、但会退化**：把 root 改成 `position: relative` + 透明背景，面板回到文档流，功能立刻恢复，但通栏纸带被收进聊天列宽、上下遮罩一并消失——那是「把设计也一起删了」，不是等价修复。修在祖先上，两样都留着。
+
 ---
 
 ## 验证方法论

@@ -91,6 +91,38 @@ _centerCol > _header > _titleRow > _titleCluster > _headerActions
 
 ---
 
+## 审批白条与祖先的 containing block（issue #41）
+
+```bash
+node test/approval-band-transform.test.js   # 真实浏览器：三个座位，同一份白条
+```
+
+**`approval-band-transform.test.js`** 守的是「CSS 写对了、位置却归浏览器管」这一类失效。审批白条的设计是 `position: fixed; inset: 0` 铺满视口、卡片被压成通栏纸带，两者之差就是「上下有遮罩」；但 fixed 只在**祖先不构成 containing block** 时才落到视口。DSH 0.2.2-rc.1 给 composer seat 加了 `will-change: transform`——按 CSS Will Change 的规定，会让元素生成 containing block 的属性写进 `will-change` 就必须真的生成——而审批面板正好替换输入框、住在这个 seat 里。
+
+失效的样子非常安静：fixed 让面板脱离文档流 → seat 的**唯一**在流内子元素消失 → seat 高度塌成 0 → 白条解析成「列宽 × 0 高」的一条线，卡片以这条零高线居中，下半截被视口裁掉，只剩顶部「● 等待审批」。现场反馈是同一台机器上审批从 1–2 秒变成 152 秒。
+
+修法只能打在祖先上（CSS 无法从 fixed 后代内部逃出 containing block），且限定在面板存在时生效：
+
+```css
+body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat']) {
+  will-change: auto !important;
+}
+```
+
+夹具同时挂三个座位，**除座位外完全一样**——少一个，断言就会为错误的理由通过：
+
+| 座位 | 钩子 | 用途 | 实测 |
+| --- | --- | --- | --- |
+| `#seatRaw` | 带 `will-change`，两个钩子都不匹配 | 反向对照：修复前的形状 | 白条 `720×0`，卡片下沿越界被裁 |
+| `#seat` | `[class$='_composerSeat']` | 类名后缀钩子 | 白条 `1200×800`，胶囊 `190×41` 在视口内 |
+| `#seatAttr` | `[data-composer-seat]` | 上游自己声明的 e2e 锚点 | 同上 |
+
+四条断言缺一不可：反向对照必须**仍然塌成一条线**（否则夹具不再复现 #41，其余断言就是空过）；两个钩子都要把 `will-change` 降成 `auto` 并让白条回到视口大小；两颗胶囊必须落在视口内且可命中（`≥150×24`）；遮罩层必须仍高于纸带（否则「上下有遮罩」这个形状本身没了）。
+
+> 变异验证：把规则里的 `will-change: auto` 换成 `transform` → 第 2 段断言红（`got transform`），证明这条测试量的确实是那一条声明，不是纸张颜色或别的巧合。
+
+---
+
 ## 样式表投递与幂等
 
 ```bash
