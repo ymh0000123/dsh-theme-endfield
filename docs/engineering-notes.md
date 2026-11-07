@@ -752,7 +752,7 @@ const visual = delta - layoutDelta
 
 ### 日历是数据，不是逻辑
 
-`BALANCE_HOLIDAY_NOTICES` 按年抄录国务院的放假安排通知（2026 年 = **国办发明电〔2025〕7号**，https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm ），`from` / `to` 是**含端点的 MM-DD**，`makeup` 存调休日——它不只是给人看的，也是上面那条推理的证据。启动时逐日展开成 `BALANCE_HOLIDAY_DATES`（`'YYYY-MM-DD' → 节日名`），再由此得出 `balanceHolidayName` 与 `balanceDayIsOffPeak`。
+`BALANCE_HOLIDAY_NOTICES` 按年抄录国务院的放假安排通知（2026 年 = **国办发明电〔2025〕7号**，https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm ；2027 年 = **国办发明电〔2026〕10号**，https://www.gov.cn/zhengce/content/202611/content_7085101.htm ），`from` / `to` 是**含端点的 MM-DD**，`makeup` 存调休日——它不只是给人看的，也是上面那条推理的证据。启动时逐日展开成 `BALANCE_HOLIDAY_DATES`（`'YYYY-MM-DD' → 节日名`），再由此得出 `balanceHolidayName` 与 `balanceDayIsOffPeak`。
 
 **没有收录的年份回退到普通工作日规则**，也就是一个未录入的节假日会被算成高峰。这是刻意的：宁可把假期显示成高峰（用户读到的只是「现在贵」），也不猜一个假的半价读数。代价是这份数据会随时间失效，而且失效是**静默**的——所以 `check.js` 在「当前北京年份不在表里」时响亮失败，作为每年 11 月（通知发布月）的提醒。
 

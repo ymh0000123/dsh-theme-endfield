@@ -11,9 +11,9 @@
  * The window itself is the longest run of consecutive EQUAL-PRICE blocks, so
  * Friday evening runs into Monday 09:00 and a national holiday is one valley
  * rather than a chain of midnights. The holiday table is data transcribed from
- * the State Council notice (国办发明电〔2025〕7号 for 2026); check.js is what
- * fails loudly when the current year is missing from it, and this file pins the
- * resulting behaviour for that year.
+ * the State Council notices (国办发明电〔2025〕7号 for 2026, 国办发明电〔2026〕10号
+ * for 2027); check.js is what fails loudly when the current year is missing from
+ * it, and this file pins the resulting behaviour for every transcribed year.
  *
  * Extracts the holiday data + the pricing functions straight out of client.js
  * by slicing the source between marker comments — a structural change to the
@@ -147,21 +147,76 @@ check('10-08 09:00 is peak again', at(2026, 10, 8, 9, 0).peak === true)
 check('09-30 (Wed) 09:30 is still peak', at(2026, 9, 30, 9, 30).peak === true)
 
 // --- 调休 workdays are ordinary weekends for billing (DeepSeek 2026-09-19) ---
-for (const [mo, d] of [[1, 4], [2, 14], [2, 28], [5, 9], [9, 20], [10, 10]]) {
-  const w = at(2026, mo, d, 10, 0)
-  check('调休 ' + mo + '-' + d + ' is off-peak', w.peak === false)
-  check('调休 ' + mo + '-' + d + ' is not a named holiday', w.holiday === '')
+const MAKEUP_DAYS = [[2026, 1, 4], [2026, 2, 14], [2026, 2, 28], [2026, 5, 9],
+  [2026, 9, 20], [2026, 10, 10], [2027, 1, 31], [2027, 2, 14], [2027, 5, 8],
+  [2027, 9, 26], [2027, 10, 9]]
+for (const [y, mo, d] of MAKEUP_DAYS) {
+  const w = at(y, mo, d, 10, 0)
+  check('调休 ' + y + '-' + mo + '-' + d + ' is off-peak', w.peak === false)
+  check('调休 ' + y + '-' + mo + '-' + d + ' is not a named holiday', w.holiday === '')
 }
 
-// --- A year with no notice falls back to the plain weekday rule ---
-// 2027-01-01 (Fri) 10:00 has no table entry yet: billed as peak, which is the
-// behaviour check.js's current-year assertion exists to force us to revisit.
-const unlisted = at(2027, 1, 1, 10, 0)
-check('2027-01-01 falls back to the weekday rule (peak)', unlisted.peak === true)
-check('2027-01-01 has no holiday name', unlisted.holiday === '')
+// --- 2027: 国办发明电〔2026〕10号 (published 2026-11-05) ---
+// 元旦 01-01 (Fri) .. 01-03 (Sun), no 调休 days: the valley opens on the last
+// 2026 peak block (Thu 18:00) and closes on Monday 01-04 09:00.
+const newYear27 = at(2027, 1, 1, 10, 0)
+check('2027 元旦 (Fri) 10:00 is off-peak', newYear27.peak === false)
+check('2027 元旦 is named 元旦', newYear27.holiday === '元旦')
+check('2027 元旦 window spans 12-31 18:00 to 01-04 09:00 (87h)', newYear27.totalMs === 87 * H)
+check('2027 元旦 10:00 counts down 71h to Monday 09:00', newYear27.remainingMs === 71 * H)
 
-// --- Table integrity: 2026 expands to 3+9+3+5+3+3+7 days ---
-check('holiday table expands to 33 dates', BALANCE_HOLIDAY_DATES.size === 33)
+// 春节 02-05 (农历除夕, Fri) .. 02-13 (农历正月初八, Sat), with 01-31 and 02-14
+// (both Sundays) worked. 02-14 is still billed as a weekend, so the valley runs
+// through it into Monday 02-15 09:00.
+check('2027 春节 (Fri) 02-05 10:00 is off-peak', at(2027, 2, 5, 10, 0).holiday === '春节')
+check('2027 春节 window spans 02-04 18:00 to 02-15 09:00 (255h)',
+  at(2027, 2, 5, 10, 0).totalMs === 255 * H)
+check('2027 01-31 (Sun, 调休 workday) is off-peak', at(2027, 1, 31, 10, 0).peak === false)
+check('2027 02-14 (Sun, 调休 workday) is off-peak', at(2027, 2, 14, 10, 0).peak === false)
+check('2027 02-15 (Mon) is back to peak', at(2027, 2, 15, 10, 0).peak === true)
+
+// 清明节 04-03 (Sat) .. 04-05 (Mon).
+check('2027 清明节 (Mon) 04-05 10:00 is off-peak', at(2027, 4, 5, 10, 0).holiday === '清明节')
+check('2027 清明节 window spans 04-02 18:00 to 04-06 09:00 (87h)',
+  at(2027, 4, 5, 10, 0).totalMs === 87 * H)
+check('2027 04-06 (Tue) is back to peak', at(2027, 4, 6, 10, 0).peak === true)
+
+// 劳动节 05-01 (Sat) .. 05-05 (Wed), with 05-08 worked.
+check('2027 劳动节 (Tue) 05-04 10:00 is off-peak', at(2027, 5, 4, 10, 0).holiday === '劳动节')
+check('2027 劳动节 window spans 04-30 18:00 to 05-06 09:00 (135h)',
+  at(2027, 5, 4, 10, 0).totalMs === 135 * H)
+check('2027 05-06 (Thu) is back to peak', at(2027, 5, 6, 10, 0).peak === true)
+check('2027 05-08 (Sat, 调休 workday) is off-peak', at(2027, 5, 8, 10, 0).peak === false)
+
+// 端午节 06-09 (Wed) and 中秋节 09-15 (Wed) are single-day holidays this year:
+// each is one valley from the previous evening's 18:00 to the next 09:00 (39h).
+check('2027 端午节 (Wed) 06-09 10:00 is off-peak', at(2027, 6, 9, 10, 0).holiday === '端午节')
+check('2027 端午节 is one valley from 06-08 18:00 to 06-10 09:00 (39h)',
+  at(2027, 6, 9, 10, 0).totalMs === 39 * H)
+check('2027 06-10 (Thu) is back to peak', at(2027, 6, 10, 10, 0).peak === true)
+check('2027 中秋节 (Wed) 09-15 10:00 is off-peak', at(2027, 9, 15, 10, 0).holiday === '中秋节')
+check('2027 中秋节 is one valley from 09-14 18:00 to 09-16 09:00 (39h)',
+  at(2027, 9, 15, 10, 0).totalMs === 39 * H)
+check('2027 09-16 (Thu) is back to peak', at(2027, 9, 16, 10, 0).peak === true)
+
+// 国庆节 2027-10-01 (Fri) .. 10-07 (Thu), with 09-26 and 10-09 worked.
+const nationalDay27 = at(2027, 10, 5, 10, 0)
+check('2027 国庆节 (Tue) 10-05 10:00 is off-peak', nationalDay27.peak === false)
+check('2027 国庆节 is named 国庆节', nationalDay27.holiday === '国庆节')
+check('2027 国庆节 window spans 09-30 18:00 to 10-08 09:00 (183h)',
+  nationalDay27.totalMs === 183 * H)
+check('2027 国庆节 10-05 10:00 counts down 71h to 10-08 09:00',
+  nationalDay27.remainingMs === 71 * H)
+
+// --- A year with no notice falls back to the plain weekday rule ---
+// 2028-01-03 (Mon) 10:00 has no table entry yet: billed as peak, which is the
+// behaviour check.js's current-year assertion exists to force us to revisit.
+const unlisted = at(2028, 1, 3, 10, 0)
+check('2028-01-03 falls back to the weekday rule (peak)', unlisted.peak === true)
+check('2028-01-03 has no holiday name', unlisted.holiday === '')
+
+// --- Table integrity: 2026 = 3+9+3+5+3+3+7 = 33 days, 2027 = 3+9+3+5+1+1+7 = 29 ---
+check('holiday table expands to 62 dates', BALANCE_HOLIDAY_DATES.size === 62)
 check('every span expands to its own name', (() => {
   for (const year of Object.keys(BALANCE_HOLIDAY_NOTICES)) {
     for (const span of BALANCE_HOLIDAY_NOTICES[year].spans) {

@@ -5413,6 +5413,18 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           { name: '国庆节', from: '10-01', to: '10-07', makeup: ['09-20', '10-10'] },
         ],
       },
+      2027: {
+        notice: '国办发明电〔2026〕10号',
+        spans: [
+          { name: '元旦', from: '01-01', to: '01-03', makeup: [] },
+          { name: '春节', from: '02-05', to: '02-13', makeup: ['01-31', '02-14'] },
+          { name: '清明节', from: '04-03', to: '04-05', makeup: [] },
+          { name: '劳动节', from: '05-01', to: '05-05', makeup: ['05-08'] },
+          { name: '端午节', from: '06-09', to: '06-09', makeup: [] },
+          { name: '中秋节', from: '09-15', to: '09-15', makeup: [] },
+          { name: '国庆节', from: '10-01', to: '10-07', makeup: ['09-26', '10-09'] },
+        ],
+      },
     }
 
     /* 'YYYY-MM-DD' -> holiday name, expanded once from the spans above. */
