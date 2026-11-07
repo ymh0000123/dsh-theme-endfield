@@ -58,8 +58,10 @@ async function launch() {
       if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text)
       return r.result.value
     }
-    return {send,evaluate,errors,close,sleep,async until(expression){
-      for(let i=0;i<100;i++){if(await evaluate(expression))return;await sleep(100)}
+    return {send,evaluate,errors,close,sleep,async until(expression,limit=100){
+      /* limit is in 100ms polls (default 10s). Slow runners pass a larger
+         budget instead of every test hardcoding its own sleep ladder. */
+      for(let i=0;i<limit;i++){if(await evaluate(expression))return;await sleep(100)}
       throw Error('Condition timed out: '+expression)
     }}
   }catch(error){await close();throw error}

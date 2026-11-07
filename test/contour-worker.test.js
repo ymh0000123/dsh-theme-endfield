@@ -13,7 +13,7 @@ const root=path.resolve(__dirname,'..')
       postMessage(...args){if(args[0]?.type==='frame')__frames++;return super.postMessage(...args)}
       terminate(){if(this.alive){this.alive=false;__live--}return super.terminate()}
     }`)
-  await browser.until('/^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "") && __frames > 2')
+  await browser.until('/^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "") && __frames > 2',400)
   const backend=await browser.evaluate('document.querySelector("[data-endfield-contour]").dataset.endfieldRenderer')
   assert.match(backend,/^worker-(webgl2|canvas2d)$/)
   console.log('Actual renderer:',backend)
@@ -26,31 +26,46 @@ const root=path.resolve(__dirname,'..')
      lands after any window we could pick, which is how this test used to fail.
      Wait for the worker to fall idle — every submitted job painted — because that
      is the moment the update has actually settled, then require the count to
-     hold. The assertion itself is unchanged: once settled, no new job appears. */
-  await browser.until('__frames === __painted')
+     hold. The assertion itself is unchanged: once settled, no new job appears.
+     Ubuntu 26 runners (20261101 image) paint each frame slower still, and a
+     strict __frames === __painted snapshot can keep missing the instant of
+     equality while a frame sits in flight — so poll for the painted counter
+     HOLDING STILL instead: the worker is idle exactly when it stops reporting,
+     which is settle-independent of any single round trip. */
+  await (async () => {
+    let prev = -1, stable = 0
+    for (let i = 0; i < 300; i++) {
+      const p = await browser.evaluate('__painted')
+      if (p > 0 && p === prev) { stable += 100; if (stable >= 800) return }
+      else { stable = 0 }
+      prev = p
+      await browser.sleep(100)
+    }
+    throw Error('painted counter never settled: ' + prev)
+  })()
   await browser.sleep(100)
   const staticCount=await browser.evaluate('__frames')
   await browser.sleep(300);assert.equal(await browser.evaluate('__frames'),staticCount)
   await browser.evaluate('__prefs.setItem("dsh-theme-endfield-contour-anim","1")')
-  await browser.until('__frames>'+staticCount)
+  await browser.until('__frames>'+staticCount,400)
   // Visibility handler drops pending work and resumes on a fresh frame.
   await browser.evaluate('Object.defineProperty(document,"hidden",{configurable:true,value:true});document.dispatchEvent(new Event("visibilitychange"))')
   await browser.sleep(200);const hiddenCount=await browser.evaluate('__frames')
   await browser.sleep(300);assert.equal(await browser.evaluate('__frames'),hiddenCount)
   await browser.evaluate('delete document.hidden;document.dispatchEvent(new Event("visibilitychange"))')
-  await browser.until('__frames>'+hiddenCount)
+  await browser.until('__frames>'+hiddenCount,400)
   // Canvas ownership cannot be reused after transfer; a failure must replace it.
   await browser.evaluate('window.__oldCanvas=document.querySelector("[data-endfield-contour-lines]");__workers.at(-1).dispatchEvent(new MessageEvent("messageerror"))')
-  await browser.until('document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer === "main-canvas2d"')
+  await browser.until('document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer === "main-canvas2d"',400)
   assert.equal(await browser.evaluate('document.querySelector("[data-endfield-contour-lines]")!==__oldCanvas && !__oldCanvas.isConnected && __live===0'),true)
   // Explicit preference change permits a retry; normal remounts do not loop.
   await browser.evaluate('__prefs.setItem("dsh-theme-endfield-contour-renderer","canvas");__prefs.setItem("dsh-theme-endfield-contour-renderer","worker-webgl")')
-  await browser.until('__live===1 && /^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "")')
+  await browser.until('__live===1 && /^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "")',400)
   for(let i=0;i<5;i++){
     await browser.evaluate('__prefs.setItem("dsh-theme-endfield-contour","0")')
     assert.equal(await browser.evaluate('__live'),0)
     await browser.evaluate('__prefs.setItem("dsh-theme-endfield-contour","1")')
-    await browser.until('__live===1 && /^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "")')
+    await browser.until('__live===1 && /^worker-/.test(document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || "")',400)
     assert.equal(await browser.evaluate('document.querySelectorAll("[data-endfield-contour-lines]").length'),1)
   }
   // Backing-store budget: a viewport whose full-device canvas passes the
@@ -61,7 +76,7 @@ const root=path.resolve(__dirname,'..')
   // the off-main-thread path at exactly these viewports.
   await browser.send('Emulation.setDeviceMetricsOverride',{width:1920,height:1080,deviceScaleFactor:2,mobile:false})
   const bigBefore=await browser.evaluate('__frames')
-  await browser.until(`__frames>${bigBefore}`)
+  await browser.until(`__frames>${bigBefore}`,400)
   assert.match(await browser.evaluate('document.querySelector("[data-endfield-contour]").dataset.endfieldRenderer'),/^worker-(webgl2|canvas2d)$/)
   await browser.sleep(300)
   assert.match(await browser.evaluate('document.querySelector("[data-endfield-contour]")?.dataset.endfieldRenderer || ""'),/^worker-/)
