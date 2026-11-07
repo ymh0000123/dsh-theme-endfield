@@ -38,7 +38,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'client.js'), 'utf8')
+const src = fs.readFileSync(path.join(__dirname, '..', 'client.js'), 'utf8').replace(/\r\n/g, '\n')
 
 let failures = 0
 const pass = (m) => console.log('ok    ' + m)
@@ -106,13 +106,20 @@ const hooks = [
   // Approval dialog restyle (Endfield full-bleed band). The root is pinned by
   // its semantic data attribute — the SAME anchor the attention watcher uses —
   // and every child rule is scoped under it by CSS-module suffix, so a generic
-  // '_card'/'_body' elsewhere can never be hit.
-  ["[data-approval-key] > [class$='_card']", 'approval band: card scoped under the panel root'],
+  // '_card'/'_body' elsewhere can never be hit. The card hook is a SUBSTRING,
+  // not a suffix: subject-bearing approvals ship the card as
+  // '<hash>_card <hash>_withSubject' and a $= match dies on the second class.
+  ["[data-approval-key] > [class*='_card']", 'approval band: card scoped under the panel root'],
   // issue #41 — the band is position:fixed, so it only reaches the viewport while
-  // the composer seat is NOT a containing block for fixed descendants. 0.2.2-rc.1
-  // gave the seat `will-change: transform`; this rule has to keep existing or the
-  // band collapses to a zero-height line at the bottom edge again.
-  ["body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat'])",
+  // NO ancestor between it and the viewport is a containing block for fixed
+  // descendants. 0.2.2-rc.1 gave the seat `will-change: transform`; the 自动授权
+  // 审查 field report is the reminder that the seat is not the only possible
+  // trap, so while a panel is mounted the rule also releases the producing
+  // properties on the structural layers the seat nests under
+  // ([data-conversation-scroll], [data-conversation-content], _centerCol,
+  // _frame). This rule has to keep existing or the band collapses to a
+  // zero-height line at the bottom edge again.
+  ["body:has([data-approval-key]) :is(\n        [data-composer-seat],\n        [class$='_composerSeat'],\n        [data-conversation-scroll],",
     'approval band: seat will-change released while a panel is mounted'],
   ["[data-approval-key] [class*='_actionRow']", 'approval actions row hook'],
   ["body [data-approval-key] [class*='_actionRow'] button:last-child", 'approval confirm capsule ink'],

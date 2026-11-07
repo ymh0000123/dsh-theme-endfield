@@ -27,10 +27,22 @@
  *   1. #bandRaw — seat has will-change but neither anchor: the PRE-FIX shape.
  *      Asserted to collapse, so a regression in the hook cannot pass silently
  *      by simply measuring nothing.
- *   2. #band    — seat matches [class$='_composerSeat'].
+ *   2. #band    — seat matches [class$='_composerSeat'], nested under a
+ *      [data-conversation-scroll] wrapper that itself carries
+ *      container-type: inline-size (a containing block for fixed descendants
+ *      per CSS Containment — the 自动授权审查 field report's shape: the band
+ *      must survive a producer on the SEAT'S ANCESTORS too, which is why the
+ *      release rule strips every producing property from the structural
+ *      layers while a panel is mounted).
  *   3. #bandAttr— seat matches [data-composer-seat] only (the e2e anchor the app
  *      declares), class deliberately NOT ending in _composerSeat, because the
- *      suffix hook dies the moment upstream appends a second class.
+ *      suffix hook dies the moment upstream appends a second class. Its seat
+ *      nests under a [class*='_frame'] wrapper carrying transform — the frame
+ *      anchor of the same defence-in-depth rule.
+ * The #band card also carries a second `x_withSubject` class: subject-bearing
+ * approvals (an agent-team escalation renders icon + name) ship the card as
+ * '<hash>_card <hash>_withSubject', and a [class$='_card'] hook would die on
+ * it — the paper-band fill proves the loosened child hook still matches.
  *
  * Usage: node test/approval-band-transform.test.js
  */
@@ -48,25 +60,34 @@ body{--dsw-alias-bg-base:#e8e8e2;--dsw-alias-bg-layer-1:#f2f2ec;--dsw-alias-labe
 .x_scroll{flex:1;min-height:0;overflow-y:auto}
 /* The three seats differ only in how the theme can name them. */
 .seatBase{position:sticky;bottom:0;margin-top:auto;z-index:9;will-change:transform}
+/* The seat's ancestors may produce containing blocks of their own: the
+   conversation scrollport with a container-type, a frame with a transform.
+   The theme must release BOTH while a band is mounted. */
+.x_convScroll{display:flex;flex-direction:column;flex:1;min-height:0;container-type:inline-size}
+.x_frameWrap{display:flex;flex-direction:column;flex:1;min-height:0;transform:translateZ(0)}
 </style></head><body>
 <div class="app_frame"><div class="app_centerCol"><div class="x_root" data-phase="active">
   <div class="x_scroll"><p>transcript</p></div>
+  <div class="x_convScroll" id="convScroll" data-conversation-scroll>
+    <div class="seatBase x_composerSeat" id="seat" data-composer-seat>
+      <div data-approval-key id="band"><div class="x_card x_withSubject">
+        <div class="x_strip">等待审批</div>
+        <div class="x_body"><div class="x_headline">允许执行吗？</div><div class="x_command">plugin_manager.action</div></div>
+        <div class="x_actionRow"><button>拒绝</button><button>允许一次</button></div>
+      </div></div>
+    </div>
+  </div>
+  <div class="x_frameWrap" id="frameWrap">
+    <div class="seatBase x_seat" id="seatAttr" data-composer-seat>
+      <div data-approval-key id="bandAttr"><div class="x_card">
+        <div class="x_strip">等待审批</div>
+        <div class="x_body"><div class="x_headline">允许执行吗？</div><div class="x_command">plugin_manager.action</div></div>
+        <div class="x_actionRow"><button>拒绝</button><button>允许一次</button></div>
+      </div></div>
+    </div>
+  </div>
   <div class="seatBase x_composerSeatRaw" id="seatRaw">
     <div data-approval-key id="bandRaw"><div class="x_card">
-      <div class="x_strip">等待审批</div>
-      <div class="x_body"><div class="x_headline">允许执行吗？</div><div class="x_command">plugin_manager.action</div></div>
-      <div class="x_actionRow"><button>拒绝</button><button>允许一次</button></div>
-    </div></div>
-  </div>
-  <div class="seatBase x_composerSeat" id="seat" data-composer-seat>
-    <div data-approval-key id="band"><div class="x_card">
-      <div class="x_strip">等待审批</div>
-      <div class="x_body"><div class="x_headline">允许执行吗？</div><div class="x_command">plugin_manager.action</div></div>
-      <div class="x_actionRow"><button>拒绝</button><button>允许一次</button></div>
-    </div></div>
-  </div>
-  <div class="seatBase x_seat" id="seatAttr" data-composer-seat>
-    <div data-approval-key id="bandAttr"><div class="x_card">
       <div class="x_strip">等待审批</div>
       <div class="x_body"><div class="x_headline">允许执行吗？</div><div class="x_command">plugin_manager.action</div></div>
       <div class="x_actionRow"><button>拒绝</button><button>允许一次</button></div>
@@ -96,6 +117,12 @@ body{--dsw-alias-bg-base:#e8e8e2;--dsw-alias-bg-layer-1:#f2f2ec;--dsw-alias-labe
         band: rect('#band'), card: rect('#band .x_card'), buttons: buttons('#band'),
         bandAttr: rect('#bandAttr'), cardAttr: rect('#bandAttr .x_card'), buttonsAttr: buttons('#bandAttr'),
         wcRaw: wc('#seatRaw'), wcSeat: wc('#seat'), wcAttr: wc('#seatAttr'),
+        /* the defence-in-depth ancestors: producers released while mounted */
+        ctScroll: getComputedStyle(document.querySelector('#convScroll')).containerType,
+        tfFrame: getComputedStyle(document.querySelector('#frameWrap')).transform,
+        bandScroll: rect('#band'), bandFrame: rect('#bandAttr'),
+        cardBg: getComputedStyle(document.querySelector('#band .x_card')).backgroundColor,
+        cardBgAttr: getComputedStyle(document.querySelector('#bandAttr .x_card')).backgroundColor
       }
     })()`)
 
@@ -139,14 +166,44 @@ body{--dsw-alias-bg-base:#e8e8e2;--dsw-alias-bg-layer-1:#f2f2ec;--dsw-alias-labe
     for (const b of m.buttonsAttr) assert.ok(inViewport(b, m.vw, m.vh),
       'attribute-anchored capsule outside the viewport: ' + JSON.stringify(b))
 
-    /* ---- 5. the mask still paints above and below the band -------------- */
+    /* ---- 5. defence in depth: producers on the seat's ANCESTORS ---------- */
+    /* The 自动授权审查 field report is the reminder that the seat is not the
+       only possible trap: container-type on the conversation scrollport and a
+       transform on a frame wrapper are both containing blocks for fixed
+       descendants. While a band is mounted the theme releases the producing
+       properties themselves, so these bands measure the viewport too — and the
+       control band above proves the release did not simply neutralise every
+       trap on the page. */
+    assert.equal(m.ctScroll, 'normal',
+      'container-type on the conversation scrollport must be normalised while a band is mounted (got ' + m.ctScroll + ')')
+    assert.equal(m.tfFrame, 'none',
+      'transform on a frame-level wrapper must be dropped while a band is mounted (got ' + m.tfFrame + ')')
+    assert.ok(near(m.bandScroll[0], 0) && near(m.bandScroll[1], 0)
+      && near(m.bandScroll[2], m.vw) && near(m.bandScroll[3], m.vh),
+      'the band under the scrollport must still be the full viewport, got ' + JSON.stringify(m.bandScroll))
+    assert.ok(inViewport(m.card, m.vw, m.vh) && inViewport(m.cardAttr, m.vw, m.vh),
+      'cards must sit inside the viewport with ancestor producers released')
+
+    /* ---- 6. subject-bearing cards keep the paper band -------------------- */
+    /* #band's card carries `x_card x_withSubject` — the app ships subject
+       escalations as '<hash>_card <hash>_withSubject', where a [class$='_card']
+       hook dies. The paper fill comes only from the band's card rule and the
+       fixture paints no card background of its own, so a non-transparent fill
+       proves the loosened child hook matched. */
+    assert.notEqual(m.cardBg, 'rgba(0, 0, 0, 0)',
+      'the withSubject card must still receive the paper-band fill, got transparent')
+    assert.equal(m.cardBg, m.cardBgAttr,
+      'the withSubject card must resolve to the same paper fill as the plain card, got '
+        + m.cardBg + ' vs ' + m.cardBgAttr)
+
+    /* ---- 7. the mask still paints above and below the band -------------- */
     /* The signature shape is 「上下有遮罩」: the dim layer is the full-viewport
        root, the opaque paper band is the card inside it. If the root ever
        shrank to the card, the darkening would vanish. */
     assert.ok(m.band[3] > m.card[3] + 100,
       'the mask must stay taller than the band so it shows above and below')
 
-    /* ---- 6. the declaration is live in both directions ------------------- */
+    /* ---- 8. the declaration is live in both directions ------------------- */
     /* Mounting/unmounting an approval has to flip the seat back and forth in the
        same document. Deleting the rule at runtime must re-collapse the band, and
        re-inserting it must restore the viewport rect — otherwise the "scoped to

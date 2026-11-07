@@ -68,6 +68,8 @@ dsh plugin --profile web rm dsh-theme-endfield
 - **插件卡片展示文案**改由 `locale/<语言>.json` 的 `meta.title` / `meta.description` 提供；`package.json` 的 `dsh.client.inject` 也不再列 0.2 已删除的 `@deepseek-ai/dsh-client-runtime` 与 `@deepseek-ai/dsh-client-ui-slots`，改为列出 0.2 真正的提供方。
 - **composer seat 的 `will-change: transform`**（0.2.2-rc.1）：它会让 seat 成为 `position: fixed` 后代的 containing block，而审批白条正是靠 fixed 铺满视口——白条因此塌成窗口底部的一条线，只剩「等待审批」可见（[#41](https://github.com/ymh0000123/dsh-theme-endfield/issues/41)）。主题在审批面板挂载期间把该提示降回 `auto`，不改 DOM、也不长期关掉上游的合成提示。
 
+- **工作区会话行高亮两侧留缝**：app 原生高亮是零几何结构——每行自带 3px 透明描边框，选中态只换背景色；原生淡色下内缩不明显，主题的强高亮色让未上色的描边框透出栏底。主题照原生的结构只换颜色——把描边框刷成同一个高亮色，高亮贴满行盒，文字、栏距、滚动条、圆角（圆角模式 12px）全部保持 app 原生，不再触碰滚动容器的裁剪边界。
+
 细节见 [docs/engineering-notes.md](docs/engineering-notes.md)。
 
 ### 开关总是「刷新后复位」

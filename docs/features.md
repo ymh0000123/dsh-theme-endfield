@@ -286,10 +286,13 @@
 | 会话头部预设徽章（agent preset，如「创造模式」） | 上游把徽章移进 `_headerActions` 插槽的包裹层里，主题的 `>` 选择器失配，退回默认灰胶囊 | 恢复强调色填充 + 黑字，**尺寸沿用上游**（不撑宽） |
 | 审批弹窗（「等待审批」） | 上游是塞在输入区里的一张圆角描边小卡 | 重绘为**贯穿屏幕左右白条 + 上下遮罩**的居中确认框，按钮改为胶囊（拒绝=深色+✕，允许一次=信号黄+◎），见下 |
 | 完全权限确认框（「确认启用完全权限？」） | 共享 Modal 的居中圆角小卡 | 同款白条 + 上下遮罩，取消/启用胶囊按钮，见下 |
+| 工作区会话行高亮（hover / 选中） | 原生高亮零几何：每行自带 3px 透明描边框（`border-inline` + `background-clip: padding-box`），选中态只换一句 `background-color`；原生淡色下内缩读作有意设计，主题的强高亮色一刷，未上色的描边框把栏底透出来，两侧显缝（「两边颜色不是填满的」） | 在原生结构内只换颜色：`border-inline-color` 刷成同一个高亮色，高亮贴满行盒；栏内边距、滚动条槽、文字线全部保持 app 原生不动，圆角模式保留原生 12px 圆角、方角模式直角；绘制全部在行盒内、滚动容器裁剪区内，圆角不再被切；menuOpen 态一并换色，见下 |
+| 审批白条 containing block 兜底 | #41 只释放了输入区座位的 `will-change`；实测 0.2.2-rc.1 里座位祖先链没有别的元凶，但「自动授权审查」的用户报告证明这类塌陷会真实发生 | 面板挂载期间对座位**及其已核实的结构层**（`[data-conversation-scroll]`、`[data-conversation-content]`、`_centerCol`、`_frame`）一并释放全部产生 containing block 的属性（transform / filter / backdrop-filter / perspective / container-type / content-visibility / contain）；附带修复：带主体（图标+名称）的审批卡类名是 `<hash>_card <hash>_withSubject`，卡片钩子从 `$=` 放宽为 `*=` 才能命中 |
 
 ### 审批弹窗：全屏白条 + 上下遮罩
 
 工具越权执行时弹出的 `[data-approval-key]` 面板被重绘成参考图那种形态：**不透明纸色横条从屏幕左缘贯到右缘、垂直居中，页面其余部分只有上下被压暗**——实现上没有加任何 DOM：面板自己的 root 变成 fixed 全屏 flex 层，它的半透明黑底就是遮罩，中间的白条不透明地盖住横带，遮罩自然只剩上下两截。文字居中，「等待审批」保留状态点但去掉警示底色。两个按钮改成终末地胶囊（左取消深灰配白 ✕、右确认信号黄配 ◎，墨字对比度与主题其它实心芯片同一条 AA 约束）。**圆角模式同样保持胶囊**（与余额药丸一致），且所有选择器都钉在语义锚点上（`data-approval-key` + `[class*='_card']` 等 CSS-module 后缀），上游重哈希不会失效——`test/selector-guard.test.js` 钉住这三个钩子。
+**挂载期间的 containing block 兜底（#41 的延伸）**：白条是 `position: fixed`，座位到视口之间的**任何**产生 containing block 的祖先都会把白条重新压扁成一条线（#41 的实测就是输入区座位的 `will-change: transform`）。面板在屏时应用本来就处于模态阻塞，主题因此同时释放座位与已核实结构层上的全部致产属性；`test/approval-band-transform.test.js` 用「座位自身干净、祖先带 container-type / transform」的两个白条夹住这条规则——对照组塌陷、这两条满屏，才证明释放真的生效。
 
 ### 完全权限确认框：同一形态
 

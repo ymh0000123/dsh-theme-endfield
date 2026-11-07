@@ -1021,6 +1021,31 @@ body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat']
 
 这同时解释了为什么**报告者给的补丁能修好、但会退化**：把 root 改成 `position: relative` + 透明背景，面板回到文档流，功能立刻恢复，但通栏纸带被收进聊天列宽、上下遮罩一并消失——那是「把设计也一起删了」，不是等价修复。修在祖先上，两样都留着。
 
+### 十类：兜底按「属性清单」打，不按已知元凶打（自动授权审查的现场报告）
+
+#41 落地次日，评论区来了第二份白条塌陷报告：开着「自动授权审查」实验性插件，被自动审查拒绝的工具调用要等人工审批，弹窗装上主题后无法显示、无法点击，关主题即恢复。现场截图的形态与 #41 分毫不差——底部只活着一行「● 等待审批」。
+
+对 0.2.2-rc.1 的安装包逐层核对（ui-approval / ui-conversation / ui-session 的 bundle）后确认：**自动审查走的就是同一条 `approval/request` 瀑布、同一个 composer 座位里的同一个面板**，座位祖先链上除 `will-change` 外也没有第二个元凶。真正能解释现场的是版本：报告者装主题的时间在 v1.2.4 发布之前，手里还是没有 #41 的旧构建。但这条线索指出了 #41 修法的结构性弱点——它只按「已知元凶」释放了 `will-change` 一个属性、座位一个元素，而白条塌陷的充分条件是**任意祖先的任意致产属性**。上游任何一次重构（把 transform 挪到包裹层、给滚动层加 container-type）都会让同一条塌陷回来。
+
+所以兜底改成按属性清单打：面板在屏期间（`body:has([data-approval-key])`），对座位和它已核实的结构层——`[data-conversation-scroll]`（会话滚动体，JSX 实测属性）、`[data-conversation-content]`（会话根，同）、`_centerCol` / `_frame`（与等高线图纸共用的后缀钩子）——一并释放全部致产属性：`transform`、`filter`、`backdrop-filter`、`perspective`、`container-type`、`content-visibility`、`contain`。这些层在 0.2.2-rc.1 上都没有致产值，规则今天是空操作；代价只存在于「面板在屏」的帧里，而那时应用正被白条遮罩挡着。`test/approval-band-transform.test.js` 为此加了两条白条：座位干净、祖先分别带 `container-type: inline-size` 与 `transform`，配合仍会塌陷的对照组，证明释放真的生效而不是「全页没陷阱」的假阳性。附带修掉一个顺藤摸出来的真钩子：带主体（图标 + 名称）的审批卡类名是 `<hash>_card <hash>_withSubject`，`[class$='_card']` 在第二个类 appended 后静默失配——卡片钩子放宽为 `[class*='_card']`（root 的唯一子元素就是卡，不可能误中）。
+
+**教训**：防御性规则要么按故障的充分条件枚举（所有致产属性 × 全部结构层），要么干脆别写；只覆盖已知名元的兜底给后来者一种「已经防住了」的错觉，而塌陷的充分条件集合在上游任何一次重构后都会变大。
+
+### 十一类：高亮不满宽是三层内缩的算术（工作区会话行）
+
+评论区另一份独立报告：左侧工作区的会话行，选中 / 悬停的强调色洗不满行盒，「两边颜色不是填满的」。对照 0.2.2-rc.1 的 bundle 把行盒到侧栏两缘之间的层全数核出，一共三层：
+
+1. **行自带 3px 内缩**——`.*_projectRow/. *_sessionRow` 携带 `border-inline: var(--dsh-sidebar-paint-inset) solid transparent`（3px）+ `background-clip: padding-box`，洗色永远画不到描边下面。主题自己的 `background:` 简写会把 clip 重置回 border-box，所以**选中和悬停其实早就贴到了行盒边缘**；没贴边的观感来自下面两层（以及 app 用 longhand 画的 menuOpen 态）。
+2. **侧栏栏根 8px 内边距**——SidebarRoot 的根节点 `padding: 6px var(--dsh-sidebar-inline-padding)`，行盒从 8px 处才开始。
+3. **列表右侧滚动条槽**——`.*_list` 的 `margin-right: var(--dsh-session-list-scrollbar-offset)` + `padding-right: calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset))`，行盒右缘距列缘还差 `inline-padding + edge-inset − scrollbar-width`。
+
+前两版修法都在重排几何、都被打回。第一版把负外边距打在**行**上——几何测试全绿（行盒 rect [0, 232]），现场却是「圆角模式下高亮还是直角」：`getBoundingClientRect` 量不出**裁剪**，会话列表是滚动容器（`overflow-y: auto` 使 `overflow-x` 计算为 auto），在**自己的 padding box** 处裁剪绘制与命中测试，圆角模式（app 原生 12px 圆角）的两端圆弧被齐齐切平，还顺带获得一段横向可拖拽区。第二版把外扩挪到列表上（负 margin + padding 归零 + 全套内层补偿）圆角是保住了，但整座补偿算术（骨架行、空态、显示更多按钮、rail 变体的溢出裁剪、隐藏滚动条）都悬在「裁剪边界恰好等于列缘」这一根独苗上。探针还接连否决了两条「聪明」路：`overflow-clip-margin` 只在元素该轴本身是 `clip` 时才被 Chromium 认（与滚动容器轴混用一律忽略，实测），滚动上移到 listArea 则把坑原样搬到上一层。
+
+**终版（作者裁定：「直接逆向一下，看下原本是怎么做的，在原本基础上换颜色算了」）回到原生的机制。** 逆向结论：原生高亮**零几何**——每行自带 3px 透明描边框 + `background-clip: padding-box`，选中态就一句 `background-color` 换色；原生淡色下 3px 内缩读作有意的胶囊设计，主题的强高亮色一刷，未上色的描边框把栏底透出来，这才是「两边不满」的显形来源。于是修法留在原生结构内、只动颜色：`border-inline-color` 刷成同一个高亮色，高亮即贴满行盒——栏内边距、滚动条槽、标题线（8+3+9+16=36px）、`--dsh-workspace-indent` 算术全部原样，圆角随原生 border-box 走（圆角模式 12px、方角模式被 blanket pass 归零），绘制全部发生在行盒内、滚动容器裁剪区内，**裁剪问题被结构性地排除而不是被对抗**。app 的 menuOpen 态（longhand 换色）一并纳入主题换色，避免「描边主题色 + 内部原生灰」的割裂。`test/sidebar-row-wash.test.js` 的断言策略是**双 boot 对照**：主题关闭先量原生基线，圆角 / 方角两个主题态再量一次，几何（行左缘 / 行高 / 标题线 / 列表盒与全部 CSS 声明）逐值一致——「换颜色不动几何」的可执行定义；颜色断言描边色 === 背景色，圆角断言 12px 保留 / 归零。
+
+顺带钉死一条 Blink 怪癖（对照测试差点被它假失配搞挂）：**`::-webkit-scrollbar` 的级联不按特异性、不按 `!important`、也不可被后插入的样式表翻转**——页面 `#list::-webkit-scrollbar{width:5px !important}` 输给后注入的主题全局 `::-webkit-scrollbar{width:10px}`，boot 之后再 append 一条 5px 全局规则同样翻不掉（实测 gap 恒 10px）。主题的全局滚动条规则一旦注入就统治文档的全部滚动容器占位，这也解释了真实 app 中列表占位是 10px（app 自己的 `--dsh-session-list-scrollbar-width` 计划值是 5px）——它是主题 v1.2.4 起的既成行为。对照测试因此不跨 boot 比行宽（占位差会假失配），只比滚动条碰不到的左半边，行宽改用列表盒内部一致性断言（行右缘 = 列表 client 右缘 − 右内边距）。
+
+
 ---
 
 ## 验证方法论

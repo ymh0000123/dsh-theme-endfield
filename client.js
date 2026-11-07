@@ -6645,6 +6645,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       [class$='_sidebarCol'] [class*='_projectRow']:hover,
       [class$='_sidebarCol'] [class*='_sessionRow']:hover,
       [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'],
+      [class$='_sidebarCol'] [class*='_sessionRow'][class*='_menuOpen'],
       [class$='_sidebarCol'] [class*='_searchResultRow']:hover,
       [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
         background: rgba(var(--edge-accent-rgb), 0.22) !important;
@@ -6669,9 +6670,49 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_projectRow']:hover,
       body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow']:hover,
       body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow'][class*='_selected'],
+      body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_sessionRow'][class*='_menuOpen'],
       body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow']:hover,
       body[data-ds-dark-theme] [class$='_sidebarCol'] [class*='_searchResultRow'][class*='_selected'] {
         background: var(--edge-accent) !important;
+      }
+      /* ---------- 会话行高亮：沿用 app 原生描边结构，只换颜色 ----------
+         Reversed from the shipped bundle (dsh-client-ui-workspace
+         Rows.module.css, read back from the installed 0.2.2-rc.1 app.asar):
+         the app draws the hover/selected wash with NO geometry of its own —
+         every row carries
+              border-inline: var(--dsh-sidebar-paint-inset) solid transparent;
+              background-clip: padding-box;
+         (3px) and the selected state is literally one declaration,
+              .wnFoaW_sessionRow.wnFoaW_selected { background-color: ... }.
+         The 3px transparent frame is the app's own design: with its faint
+         native wash the inset reads as intentional, but the theme's strong
+         accent lets the unpainted frame show the column background through on
+         both sides (「两边颜色不是填满的」). So the fix stays INSIDE the app's
+         structure and only changes colors: the frame is painted with the same
+         wash as the background (border-inline-color), which fills the row's
+         border box edge to edge. Nothing moves — rail padding, row padding,
+         the scrollbar gutter, the title's 36px line all stay exactly where the
+         app put them — and because the whole wash now lives inside the row's
+         border box, it can never cross the scroll container's clip region:
+         圆角模式 keeps the row's native var(--dsw-radius-md) rounding on both
+         ends, and the square-mode blanket pass squares it, both without ever
+         being cut (the previous full-bleed attempt that re-architected the
+         list's margins/clip was reverted for exactly that fragility).
+         Same three row suffixes the theme already paints; the app's menuOpen
+         state is included so its longhand wash fills the frame too. */
+      [class$='_sidebarCol'] :is([class*='_sessionRow'], [class*='_projectRow'], [class*='_searchResultRow']):is(
+        :hover,
+        [class*='_selected'],
+        [class*='_menuOpen']
+      ) {
+        border-inline-color: rgba(var(--edge-accent-rgb), 0.22) !important;
+      }
+      body[data-ds-dark-theme] [class$='_sidebarCol'] :is([class*='_sessionRow'], [class*='_projectRow'], [class*='_searchResultRow']):is(
+        :hover,
+        [class*='_selected'],
+        [class*='_menuOpen']
+      ) {
+        border-inline-color: var(--edge-accent) !important;
       }
       /* WHY '_badge' not bare 'badge': app CSS-module badges are '<hash>_badge'
          (zf92ZW_badge footer, dlU_AG_badge …), but third-party plugins name
@@ -6769,9 +6810,40 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          (test/approval-band-transform.test.js covers both directions).
          Both anchors are listed because the [class$=] hook dies the moment
          upstream appends a second class to the seat, and [data-composer-seat]
-         is the e2e hook the app itself declares. */
-      body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat']) {
+         is the e2e hook the app itself declares.
+
+         DEFENCE IN DEPTH (the 自动授权审查 field report). will-change on the
+         seat is the only containing-block producer measured on the seat's
+         ancestor chain in 0.2.2-rc.1 — but the band is position:fixed, so ANY
+         producer on ANY ancestor between it and the viewport re-creates the
+         whole collapse, and the apps that hit it in the field were one release
+         behind (the report shipped before this rule existed). While a panel is
+         mounted the app is modal-blocked anyway, so the theme releases every
+         containing-block-producing property on the seat AND the structural
+         layers the seat actually nests under, all verified in the extracted
+         bundles and all semantic anchors: the conversation scrollport
+         ([data-conversation-scroll]), the conversation root
+         ([data-conversation-content]), the frame and center column (the same
+         suffix hooks the contour sheet already relies on). transform:none is
+         the only declaration that could plausibly change a visible pixel
+         elsewhere, and everything it could un-transform is behind the band's
+         own full-viewport mask for exactly as long as the panel exists. */
+      body:has([data-approval-key]) :is(
+        [data-composer-seat],
+        [class$='_composerSeat'],
+        [data-conversation-scroll],
+        [data-conversation-content],
+        [class$='_centerCol'],
+        [class*='_frame']
+      ) {
         will-change: auto !important;
+        transform: none !important;
+        filter: none !important;
+        backdrop-filter: none !important;
+        perspective: none !important;
+        container-type: normal !important;
+        content-visibility: visible !important;
+        contain: none !important;
       }
       /* ---------- 审批弹窗：全屏白条 + 上下遮罩（Endfield 寻访确认框） ----------
          The shipped panel is a rounded warn-bordered card parked inside the
@@ -6811,8 +6883,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       }
       /* The band: square, full-bleed, paper. The zero-radius pass in round
          mode would restore the app's --dsw-radius-xl here, and a rounded band
-         contradicts the reference — pin it flat with priority. */
-      [data-approval-key] > [class$='_card'] {
+         contradicts the reference — pin it flat with priority. '_card' as a
+         SUBSTRING, not a suffix: subject-bearing approvals (an agent-team
+         escalation renders its icon + name) ship the card as
+         '<hash>_card <hash>_withSubject', and a $= match dies the moment that
+         second class is appended — the band would keep its mask but lose the
+         paper. The root's ONLY child is the card, so the looser hook cannot
+         reach anything else. */
+      [data-approval-key] > [class*='_card'] {
         width: 100%;
         max-width: none !important;
         box-sizing: border-box;
