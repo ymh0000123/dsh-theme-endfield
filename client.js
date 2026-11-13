@@ -8620,11 +8620,16 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       /* Three concentric squares, measured off the reference at 16x: a 14px
          white rounded square, a 6px dark core punched into it, and a 3px white
          pip at the centre — all pseudo-elements, no glyph and no image. */
+      /* The reference's square mark, sized so its three layers survive 1x:
+         2px ink ring between a 12px paper frame and a 4px paper core. At 10px
+         the core was 3px and the ring 1.5px, which rasterised into a smudge
+         with a single white pixel in it (the same failure mode as the typed ◎
+         on the confirm capsules). */
       [data-endfield-balance] [data-endfield-balance-icon] {
         position: relative;
         flex: none;
-        width: 10px;
-        height: 10px;
+        width: 12px;
+        height: 12px;
         margin-right: 4px;
         border-radius: 3px;
         corner-shape: round !important;
@@ -8641,7 +8646,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       [data-endfield-balance] [data-endfield-balance-icon]::after {
         content: '';
         position: absolute;
-        inset: 3.5px;
+        inset: 4px;
         border-radius: 1px;
         corner-shape: round !important;
         background: #f1f1ec;
@@ -8776,15 +8781,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         background: conic-gradient(
           from 0deg,
           var(--edge-accent) 0deg var(--endfield-balance-sweep, 0deg),
-          transparent var(--endfield-balance-sweep, 0deg) 360deg
+          rgba(255, 255, 255, 0.14) var(--endfield-balance-sweep, 0deg) 360deg
         );
         -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
         mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
       }
       [data-endfield-balance] [data-endfield-balance-clock] {
         position: relative;
-        width: 12px;
-        height: 12px;
+        width: 14px;
+        height: 14px;
         border-radius: 999px;
         corner-shape: round !important;
         background: var(--edge-accent);
@@ -8796,9 +8801,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         position: absolute;
         left: 50%;
         top: 50%;
-        width: 1.5px;
-        height: 3px;
-        margin: -3px 0 0 -0.75px;
+        width: 2px;
+        height: 5px;
+        margin: -5px 0 0 -1px;
         border-radius: 1px;
         background: #262425;
         transform: rotate(25deg);
