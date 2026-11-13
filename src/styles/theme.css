@@ -1214,6 +1214,71 @@
         filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
         font-family: var(--edge-font);
       }
+      /* ---------- 入场：白条从右缘擦入，内容再淡入 ----------
+         Traced 1:1 off the reference teardown of this dialog (a ~300ms open in
+         three stages, measured frame by frame at 30fps):
+
+           band   130ms  cubic-bezier(.65,0,.35,1)  the hard leading edge sweeps
+                        right -> left. The curve is SLOW-START / FAST-FINISH:
+                        the reference's 5-frame capture shows 40% of the time
+                        covering 17% of the distance, i.e. easeInOutCubic — the
+                        usual ease-out is visibly wrong here.
+           fade   170ms  cubic-bezier(.3,.7,.4,1)  the band itself comes up with
+                        the wipe (panel opacity 22% -> 53% -> 100% across it),
+                        so the leading edge never reads as a bare sheet of paper
+                        sliding in from nowhere.
+           copy   100ms  ease-out, delayed 195ms = the 130ms wipe plus the
+                        reference's 65ms beat. OPACITY ONLY: in the source the
+                        title's pixel centroid stays at the same x/y through the
+                        whole fade, so no translate, no scale, no blur.
+
+         WHY translate AND NOT clip-path/mask: filter runs BEFORE clipping in the
+         paint order, so clipping the band would also eat the drop-shadow it
+         draws (the shadow is outside the border box). The band is exactly
+         viewport-wide, so translateX(100% -> 0) paints the SAME right-anchored
+         wipe — at every instant the visible span is identical, the leading edge
+         sweeps the identical path — and the shadow survives. Scale is out for
+         the reason the reference gives: a full-bleed strip scaled about its
+         centre flashes the centre anchor.
+
+         The app ships its own _modalEnter fade on this dialog; the rule below
+         REPLACES that animation (same property, higher specificity) rather than
+         stacking a second one on top. No fill mode: nothing may stay pinned
+         after the run, or the dialog would keep a transform (and with it a
+         containing block for any fixed descendant) forever. */
+      [role='dialog'][class*='_confirmation'] {
+        animation:
+          endfield-band-wipe 130ms cubic-bezier(0.65, 0, 0.35, 1),
+          endfield-band-fade 170ms cubic-bezier(0.3, 0.7, 0.4, 1);
+      }
+      @keyframes endfield-band-wipe {
+        from { transform: translateX(100%); }
+        to { transform: translateX(0); }
+      }
+      @keyframes endfield-band-fade {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      /* backwards, not both: the copy has to be invisible during its 195ms
+         beat (the band must land as blank paper first), but nothing should stay
+         applied once it is done. One selector level only — the dialog's single
+         child is the app's _content wrapper, so this is one fade, not a
+         multiply-nested chain of them. */
+      [role='dialog'][class*='_confirmation'] > * {
+        animation: endfield-band-copy 100ms ease-out 195ms backwards;
+      }
+      @keyframes endfield-band-copy {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      /* The app already parks its own modal fade under reduced motion; ours has
+         to be switched off by the same rule or the dialog would still slide. */
+      @media (prefers-reduced-motion: reduce) {
+        [role='dialog'][class*='_confirmation'],
+        [role='dialog'][class*='_confirmation'] > * {
+          animation: none !important;
+        }
+      }
       /* Ink side of the paper: in the dark palette the app's labels are
          #f5f5f0 (paper-on-dark) and would vanish on the white band, so the
          dialog scope re-declares the label tokens as ink — every var() the

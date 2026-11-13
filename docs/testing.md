@@ -123,6 +123,18 @@ body:has([data-approval-key]) :is([data-composer-seat], [class$='_composerSeat']
 
 ---
 
+## 弹窗入场动效
+
+`test/band-enter-motion.test.js` 测的是「确认启用完全权限？」白条的入场三段：130ms 右缘擦入（`easeInOutCubic`）、170ms 面板淡入、延迟 195ms 的 100ms 内容淡入，以及 `prefers-reduced-motion` 下全部关闭。
+
+**测法不是截图，是把动画钉在时间轴上读计算值。** 页面里先用 `<template>` 存一份弹窗结构，boot 之后克隆进 DOM，并在**同一个任务里**把所有动画 `pause()`——否则 130ms 的动画会在探针拿到它之前就播完（第一次写这个测试就踩了：`document.getAnimations()` 返回空数组，因为动画早已结束、不再是 relevant）。之后用 `currentTime` 逐点步进，读 `getBoundingClientRect().left` 与 `opacity`，所以每个断言都是某一个确定时刻的真实计算值，不受 30fps 采样和机器快慢影响。
+
+`Page.captureScreenshot` 在这里**不能用**：合成器线程上的 transform/opacity 动画即使 `pause()` 也不会立刻反映到截图里，六张关键帧截出来一模一样。几何要用 `getBoundingClientRect` 量，视觉检查改用内联样式直接摆出各相位——两件事分开做。
+
+断言分四组：三段动画的 `duration / delay / easing / fill`（从计算样式按逗号切分读取，注意 `cubic-bezier()` 里的逗号不能被当成分隔符）；t=0 时整条在视口右侧、t=65 时前缘在中线 ±6%、t=33 时位移不足 20%（这条锁的是「慢起快收」，换成 `ease-out` 会立刻失败）；内容在 195ms 仍为 0、245ms 处于中途、295ms 到位且 `transform` 必须是 `none`；动画跑完后弹窗不残留 `transform`/`opacity`/动画对象（残留 transform 会让它继续做 fixed 后代的 containing block，就是 #41 的坑）。
+
+反向验证：换回没有这段动效的 `client.js`，第一条断言即报 `got 0`。
+
 ## 样式表投递与幂等
 
 ```bash

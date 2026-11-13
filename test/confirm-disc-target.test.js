@@ -111,6 +111,10 @@ const ink = c => Math.max(c[0], c[1], c[2]) < 70
   const browser = await launch()
   try {
     await boot(browser, root, {}, '', { html: PAGE, ready: '#allow' })
+    /* The band now enters with a 130ms right-to-left wipe (see
+       band-enter-motion.test.js). A capture taken mid-slide finds the button
+       outside the frame, so let the entrance land before measuring anything. */
+    await browser.evaluate('Promise.all(document.getAnimations().map(a => a.finished)).then(() => true)')
 
     /* 1. Cause: no glyph, and the target is two gradients on the ink disc. */
     const style = await browser.evaluate(STYLE)
