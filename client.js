@@ -6505,12 +6505,90 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         scrollbar-width: thin;
         scrollbar-color: var(--edge-line) transparent;
       }
+      /* Issue #43: the app draws the conversation-width drag indicator with a
+         gradient whose two solid stops are var(--dsw-alias-scrollbar-bg-l1). The
+         theme sets that token (and l2) to transparent so it can paint its own
+         scrollbars — and the handle is the ONLY consumer of l1 that is not a
+         scrollbar thumb, so the line is still painted on hover / while dragging,
+         at opacity 1, in transparent. That is the whole bug.
+
+         WHY NOT JUST UN-TRANSPARENT THE TOKEN. The app spends --dsw-alias-
+         scrollbar-bg-l2 in 45 rules and l1 in 3; every one but this gradient is a
+         thumb (--dsh-scrollbar-thumb). Handing the token back a colour would
+         repaint every themed scrollbar to the app's stock grey, i.e. trade one
+         visible regression for another. So the token stays transparent and the
+         handle is repainted on its own.
+
+         COLOUR: --dsw-alias-label-primary, the exact pair the app already uses for
+         its own line (#0f1115 on cream, #f9fafb on near-black — 15.35:1 / 18.11:1
+         against their papers). The theme never remaps that token globally, and
+         reading it means both schemes and both palettes come out right without a
+         second rule or a backing plate.
+
+         GEOMETRY: none. Width, radius, offsets and the pointer-y math stay the
+         app's; only the two colour stops change, so the handle cannot grow into
+         the transcript column.
+
+         ANCHORS: [data-width-handle] is the e2e hook the app declares on both
+         handles; the class is matched as a SUBSTRING because a suffix match dies
+         the day upstream appends a second class (the 0.1.2-rc.1 lesson). */
+      :is([data-width-handle], [class*='_widthHandle']):after {
+        background: linear-gradient(
+          to bottom,
+          transparent calc(var(--dsh-width-handle-pointer-y, 50%) - 36px),
+          var(--dsw-alias-label-primary) calc(var(--dsh-width-handle-pointer-y, 50%) - 8px),
+          var(--dsw-alias-label-primary) calc(var(--dsh-width-handle-pointer-y, 50%) + 8px),
+          transparent calc(var(--dsh-width-handle-pointer-y, 50%) + 36px)
+        );
+      }
       /* ---------- Light mode: deepen tertiary/secondary labels for icon visibility ---------- */
       body:not([data-ds-dark-theme]) {
         --dsw-alias-label-tertiary: #6a6d68;
         --dsw-alias-label-caption: #5a5d58;
         --dsw-alias-label-dimmed: #9a9d98;
         --edge-btn-muted: #dcddd6;
+      }
+      /* ---------- light mode: keep the accent as a SIGNAL, not as text ----------
+         Issue #44. The composer's quoted selection takes its colour from
+         --dsw-alias-state-business-primary, i.e. the app's brand blue. The light
+         palette remaps that token to ink (#101110) so buttons, status dots and the
+         rest of the blue chrome read as a darkroom instrument — and the quote goes
+         with it, landing 0.7 L* away from body text at 16.84:1. Nothing is
+         unreadable; the QUOTING ACTION stops being visible, which is the point of
+         the colour.
+
+         WHY NOT FIX THE TOKEN. Button fills, status dots and the focus ring's
+         ancestry all read it; a per-consumer repaint is the only change that does
+         not drag one of them back to blue. So the token stays ink and the quote
+         gets its own two-tone: ink on a 55% accent wash (16.4:1 on 谷地黄, 9.9:1
+         on 武陵青). The signal is carried by HUE — yellow or cyan behind black
+         type — which is exactly the axis the palette owns, and it needs no third
+         colour that would have to be re-measured per palette.
+
+         NO PADDING, deliberately: the excerpt is a single-line ellipsis box inside
+         the composer row, and inline padding here would widen its measured box.
+         This sheet has never reflowed the app, and it does not start for a chip.
+         (radius only rounds the wash's ends.)
+
+         Dark needs no rule: there the token already resolves to the accent
+         (13.97:1), so the quote is signal-yellow text today and stays that way.
+         The anchor is the app's declared attribute on the excerpt itself,
+         data-quote-preview — matching the excerpt rather than a parent also keeps
+         this rule from depending on how deeply the row nests it. */
+      body:not([data-ds-dark-theme]) [data-quote-preview] {
+        color: var(--dsw-alias-label-primary);
+        background: rgba(var(--edge-accent-rgb), 0.55);
+        border-radius: 3px;
+      }
+      /* The same token, the same defect, one row over: the ref chip that carries a
+         file / skill / command name is also business-primary, so on cream it turns
+         into body text and stops reading as a reference. --edge-status-light is the
+         palette's own deep step for accent-as-text on paper (#6b5d00 谷地黄 5.35:1,
+         #006a6a 武陵青 5.22:1) — already measured, already the value the turn-status
+         gradient uses, and it switches with the palette for free. Dark is already
+         the accent (the same 13.97:1 the quote gets), so it is out of scope. */
+      body:not([data-ds-dark-theme]) [data-ref-chip] {
+        color: var(--edge-status-light);
       }
       /* ---------- Neutralize remaining DeepSeek brand blues ---------- */
       body {
@@ -6603,11 +6681,43 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         --dsw-specific-sidebar-nav-item-active: rgba(var(--edge-accent-rgb), 0.20);
         --dsw-specific-sidebar-nav-item-hover: rgba(var(--edge-accent-rgb), 0.16);
       }
-      input, textarea, [contenteditable='true'] {
-        caret-color: var(--edge-accent);
+      /* ---------- the two places the accent may NOT be ink (#42, #43) ----------
+         Both are painted by elements the theme does not own, and both used to read
+         --edge-accent directly. That works on the near-black page and fails on
+         cream: #fff500 is 13.97:1 on #202220 and 1.02:1 on the #f2f2ec input card.
+         Pinning the two ANSWERS here, per scheme, keeps the accent token itself
+         untouched (it is still the fill/icon colour everywhere else).
+           --edge-caret       ink in light, accent in dark
+           --edge-focus-ring  the APP's own deepseek-500/400 pair, as literal hex:
+                              a focus ring is a system-level accessibility signal
+                              and already clears its bar on both papers (5.0:1 on
+                              #e8e8e2, 9.2:1 on #101110). Literal, because the
+                              theme remaps --dsw-static-deepseek-500/600 to ink and
+                              accent, so reading that token would loop straight
+                              back to the accent this rule is escaping. */
+      body {
+        --edge-caret: var(--dsw-alias-label-primary);
+        --edge-focus-ring: #4176e6;
       }
+      body[data-ds-dark-theme] {
+        --edge-caret: var(--edge-accent);
+        --edge-focus-ring: #7aaaff;
+      }
+      /* Issue #42: the caret was the accent in both schemes. A 1px caret paints
+         fine and is simply invisible at 1.02:1 (谷地黄) / 1.70:1 (武陵青) — the
+         report's word was 「光标不可见」, not 「颜色不好看」. Ink on the card is
+         16.4:1; the dark scheme keeps the accent, which is the one scheme where
+         accent-as-ink already measured 13.97:1. */
+      input, textarea, [contenteditable='true'] {
+        caret-color: var(--edge-caret, var(--edge-accent));
+      }
+      /* Issue #43 annex: same defect on the keyboard focus ring — 2px of #fff500
+         hugging a #f2f2ec button is 1.02:1, and the !important also suppressed the
+         app's own blue ring, so Tab navigation had no visible focus at all. The
+         geometry (2px, offset 1px) is the theme's and stays; only the colour goes
+         back to the app's, which is what "no theme installed" looks like. */
       :focus-visible {
-        outline: 2px solid var(--edge-accent) !important;
+        outline: 2px solid var(--edge-focus-ring, var(--edge-accent)) !important;
         outline-offset: 1px;
       }
       a {
