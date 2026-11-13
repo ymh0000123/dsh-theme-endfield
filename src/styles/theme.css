@@ -1159,7 +1159,8 @@
         font-weight: 700;
       }
       body [data-approval-key] [class*='_actionRow'] button:last-child::after {
-        content: '◎';
+        /* Drawn, not typed — see the note on the disc's background below. */
+        content: '';
         margin-left: 10px;
       }
       /* ---------- 完全权限确认框：通栏白条（左右到屏幕边缘）+ 上下遮罩 ----------
@@ -1350,7 +1351,8 @@
         font-weight: 700;
       }
       body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
-        content: '◎';
+        /* Drawn, not typed — see the note on the disc's background below. */
+        content: '';
       }
       body [data-approval-key] [class*='_actionRow'] button,
       body [role='dialog'][class*='_confirmation'] [class*='_modalAction'],
@@ -1398,9 +1400,31 @@
         background: #211f1d;
         color: #f5f5f0;
       }
+      /* THE TARGET IS DRAWN, NOT TYPED. The reference's trailing mark is a
+         bullseye: an accent ring with a dot in the middle, sitting in an ink
+         disc. It used to be the character U+25CE at font-size 11px — and at that
+         size the ring's counter closes up while rasterising, so what shipped was
+         a solid accent blob off-centre in the disc (reproduced in headless
+         Chrome at 11px _and_ 13px; the ✕ beside it stays crisp because it is two
+         strokes, not a closed ring). A glyph also made the icon depend on which
+         fallback font resolves U+25CE on the host — the theme's stack is Arial,
+         which does not carry it.
+
+         Two radial gradients on the same 20px disc give the exact geometry at
+         any DPI and any font:
+           dot   r 2.2px
+           gap   r 2.6..5.6px (disc ink shows through)
+           ring  r 5.8..7.4px
+         Stops read currentColor rather than a literal so the palette/dark switch
+         still drives the mark — same reason the glyph carried a color before. The
+         disc fill stays a solid #1c1b19 base layer: it is the ink the gap and the
+         outside edge resolve to. */
       body [data-approval-key] [class*='_actionRow'] button:last-child::after,
       body [role='dialog'][class*='_confirmation'] [class*='_confirmAction']::after {
-        background: #1c1b19;
+        background:
+          radial-gradient(circle at 50% 50%, currentColor 0 2.2px, transparent 2.6px),
+          radial-gradient(circle at 50% 50%, transparent 0 5.6px, currentColor 5.8px 7.4px, transparent 7.8px),
+          #1c1b19;
         color: var(--edge-accent);
       }
       /* ---------- Tables: bright signal-yellow hover (reference .data-table) ---------- */
