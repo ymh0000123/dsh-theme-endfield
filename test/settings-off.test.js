@@ -7,7 +7,7 @@
  * buttons were styled with the theme's own variables (--edge-accent /
  * --edge-btn-muted, defined in the theme's <style>) and hardcoded black ink
  * for the ON state. unmount() removes that stylesheet, so after switching the
- * theme OFF the ON buttons (including the always-ON palette button) kept
+ * theme OFF the ON buttons (including the always-ON ones) kept
  * `color:#000` while their accent fill vanished — black text on the app's dark
  * settings panel, i.e. invisible. Measured: ~1.1:1 in dark mode.
  *
@@ -189,6 +189,17 @@ for (const s of ['light', 'dark']) {
     const label = (btn.textContent || '').trim()
     const r = probe(btn)
     R2(tag + ' · 按钮[' + i + ']「' + label + '」', r.ratio >= 4.5,
+      r.ratio.toFixed(2) + ':1  fg=' + r.fg + ' on ' + r.bg)
+  })
+  /* The palette row is a <select> now, not a button: its label text must stay
+     readable with the theme's stylesheet gone, exactly like the buttons above.
+     A select is the one control whose ink is drawn by the OS, so an unstyled
+     (or transparent-ink) one would look disabled rather than legible. */
+  const selects = [...panel.querySelectorAll('select')]
+  selects.forEach((sel, i) => {
+    const label = sel.options.length > 0 ? sel.options[0].textContent : ''
+    const r = probe(sel)
+    R2(tag + ' · 下拉[' + i + ']「' + (label || '').trim() + '」', r.ratio >= 4.5,
       r.ratio.toFixed(2) + ':1  fg=' + r.fg + ' on ' + r.bg)
   })
   /* Group titles must also inherit a readable colour once the stylesheet rule

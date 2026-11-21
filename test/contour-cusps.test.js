@@ -76,7 +76,13 @@ const CONTOUR_KEEP_RING=CONTOUR_MIN_RING_BOX*1.5
 const contourSeed=0x5eed4242
 ${fns}
 const isDarkScheme=()=>false
-const isWulingPalette=()=>false
+/* contourStroke() asks which palette is active (four of them now); this harness
+   draws the default one, which is all the geometry assertions need. The stroke
+   TABLE has to come along with the function: after the four-palette refactor the
+   lookup lives outside contourStroke(), and slicing only the function body would
+   throw a ReferenceError instead of measuring geometry. */
+const activePalette=()=>'valley'
+${grab('CONTOUR_STROKE')}
 ${grab('contourStroke')}
 let REC=[]
 const contourLineCv={ getContext:()=>({

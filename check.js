@@ -181,7 +181,7 @@ if (openIdx < 0) {
       }
     }
 
-    /* --- 6. both accent palettes must be DEFINED, and on body rather than :root ---
+    /* --- 6. every accent palette must be DEFINED, and on body rather than :root ---
        Every accent in this stylesheet reads from these variables, so a missing one
        does not degrade gracefully: each rule that references it computes to nothing
        and that entire declaration is dropped.
@@ -202,11 +202,15 @@ if (openIdx < 0) {
     if (missing.length === 0) pass(`all ${paletteVars.length} palette variables are defined in live CSS`)
     else fail(`palette variable(s) never DEFINED in live CSS: ${missing.join(', ')}`)
 
-    // The 武陵青 palette must exist as an override block, or the switch is inert.
-    if (/body\.theme-endfield-wuling\s*\{/.test(stripped)) {
-      pass('武陵青 palette block (body.theme-endfield-wuling) is present')
-    } else {
-      fail('no body.theme-endfield-wuling block — the palette switch would do nothing')
+    // Every non-default palette must exist as an override block, or that step of
+    // the cycle is inert. Driven by a list so a palette added to the client but
+    // forgotten in the sheet fails here instead of silently doing nothing.
+    for (const cls of ['theme-endfield-wuling', 'theme-endfield-ember', 'theme-endfield-abyss']) {
+      if (new RegExp('body\\.' + cls + '\\s*\\{').test(stripped)) {
+        pass(cls + ' palette block is present')
+      } else {
+        fail('no body.' + cls + ' block — that palette step would do nothing')
+      }
     }
 
     /* --- 7. the app's font TOKENS must not be redeclared anywhere ---

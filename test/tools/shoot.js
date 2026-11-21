@@ -1,6 +1,6 @@
 /**
  * shoot.js — render the real client.js over a mock of the app and save PNGs for
- * visual review: both colour schemes x both accent palettes (谷地黄 / 武陵青).
+ * visual review: both colour schemes x all four accent palettes (谷地黄 / 武陵青 / 重燃赤 / 浸蓝).
  * Correctness checks live in the .test.js files; this exists purely so the result
  * can be LOOKED at.
  *
@@ -26,11 +26,12 @@ if (!chrome) { console.error('no chrome'); process.exit(1) }
 /* Mock of the real conversation page. Class names and the opaque bg-base fills
    are copied from the installed @deepseek-ai bundles so the screenshot exercises
    the same background-stacking problem the live app has.
-   `wuling` selects the 武陵青 palette exactly the way the settings row does: by
-   putting the class on <body>. Nothing else differs between the two renders,
-   which is the point — if a surface does not change colour, it is not reading
-   the palette variables. */
-const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><style>
+   `palette` selects the accent exactly the way the settings row does: the client
+   reads the stored field and puts one class on <body>. Nothing else differs
+   between the renders, which is the point — if a surface does not change colour,
+   it is not reading the palette variables. */
+const PALETTE_LABEL = { valley: '谷地黄 #fff500', wuling: '武陵青 #14d0d0', ember: '重燃赤 #ff3b2e', abyss: '浸蓝 #7d6fff' }
+const mk = (dark, palette) => `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body,#root{height:100%;margin:0}
   :root{
     --dsw-alias-bg-base:${dark ? '#101110' : '#e8e8e2'};
@@ -132,10 +133,12 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
           block, so the whole theme repaints from a single class on &lt;body&gt;. This paragraph
           exists to prove body text keeps full contrast in either palette — the contour sheet
           sits behind it, and the accent never touches running text.</div>
-          <table><thead><tr><th>role</th><th>谷地黄</th><th>武陵青</th></tr></thead>
-          <tbody><tr><td>solid fill + ink</td><td>16.50:1</td><td>6.62:1</td></tr>
-          <tr><td>dark icon ink</td><td>15.26:1</td><td>6.12:1</td></tr></tbody></table>
-          <div class="card">palette ${wuling ? '武陵青 #14d0d0' : '谷地黄 #fff500'} · scheme ${dark ? 'dark' : 'light'}</div>
+          <table><thead><tr><th>palette</th><th>fill + ink</th><th>icon ink</th></tr></thead>
+          <tbody><tr><td>谷地黄</td><td>16.50:1</td><td>15.26:1</td></tr>
+          <tr><td>武陵青</td><td>9.88:1</td><td>9.14:1</td></tr>
+          <tr><td>重燃赤</td><td>5.33:1</td><td>4.93:1</td></tr>
+          <tr><td>浸蓝</td><td>5.04:1</td><td>4.66:1</td></tr></tbody></table>
+          <div class="card">palette ${PALETTE_LABEL[palette]} · scheme ${dark ? 'dark' : 'light'}</div>
         </div>
       </div></div>
       <div class="wSkVaW_composerSeat"><div class="composer">Message DeepSeek Harness…</div></div>
@@ -149,7 +152,7 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
      the localStorage store, so the LS.setItem calls this page used to make were
      silently ignored — every shot rendered the default palette with no contour. */
   const __prefs=(()=>{
-    const sec={enabled:'1',palette:${wuling ? "'wuling'" : "'valley'"},radius:'square',contour:'1',contourAnim:'1',contourFps:'24',contourSpeed:'2',contourScrollPause:'1',watermark:'0',watermarkPersist:'0',loader:'0',thunder:'0',thunderAnim:'0'}
+    const sec={enabled:'1',palette:${JSON.stringify(palette)},radius:'square',contour:'1',contourAnim:'1',contourFps:'24',contourSpeed:'2',contourScrollPause:'1',watermark:'0',watermarkPersist:'0',loader:'0',thunder:'0',thunderAnim:'0'}
     const ls=[]
     return { binder:{ bind:()=>({
       getSnapshot:()=>({status:'ready',value:sec,writable:true,mode:'host'}),
@@ -178,11 +181,12 @@ const mk = (dark, wuling) => `<!doctype html><html><head><meta charset="utf-8"><
 
 fs.mkdirSync(OUT, { recursive: true })
 fs.copyFileSync(path.join(ROOT, 'client.js'), path.join(OUT, 'client.js'))
-for (const wuling of [false, true]) {
+const PALETTES = ['valley', 'wuling', 'ember', 'abyss']
+for (const palette of PALETTES) {
   for (const dark of [false, true]) {
-    const name = 'shot-' + (wuling ? 'wuling' : 'valley') + '-' + (dark ? 'dark' : 'light')
+    const name = 'shot-' + palette + '-' + (dark ? 'dark' : 'light')
     const page = path.join(OUT, name + '.html')
-    fs.writeFileSync(page, mk(dark, wuling))
+    fs.writeFileSync(page, mk(dark, palette))
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'shot-'))
     execFileSync(chrome, [
       '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars',

@@ -266,7 +266,17 @@ function panelButtons(client) {
   if (!tree) return []
   return walk(tree).filter((n) => n.type === 'button')
 }
+/** All `<select>` elements of the rendered settings page (same one-render rule
+ *  as panelButtons: reading the real tree without re-seeding hooks). */
+function panelSelects(client) {
+  const tree = client.render()
+  if (!tree) return []
+  return walk(tree).filter((n) => n.type === 'select')
+}
 const findButton = (buttons, re) => buttons.find((b) => re.test(textOf(b)))
+/** The 主题配色 dropdown, located by its aria-label (it has no button text). */
+const PALETTE_SELECT_RE = /主题配色|Accent palette/
+const findPaletteSelect = (selects) => selects.find((s) => PALETTE_SELECT_RE.test(String(s.props['aria-label'] || '')))
 const RADIUS_RE = /切换直角|切换圆角/
 
 async function main() {
@@ -650,10 +660,11 @@ async function main() {
     if (stub.writes.length !== 0) fail('read-only boot wrote to the transport: ' + JSON.stringify(stub.writes))
 
     // Boot render: the section is still in flight, so the panel shows defaults.
-    const before = findButton(panelButtons(client), /切换武陵|切换谷地|Switch palette/)
-    if (!before) fail('no palette toggle rendered (late-section read case)')
-    else if (!/切换武陵/.test(textOf(before))) {
-      fail('precondition: panel should start on the DEFAULT palette, label=' + JSON.stringify(textOf(before)))
+    const before = findPaletteSelect(panelSelects(client))
+    if (!before) fail('no palette <select> rendered (late-section read case)')
+    else if (before.props.value !== 'valley') {
+      fail('precondition: panel should start on the DEFAULT palette, select holds='
+        + JSON.stringify(before.props.value))
     } else {
       pass('precondition: panel starts on the schema default while the section is in flight')
     }
@@ -685,13 +696,16 @@ async function main() {
         + JSON.stringify(paletteSlot) + ' (this is the reported reset bug)')
     }
 
-    const after = findButton(panelButtons(client), /切换武陵|切换谷地|Switch palette/)
-    const afterLabel = after ? textOf(after) : ''
-    if (/切换谷地/.test(afterLabel)) {
+    const after = findPaletteSelect(panelSelects(client))
+    const afterValue = after ? after.props.value : undefined
+    /* The served value IS 'wuling', so a re-synced dropdown holds exactly that.
+       A frozen default would still hold 'valley' — a select has no "next" step to
+       confuse the reading, which is half the reason it replaced the cycle button. */
+    if (afterValue === 'wuling') {
       pass('panel re-synced onto the late-served palette (wuling), not the default')
     } else {
-      fail('panel did NOT re-sync after the section settled — it still offers '
-        + JSON.stringify(afterLabel) + ' (this is the reported reset bug)')
+      fail('panel did NOT re-sync after the section settled — the palette select holds '
+        + JSON.stringify(afterValue) + ' (this is the reported reset bug)')
     }
 
     // The served radius must show up too: the toggle names the mode it switches
@@ -745,13 +759,13 @@ async function main() {
     await drain()
 
     // Only now does the settings page mount (the user opens 设置).
-    const toggle = findButton(panelButtons(client), /切换武陵|切换谷地|Switch palette/)
-    if (!toggle) fail('no palette toggle rendered (post-settle mount case)')
-    else if (/切换谷地/.test(textOf(toggle))) {
+    const toggle = findPaletteSelect(panelSelects(client))
+    if (!toggle) fail('no palette <select> rendered (post-settle mount case)')
+    else if (toggle.props.value === 'wuling') {
       pass('panel mounting after the section settled shows the stored palette, not the default')
     } else {
-      fail('panel mounted after the section settled but still shows the default: '
-        + JSON.stringify(textOf(toggle)) + ' — this is the live boot-report defect')
+      fail('panel mounted after the section settled but still holds '
+        + JSON.stringify(toggle.props.value) + ' — this is the live boot-report defect')
     }
 
     const radius = findButton(panelButtons(client), RADIUS_RE)
@@ -770,59 +784,65 @@ async function main() {
   }
 
   /* =======================================================================
-     13. A toggle decides from the STORE, never from stale React state.
+     13. The palette dropdown persists the option the user PICKED.
 
-         The live defect this pins: the panel's useState seeds from prefsGet()
-         while the Host section is still 'loading', so it captures the schema
-         DEFAULT. If the user clicks before any re-sync pass corrected it, a
-         handler that computed `next = !enabled` (React state) wrote the DEFAULT
-         back to the durable section — overwriting a real stored choice. The
-         symptom is precisely "I change it, it looks changed, and after a refresh
-         it is back to the old value", because the wrong value was persisted.
+         The defect this pins was the old cycle button's: it computed `next` from
+         React state, and that state seeds from prefsGet() while the Host section
+         is still 'loading' — i.e. from the schema DEFAULT. A click in that window
+         wrote the default back over a real stored choice ("I change it, it looks
+         changed, and after a refresh it is back to the old value").
 
-         A handler that derives `next` from the store (isEnabled()/readPalette()/…)
-         is immune: it decides against the durable value it is about to replace.
+         A <select> cannot make that mistake, because the value comes from the
+         option itself rather than from what the panel believed was active. The
+         two things that still need guarding: the pick must land even from a stale
+         panel, and an undeclared value must never reach the transport.
      ======================================================================= */
   {
-    // The Host holds palette=wuling and radius=round; the panel is rendered while
-    // the section is still in flight, so its useState slots captured the defaults.
+    // The Host holds palette=wuling; the panel is rendered while the section is
+    // still in flight, so its useState slot captured the default.
     const stub = configFormsStub({ 'theme-endfield': { palette: 'wuling', radius: 'round' } }, { served: ['theme-endfield'], loading: ['theme-endfield'] })
 
     // Render the panel while loading, so its state seeds from the schema default.
     const client = bootClient({ configForms: stub.service })
-    const buttons = panelButtons(client)
 
-    const toggle = findButton(buttons, /切换武陵|切换谷地|Switch palette/)
-    if (!toggle) {
-      fail('no palette toggle rendered (stale-state case)')
+    const select = findPaletteSelect(panelSelects(client))
+    if (!select) {
+      fail('no palette <select> rendered (stale-state case)')
     } else {
-      const before = textOf(toggle)
       // The panel was rendered during 'loading', so it shows the default (谷地/valley).
-      if (/切换武陵/.test(before)) pass('precondition: panel shows the schema default palette while the section is in flight')
-      else pass('precondition: panel rendered during loading (shows ' + JSON.stringify(before) + ')')
+      if (select.props.value === 'valley') pass('precondition: panel shows the schema default palette while the section is in flight')
+      else pass('precondition: panel rendered during loading (select holds ' + JSON.stringify(select.props.value) + ')')
 
       // Now the Host serves the stored value. No re-sync pass has run for the
       // panel yet (the test has not driven the effect), which is the window the
-      // bug lived in: the DOM still reflects the default.
+      // bug lived in: the tree still reflects the default.
       stub.settle('theme-endfield')
       await drain()
 
-      toggle.props.onClick()
+      /* Drive the element captured during 'loading' on purpose: its closure
+         predates the re-sync, so anything derived from state would be stale. The
+         pick must still persist exactly what the option says. */
+      select.props.onChange({ target: { value: 'abyss' } })
       await drain()
 
-      // The stored value was wuling, so a store-derived toggle MUST write valley —
-      // i.e. flip away from what is actually stored. A state-derived toggle that
-      // wrongly believed it was already on valley would write wuling, re-asserting
-      // the old value and making the click a no-op after a refresh.
-      const w = stub.writes
-      if (w.length === 0) {
-        fail('a palette click against a settled section wrote nothing')
-      } else if (w[0].field === 'palette' && w[0].value === 'valley') {
-        pass('palette toggle decided from the STORE (stored wuling -> wrote valley)')
+      const picked = stub.writes.filter((w) => w.field === 'palette')
+      if (picked.length === 0) {
+        fail('a palette pick against a settled section wrote nothing')
+      } else if (picked[picked.length - 1].value === 'abyss') {
+        pass('palette pick persisted the option itself (abyss) from a stale panel')
       } else {
-        fail('palette toggle decided from stale React state: wrote '
-          + JSON.stringify(w[0]) + ', expected {field:palette, value:valley} — this is the '
-          + '"change it, refresh, it reverted" defect')
+        fail('palette pick wrote ' + JSON.stringify(picked[picked.length - 1])
+          + ', expected {field:palette, value:abyss}')
+      }
+
+      const writesBefore = stub.writes.length
+      select.props.onChange({ target: { value: 'chartreuse' } })
+      await drain()
+      if (stub.writes.length === writesBefore) {
+        pass('an undeclared palette is refused instead of persisted')
+      } else {
+        fail('an undeclared palette reached the transport: '
+          + JSON.stringify(stub.writes.slice(writesBefore)))
       }
     }
   }

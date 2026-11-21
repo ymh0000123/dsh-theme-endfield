@@ -8,11 +8,13 @@
       // Guarded like every other body touch: an unload race must not throw here.
       if (typeof document !== 'undefined' && document.body !== null) {
         document.body.classList.remove('theme-endfield-round')
-        /* The palette class must go with the stylesheet that gives it meaning:
-           left behind it would be a class nothing defines, and it would make
-           isWulingPalette() report a palette the page is no longer using. The
-           stored preference is untouched, so re-enabling restores it. */
-        document.body.classList.remove(PALETTE_CLASS)
+        /* The palette classes must go with the stylesheet that gives them
+           meaning: left behind they would be classes nothing defines, and they
+           would make activePalette() report a palette the page is no longer
+           using. Driven off the same map the sync uses, so a palette added
+           later cannot be forgotten here. The stored preference is untouched,
+           so re-enabling restores it. */
+        for (const cls of Object.values(PALETTE_CLASSES)) document.body.classList.remove(cls)
         document.body.removeAttribute?.('data-endfield-glass')
       }
       // The plate is styled by the theme stylesheet just torn down — an orphaned

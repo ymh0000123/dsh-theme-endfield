@@ -202,6 +202,19 @@ const run=(paletteName)=>{
 run('谷地黄')
 document.body.classList.add('theme-endfield-wuling')
 run('武陵青')
+/* Third palette: the accent fill is a mid-luminance red, so every one of these
+   rules has less headroom under ink than in the other two. Same assertions, not
+   a relaxed bar — a red hover state that drops below AA is the exact defect this
+   test exists to catch. */
+document.body.classList.remove('theme-endfield-wuling')
+document.body.classList.add('theme-endfield-ember')
+run('重燃赤')
+/* Fourth palette: the first accent that is not obviously LIGHTER than the ink it
+   carries. Every rule here has to pass the same bar — an indigo hover fill that
+   keeps the app's near-white label is the exact 3.4:1 case this file exists for. */
+document.body.classList.remove('theme-endfield-ember')
+document.body.classList.add('theme-endfield-abyss')
+run('浸蓝')
 
 document.title='DONE '+JSON.stringify(window.__RESULTS__)
 </script></body></html>`)

@@ -100,7 +100,7 @@ const NAMESPACE = LEGACY_NAMESPACE;
  *   - default-ON switches store '1' and the client reads them as `!== '0'`;
  *   - default-OFF switches store '0' and the client reads them as `=== '1'`;
  *   - palettes / radii / frame-rate / speed each store exactly one of their
- *     documented literals ('valley'/'wuling'; 'square'/'round'; fps in
+ *     documented literals ('valley'/'wuling'/'ember'/'abyss'; 'square'/'round'; fps in
  *     24/60/120; speed in 1/2/4), with the shipped default filled in here.
  */
 const FIELD_DEFAULTS = {

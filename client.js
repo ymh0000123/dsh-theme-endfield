@@ -1325,35 +1325,73 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       else document.body.classList.remove('theme-endfield-round')
     }
 
-    /* ---------- accent palette: 谷地黄 (default) / 武陵青 ----------
-       The palette is ONE class on <body>; the stylesheet defines both variable
-       sets, so switching is a class flip with no restyling work here. Because the
-       app applies its theme tokens as inline body styles and this theme's token
-       overrides are var(--edge-accent) references, those tokens re-resolve on the
-       same flip — no JS repaint, no theme.overrideTokens() re-registration.
+    /* ---------- accent palette: 谷地黄 (default) / 武陵青 / 重燃赤 / 浸蓝 ----------
+       The palette is ONE class on <body>; the stylesheet defines all four
+       variable sets, so switching is a class flip with no restyling work here.
+       Because the app applies its theme tokens as inline body styles and this
+       theme's token overrides are var(--edge-accent) references, those tokens
+       re-resolve on the same flip — no JS repaint, no theme.overrideTokens()
+       re-registration.
 
        'valley' (谷地黄, signal yellow) is the DEFAULT, so an unset field and any
-       unrecognised value both mean yellow. Only the exact string 'wuling' selects
-       武陵青, which keeps a corrupt stored value (schema rejects / outside the
-       fallback) from silently changing the shipped look.
+       unrecognised value both mean yellow. Only the exact literals 'wuling' /
+       'ember' / 'abyss' select the others, which keeps a corrupt stored value
+       (schema rejects / outside the fallback) from silently changing the shipped
+       look.
+
+       The map is the single place that knows a palette's class name. Everything
+       downstream asks activePalette() instead of testing one class by name, so a
+       palette is one CSS block plus one entry here — and no consumer can keep
+       quietly reporting "not wuling" for a palette it has never heard of.
+       (That was the shape of the bug this refactor removes: the contour canvas
+       used to ask isWulingPalette(), which would have painted a new palette with
+       the YELLOW stroke and looked like the feature breaking on switch.)
 
        The one surface a class cannot reach is the contour canvas, which is painted
-       by JS — hence syncPalette() redraws it, and the observer below catches a flip
-       made in another tab or by the browser restoring state. */
+       by JS — hence syncPalette() redraws it after a flip. */
     const PALETTE_KEY = 'dsh-theme-endfield-palette'
-    const PALETTE_CLASS = 'theme-endfield-wuling'
-    const readPalette = () => (prefsGet(PALETTE_KEY) === 'wuling' ? 'wuling' : 'valley')
+    const PALETTE_CLASSES = {
+      wuling: 'theme-endfield-wuling',
+      ember: 'theme-endfield-ember',
+      abyss: 'theme-endfield-abyss',
+    }
+    /* Order is the shipped order, not a set: the settings row lists these as the
+       options of its <select>, so this array is simultaneously the allow-list for
+       a stored value and the order the user reads. The reading order is
+       deliberate — default (warm), cool, hot, deep. */
+    const PALETTES = ['valley', 'wuling', 'ember', 'abyss']
+    const readPalette = () => {
+      const stored = prefsGet(PALETTE_KEY)
+      return PALETTES.indexOf(stored) === -1 ? 'valley' : stored
+    }
     /* Read from the DOM, not from storage: the canvas must match what is actually
-       on screen. While the theme is switched off the class is absent, so the sheet
-       keeps its default palette instead of following an ignored preference. */
-    const isWulingPalette = () => typeof document !== 'undefined'
-      && document.body !== null
-      && document.body.classList.contains(PALETTE_CLASS)
+       on screen. While the theme is switched off every class is absent, so the
+       sheet keeps its default palette instead of following an ignored preference. */
+    const activePalette = () => {
+      if (typeof document === 'undefined' || document.body === null) return 'valley'
+      const list = document.body.classList
+      for (let i = 0; i < PALETTES.length; i++) {
+        const cls = PALETTE_CLASSES[PALETTES[i]]
+        if (cls !== undefined && list.contains(cls)) return PALETTES[i]
+      }
+      return 'valley'
+    }
+    const isWulingPalette = () => activePalette() === 'wuling'
+    const isEmberPalette = () => activePalette() === 'ember'
+    const isAbyssPalette = () => activePalette() === 'abyss'
+    /* No nextPalette() any more: the settings row is a <select>, so "which one do
+       I get" is answered by the option the user picked rather than by arithmetic
+       over this array. The order above still matters — it is the option order. */
     const syncPaletteClass = () => {
       if (typeof document === 'undefined' || document.body === null) return
-      // The class only applies while the theme owns the page; unmount() drops it.
-      if (isEnabled() && readPalette() === 'wuling') document.body.classList.add(PALETTE_CLASS)
-      else document.body.classList.remove(PALETTE_CLASS)
+      const wanted = readPalette()
+      for (const name of PALETTES) {
+        const cls = PALETTE_CLASSES[name]
+        if (cls === undefined) continue
+        // The class only applies while the theme owns the page; unmount() drops it.
+        if (isEnabled() && wanted === name) document.body.classList.add(cls)
+        else document.body.classList.remove(cls)
+      }
     }
 
     /* ---------- background ENDFIELD watermark (settings-toggleable) ----------
@@ -2751,27 +2789,47 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        1.332:1 against the yellow's 1.734:1 — a 23% drop, which reads as the
        feature having quietly weakened on switch. Each palette is therefore tuned
        to the same composited contrast rather than the same number, and
-       test/palette-contrast.test.js fails if the two drift more than 20% apart:
+       test/palette-contrast.test.js fails if any two drift more than 20% apart:
          谷地黄 dark  #fff50033  (0.20)  1.734:1
          谷地黄 light #beaf006b  (0.42)  1.291:1
          武陵青 dark  #14d0d045  (0.27)  1.755:1  (+1.2%)
          武陵青 light #14d0d07a  (0.48)  1.289:1  (-0.2%)
+         重燃赤 dark  #ff3b2e66  (0.40)  1.737:1  (+0.2%)
+         重燃赤 light #ff3b2e36  (0.21)  1.297:1  (+0.5%)
+         浸蓝   dark  #7d6fff61  (0.38)  1.706:1  (-1.6%)
+         浸蓝   light #2831cc26  (0.15)  1.282:1  (-0.7%)
        Both cyan alphas came DOWN from the first version (0.32 / 0.30 at the old
        darker accent): a brighter stroke composites stronger, so holding the same
        on-screen strength means less of it. Light-mode cyan still needs no darkened
-       variant the way yellow does, because it is not close to paper-white. The tags
-       below are what the test greps for, so renaming them breaks the check loudly
-       instead of silently. */
-    const contourStroke = () => {
-      const cyan = isWulingPalette()
-      if (isDarkScheme()) {
-        // EDGE_STROKE_DARK_CYAN: #14d0d045
-        // EDGE_STROKE_DARK_YELLOW: #fff50033
-        return cyan ? '#14d0d045' : '#fff50033'
-      }
-      // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
+       variant the way yellow does, because it is not close to paper-white. Red
+       needs the LOWEST alpha of the three in light mode and the HIGHEST in dark:
+       the same colour moves much further per unit of alpha against cream than
+       against near-black, so a single number would read as a stain on paper or as
+       nothing on black. Indigo repeats red's pattern even more sharply — it is the
+       dimmest accent of the four (L* 55), so its dark stroke needs the highest
+       alpha of any palette (0.38) to reach the same 1.7:1, while on cream the
+       DEEP step carries it at 0.15 instead (the pale accent at any alpha only got
+       to 1.20). The tags below are what the test greps for, so renaming them
+       breaks the check loudly instead of silently.
+
+       Kept as a lookup keyed by palette id rather than a ternary chain: with four
+       palettes a chain silently answers for a name it has never heard of, which is
+       exactly the bug this file already paid for once. */
+    const CONTOUR_STROKE = {
+      // EDGE_STROKE_DARK_YELLOW: #fff50033
+      // EDGE_STROKE_DARK_CYAN: #14d0d045
+      // EDGE_STROKE_DARK_EMBER: #ff3b2e66
+      // EDGE_STROKE_DARK_ABYSS: #7d6fff61
+      dark: { valley: '#fff50033', wuling: '#14d0d045', ember: '#ff3b2e66', abyss: '#7d6fff61' },
       // EDGE_STROKE_LIGHT_YELLOW: #beaf006b
-      return cyan ? '#14d0d07a' : '#beaf006b'
+      // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
+      // EDGE_STROKE_LIGHT_EMBER: #ff3b2e36
+      // EDGE_STROKE_LIGHT_ABYSS: #2831cc26
+      light: { valley: '#beaf006b', wuling: '#14d0d07a', ember: '#ff3b2e36', abyss: '#2831cc26' },
+    }
+    const contourStroke = () => {
+      const table = CONTOUR_STROKE[isDarkScheme() ? 'dark' : 'light']
+      return table[activePalette()] || table.valley
     }
 
     const contourDrawLines = () => {
@@ -6025,10 +6083,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       /* ================= accent palette =================================
          Every accent value in this stylesheet reads from the variables below
          instead of a literal, so the whole theme repaints from ONE declaration
-         block. Two palettes ship:
+         block. Four palettes ship:
 
            谷地黄 (default)  signal yellow  #fff500 — the Endfield site accent
            武陵青            teal-cyan      #14d0d0
+           重燃赤            campaign red   #ff3b2e — the 危机合约 key art
+           浸蓝              key-art indigo #7d6fff — the 浸蓝测试作战 key art
 
          WHY THIS BLOCK IS ON body AND NOT :root. The app applies its theme
          tokens as INLINE STYLES ON <body> (dsh-client-ui-layout does
@@ -6057,8 +6117,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
 
          Values are MEASURED, not chosen — see test/palette-contrast.test.js,
          which fails the build if any of them stops clearing its bar:
-           ink #101110 on 谷地黄 16.50:1 · on 武陵青 6.62:1   (AA, solid chips)
-           accent as dark-mode icon ink   15.26:1  ·  6.12:1  (>=3 icon floor) */
+           ink #101110 on the accent   16.50 / 9.88 / 5.33 / 5.04:1 (AA chips)
+           accent as dark-mode ink     15.26 / 9.14 / 4.93 / 4.66:1 (icon floor 3,
+             text floor 4.5 — the two darkest palettes have no room to spare)
+         (谷地黄 / 武陵青 / 重燃赤 / 浸蓝, same order as the list above.) */
       body {
         --edge-accent: #fff500;
         --edge-accent-rgb: 255, 245, 0;
@@ -6142,6 +6204,124 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
            measured 6.0. */
         --edge-glow-light: 0.08;
         --edge-glow-dark: 0.04;
+      }
+      /* ---------- 重燃赤 (campaign red, #ff3b2e) ----------
+         Sampled from the 危机合约 / 重燃测试作战 key art, then measured against the
+         same surfaces as the other two. Red is the one hue on this list that is
+         NOT free to move in both directions, and every value below is a
+         consequence of that, not a preference.
+
+         WHY THE HOVER STEP GOES UP. The other two palettes dip the accent on
+         hover (#fff500 -> #e8e000, #14d0d0 -> #10b8b8) because both keep real
+         luminance headroom under ink. Red does not: a dip of the same visual size
+         lands on #e02317, which seats ink at 3.99:1 — below AA, i.e. the hover
+         state of every chip and primary button becomes unreadable. There is no
+         darker red that both clears 4.5:1 under ink AND reads as a different
+         colour. So this palette ignites instead of pressing: #ff5f4d lifts ink to
+         6.30:1 and is a visible step (L 24.6% -> 30.0%) at the same time. That is
+         a deliberate asymmetry with the other two palettes, and the reason the
+         variable is not repo-wide assumed to mean "darker".
+
+         THE REST, measured (worst surface of each role):
+           ink #101110 on the accent          5.33:1   (solid chips/buttons, AA)
+           accent as dark-mode icon/link ink  4.93:1   on #181a18 (floor is 3)
+           accent as TEXT on cream            2.89:1   on #e8e8e2 — erasure, so
+             light mode uses #b01f14 for accent-as-text (5.59) exactly as the
+             other palettes sink their own hue; #ff3b2e survives there only as a
+             FILL (3.16:1 on the panel, which is what a fill needs)
+           turn status, light  #b01f14 / #7a1109   5.59 / 8.93 on both surfaces
+           turn status, dark   #ff3b2e / #ff7a55   4.93 / 6.81 on both surfaces
+             (the dark mid band LIFTS, like cyan's, not dips like yellow's: a
+             darker red mid stop falls off AA immediately — red has almost no
+             headroom below #ff3b2e)
+
+         GLOW. Red carries real luminance on cream, so the alphas are measured
+         against the same budget as the other palettes (blue replacement + 2 Y):
+         light 0.06 gives |ΔY| 7.91 (budget 9.90), dark 0.10 gives 8.30 (11.28).
+         Both are louder than cyan's, and 0.08 / 0.12 would blow the light budget
+         outright — red at cyan's alpha reads as a stain, not a breath. */
+      body.theme-endfield-ember {
+        --edge-accent: #ff3b2e;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. */
+        --edge-accent-rgb: 255, 59, 46;
+        /* The IGNITION step — see the note above; brighter, not deeper. */
+        --edge-accent-deep: #ff5f4d;
+        /* Red under ink is 2.75:1, so light-mode fill text is paper, not ink.
+           This is the fill step that still separates from cream: 5.59:1. */
+        --edge-accent-onpaper: #b01f14;
+        --edge-status-light: #b01f14;
+        --edge-status-light-mid: #7a1109;
+        --edge-status-dark: #ff3b2e;
+        --edge-status-dark-mid: #ff7a55;
+        /* Destructive control. Not derivable from the accent here: the app's own
+           error red (#ff3b30) and this accent (#ff3b2e) are the same colour to the
+           eye, so 确认 and 拒绝 in the approval band would be indistinguishable at
+           the one moment they must not be. Danger drops to the key art's blood
+           tone instead (bone text 9.76:1). */
+        --edge-danger: #7c1414;
+        --edge-glow-light: 0.06;
+        --edge-glow-dark: 0.1;
+      }
+      /* ---------- 浸蓝 (key-art indigo, #7d6fff) ----------
+         Sampled from 危机合约 / 浸蓝测试作战. The field type of that key art is
+         #0a06d0 — hue 241, L* 26 — a blue that fills a poster at 300px and even
+         there reads as a watermark.
+
+         WHY THE ACCENT IS NOT THAT VALUE. A chip is not a poster. #0a06d0 against
+         the near-black page measures 1.76:1: the row, the badge and the primary
+         button would be present but unseen — the same failure as the rejected
+         #0daaaa cyan, one order of magnitude worse. So the accent is that blue
+         lifted along its own hue axis to #7d6fff (L* 55). It is the largest lift
+         of the four palettes, and the only one that does not preserve the art's
+         value; the hue is preserved instead (246 vs 241), and R > G is pinned by
+         the test so this can never drift onto the app's own royal blue (#4d6bfe,
+         hue 229, G > R) and read as "no theme installed".
+
+         HOVER IGNITES, like 重燃赤, and for the same measurable reason. Ink needs
+         L >= 19.75% to clear AA on the chip, and the step a press would take
+         downward — #6c5cf0, ΔL* -6.6, the same size as the yellow and cyan dips —
+         seats ink at 3.99:1. Both low-luminance palettes therefore fail at
+         almost exactly the same number, which is why both go up: #8e82ff takes
+         ink to 6.12:1 and is a visible step (ΔL* +5.7).
+
+         MEASURED (worst surface of each role):
+           ink #101110 on the accent          5.04:1   (solid chips/buttons, AA)
+           accent as dark-mode ink/text       4.66:1   on #181a18 — above the 3
+             icon floor and above the 4.5 text floor, but the tightest number in
+             the whole palette: the turn-status gradient reads this exact value,
+             so it is the one to re-measure before touching anything here
+           accent as TEXT on cream            3.05:1   — a fill, not a text step,
+             so paper mode uses #2831cc for accent-as-text (7.11:1)
+           turn status, light  #2831cc / #121a72   7.11 / 12.05
+           turn status, dark   #7d6fff / #c6bfff   4.66 / 10.25
+             (the dark mid band lifts like cyan's and red's: indigo has almost no
+             headroom below #7d6fff either)
+
+         GLOW. The one palette whose alphas are the stock blue's own (0.08 /
+         0.10): the hue IS that family, so |ΔY| 8.58 and 10.77 land inside the
+         9.90 / 11.28 budget with no tuning at all — the first palette where the
+         hero needed nothing.
+
+         ON PAPER THE PALETTE RETURNS TO THE ART. #2831cc is the key art's
+         #0a06d0 brought UP just far enough to hold paper text. The other three
+         palettes darken their hue to survive cream; this one is already dark and
+         only has to climb — which is also why it has the deepest accent-as-text
+         step of the four. */
+      body.theme-endfield-abyss {
+        --edge-accent: #7d6fff;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. */
+        --edge-accent-rgb: 125, 111, 255;
+        /* The IGNITION step — see the note above; brighter, not deeper. */
+        --edge-accent-deep: #8e82ff;
+        /* The fill step that carries paper text on cream (7.11:1), and the value
+           the art itself uses — #0a06d0 lifted, not a different blue. */
+        --edge-accent-onpaper: #2831cc;
+        --edge-status-light: #2831cc;
+        --edge-status-light-mid: #121a72;
+        --edge-status-dark: #7d6fff;
+        --edge-status-dark-mid: #c6bfff;
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.1;
       }
       /* Token-derived aliases. These MUST be on body, not :root — see above. */
       body {
@@ -6948,6 +7128,22 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       }
       [data-cordis-decline]:hover:not(:disabled) {
         background: #d6281d !important;
+      }
+      /* 重燃赤：拒绝不能和确认同色 -------------------------------------------------
+         The app paints 拒绝 with its error red (#ff3b30); this palette's 确认 is
+         #ff3b2e. In the approval band that is one red rendered twice — the two
+         actions become indistinguishable exactly when a mis-click is expensive.
+         Scoped to the palette, danger drops to the art's blood tone (--edge-danger,
+         bone text 9.32:1) and gets a darker hover, so it still reads as "red and
+         serious" without borrowing the signal. The other two palettes keep the
+         app's error red untouched. */
+      body.theme-endfield-ember [data-cordis-decline],
+      body.theme-endfield-ember [data-cordis-decline-plugin] {
+        background: var(--edge-danger) !important;
+      }
+      body.theme-endfield-ember [data-cordis-decline]:hover:not(:disabled),
+      body.theme-endfield-ember [data-cordis-decline-plugin]:hover:not(:disabled) {
+        background: #5f0d09 !important;
       }
       /* ---------- 审批白条的前提：祖先不能是 containing block（issue #41） ----------
          The band below fills the VIEWPORT only while no ancestor between the
@@ -9027,11 +9223,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // Guarded like every other body touch: an unload race must not throw here.
       if (typeof document !== 'undefined' && document.body !== null) {
         document.body.classList.remove('theme-endfield-round')
-        /* The palette class must go with the stylesheet that gives it meaning:
-           left behind it would be a class nothing defines, and it would make
-           isWulingPalette() report a palette the page is no longer using. The
-           stored preference is untouched, so re-enabling restores it. */
-        document.body.classList.remove(PALETTE_CLASS)
+        /* The palette classes must go with the stylesheet that gives them
+           meaning: left behind they would be classes nothing defines, and they
+           would make activePalette() report a palette the page is no longer
+           using. Driven off the same map the sync uses, so a palette added
+           later cannot be forgotten here. The stored preference is untouched,
+           so re-enabling restores it. */
+        for (const cls of Object.values(PALETTE_CLASSES)) document.body.classList.remove(cls)
         document.body.removeAttribute?.('data-endfield-glass')
       }
       // The plate is styled by the theme stylesheet just torn down — an orphaned
@@ -9191,10 +9389,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       paletteRow: '主题配色',
       paletteValley: '谷地黄',
       paletteWuling: '武陵青',
-      paletteToValley: '切换谷地黄',
-      paletteToWuling: '切换武陵青',
+      paletteEmber: '重燃赤',
+      paletteAbyss: '浸蓝',
       paletteHintValley: '默认信号黄 #fff500（终末地官网强调色）',
       paletteHintWuling: '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线',
+      paletteHintEmber: '战役红 #FF3B2E（危机合约取色），压黑底 5.33:1；纸上落一档 #B01F14',
+      paletteHintAbyss: '靛蓝强调 #7D6FFF（浸蓝测试作战取色），压黑底 5.04:1；纸上回到原画蓝 #2831CC',
       radiusRow: '主题圆角',
       radiusRound: '圆角',
       radiusSquare: '直角',
@@ -9388,10 +9588,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       paletteRow: 'Accent palette',
       paletteValley: 'Valley Yellow',
       paletteWuling: 'Wuling Cyan',
-      paletteToValley: 'Use Valley Yellow',
-      paletteToWuling: 'Use Wuling Cyan',
+      paletteEmber: 'Rekindle Red',
+      paletteAbyss: 'Immersed Blue',
       paletteHintValley: 'Default signal yellow #fff500 (the Endfield site accent)',
       paletteHintWuling: 'Teal-cyan accent #14d0d0 for buttons, hover, selected rows and contours',
+      paletteHintEmber: 'Campaign red #FF3B2E from the Contingency Contract art — 5.33:1 on ink, sinks to #B01F14 on paper',
+      paletteHintAbyss: 'Indigo accent #7D6FFF from the Immersed Blue key art — 5.04:1 on ink, returns to the art\'s own #2831CC on paper',
       radiusRow: 'Corners',
       radiusRound: 'Rounded',
       radiusSquare: 'Square',
@@ -9574,6 +9776,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     }
 
     /* ---------- Settings page: 主题 (own settings.section) ---------- */
+    /* Palette copy keys — one map per question the row asks: what is active, and
+       what it looks like. Side by side like this, a fifth palette is a data edit
+       rather than three more ternaries to get wrong. Both maps are keyed by
+       palette id, and PALETTES owns which ids exist and in what order the <select>
+       offers them — so the option list, the allow-list in the change handler and
+       the runtime class table can never drift apart. */
+    const PALETTE_NAME = { valley: 'paletteValley', wuling: 'paletteWuling', ember: 'paletteEmber', abyss: 'paletteAbyss' }
+    const PALETTE_HINT = { valley: 'paletteHintValley', wuling: 'paletteHintWuling', ember: 'paletteHintEmber', abyss: 'paletteHintAbyss' }
     const slots = ctx.get('slots')
     const disposeRows = []
     let disposeSettings = () => { disposeRows.forEach((d) => d()) }
@@ -9840,12 +10050,26 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           /* Palette switch. Everything visual is carried by the class flip inside
              syncPaletteClass(); the only thing that needs explicit work is the
              contour canvas, because a canvas stroke cannot read a CSS variable.
-             The redraw is called directly rather than left to the MutationObserver
-             so the sheet changes in the same frame as the rest of the UI. */
-          const togglePalette = () => {
-            const next = readPalette() === 'wuling' ? 'valley' : 'wuling'
-            prefsSet(PALETTE_KEY, next)
-            setPalette(next)
+             The redraw is called directly rather than left to a later observer so
+             the sheet changes in the same frame as the rest of the UI.
+
+             A <select> rather than a cycle button. With four palettes, "click
+             until the one you want comes around" stopped being a control and
+             became a memory game — the button also had to answer a question
+             nobody asked ("what is next?") instead of showing the choices. The
+             dropdown lists every palette at once and the current one is the
+             value, so nothing has to be inferred from the previous state.
+
+             `value` is the OPTION the user picked, not a captured React state:
+             after a language switch or a late-served section the panel's state
+             can lag, but the intent of a pick is still exactly what the option
+             says. PALETTES is the allow-list (the same array the option list is
+             built from), so a corrupt or hand-crafted event cannot persist a
+             palette no stylesheet defines. */
+          const setPaletteValue = (value) => {
+            if (PALETTES.indexOf(value) === -1) return
+            prefsSet(PALETTE_KEY, value)
+            setPalette(value)
             syncPaletteClass()
             if (contourWrap !== null) contourRefresh(false)
           }
@@ -10227,32 +10451,35 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
               ]),
               row('palette', false, [
                 R.createElement('span', { style: labelStyle },
-                  t('paletteRow') + t('sep') + t(palette === 'wuling' ? 'paletteWuling' : 'paletteValley'),
+                  t('paletteRow') + t('sep') + t(PALETTE_NAME[palette] || PALETTE_NAME.valley),
                   R.createElement('span', { style: hintStyle },
-                    t(palette === 'wuling' ? 'paletteHintWuling' : 'paletteHintValley')
+                    t(PALETTE_HINT[palette] || PALETTE_HINT.valley)
                   )
                 ),
-                // A colour switch should show the colour it offers, not only name it.
                 R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', alignItems: 'center' } },
+                  // A colour switch should show the colour it offers, not only name it:
+                  // the dropdown can only print the name, so the live accent stays
+                  // beside it as a chip. --edge-accent only exists while the theme
+                  // stylesheet is mounted; with the theme off the chip falls back to
+                  // the app's own filled surface so it stays visible.
                   R.createElement('span', {
                     'aria-hidden': 'true',
                     style: {
                       width: '14px',
                       height: '14px',
                       flex: '0 0 auto',
-                      // --edge-accent only exists while the theme stylesheet is
-                      // mounted; with the theme off the chip falls back to the
-                      // app's own filled surface so it stays visible.
                       background: enabled ? 'var(--edge-accent)' : 'var(--dsw-alias-interactive-bg-hover-solid)',
                       border: '1px solid var(--dsw-alias-border-l2)',
                       borderRadius: mode === 'round' ? '999px' : '0',
                     },
                   }),
-                  R.createElement('button', {
-                    type: 'button',
-                    onClick: togglePalette,
-                    style: btnStyleFor(true),
-                  }, t(palette === 'wuling' ? 'paletteToValley' : 'paletteToWuling'))
+                  R.createElement('select', {
+                    'aria-label': t('paletteRow'), value: palette,
+                    onChange: (event) => setPaletteValue(event.target.value),
+                    style: { color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)',
+                      border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 10px' },
+                  }, PALETTES.map((value) => R.createElement('option', { key: value, value },
+                    t(PALETTE_NAME[value] || PALETTE_NAME.valley))))
                 )
               ]),
               row('glass', false, [

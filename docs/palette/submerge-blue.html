@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>浸蓝 — Palette Reference 05</title>
+<style>
+  :root{
+    --accent:#7D6FFF;
+    --accent-deep:#8E82FF;
+    --accent-onpaper:#2831CC;
+    --art:#0A06D0;
+    --shimmer:#C6BFFF;
+    --base:#101110;
+    --l1:#181A18;
+    --l2:#1E201D;
+    --line1:#343633;
+    --line2:#4A4D49;
+    --label2:#898D89;
+    --label1:#F5F5F0;
+    --paper:#E8E8E2;
+    --muted:#6E6A66;
+    --sans:"Bahnschrift","DIN Alternate","Arial Narrow","Microsoft YaHei",sans-serif;
+    --cjk:"Microsoft YaHei","PingFang SC",sans-serif;
+    --mono:"Cascadia Mono","Consolas","SF Mono","Courier New",monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{background:var(--base);}
+  body{
+    width:1600px;height:1280px;overflow:hidden;
+    color:var(--label1);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    font-feature-settings:"tnum" 1;
+  }
+  .sheet{
+    position:relative;width:1600px;height:1280px;
+    padding:34px 46px 22px;
+    background:
+      radial-gradient(120% 80% at 76% 2%, rgba(125,111,255,.13), transparent 58%),
+      radial-gradient(90% 62% at 4% 98%, rgba(10,6,208,.20), transparent 62%),
+      var(--base);
+    display:flex;flex-direction:column;
+  }
+  .sheet::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:
+      linear-gradient(to right, rgba(243,239,233,.032) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(243,239,233,.032) 1px, transparent 1px);
+    background-size:48px 48px;
+    mask-image:linear-gradient(to bottom, rgba(0,0,0,.9), rgba(0,0,0,.25) 55%, rgba(0,0,0,.7));
+  }
+  .frame{
+    position:absolute;inset:16px;border:1px solid rgba(243,239,233,.16);pointer-events:none;
+  }
+  .frame::before,.frame::after{content:"";position:absolute;width:26px;height:26px;}
+  .frame::before{left:-1px;top:-1px;border-left:2px solid var(--accent);border-top:2px solid var(--accent);}
+  .frame::after{right:-1px;bottom:-1px;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);}
+
+  .rail{
+    position:absolute;top:0;bottom:0;width:18px;
+    font-family:var(--mono);font-size:9px;letter-spacing:.30em;color:rgba(137,141,137,.55);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .rail span{writing-mode:vertical-rl;}
+  .rail-l{left:22px;}
+  .rail-r{right:22px;}
+
+  /* ================= header ================= */
+  header{
+    position:relative;z-index:3;
+    display:flex;align-items:center;justify-content:space-between;
+    padding-bottom:12px;border-bottom:1px solid var(--line1);
+  }
+  .brand{display:flex;align-items:center;gap:12px;}
+  .mark{width:14px;height:14px;background:var(--accent);}
+  .brand b{font-size:13px;letter-spacing:.20em;font-weight:600;}
+  .brand i{
+    font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+    color:var(--label2);padding-left:12px;border-left:1px solid var(--line2);
+  }
+  .head-right{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--label2);}
+  .head-right em{font-style:normal;color:var(--accent);}
+  .head-right .hd-box{border:1px solid var(--line2);padding:4px 8px;color:var(--label1);}
+
+  /* ================= hero ================= */
+  .hero{
+    position:relative;z-index:2;overflow:hidden;
+    display:grid;grid-template-columns:1fr 486px;gap:34px;
+    padding:26px 0 24px;border-bottom:1px solid var(--line1);
+  }
+  /* The KV's move is type at poster scale; a cropped fragment of it reads as a bug
+     instead (that lesson is already in this repo), so the art blue appears here at
+     a size that is complete on purpose: a bilingual lockup, the CJK name large and
+     the Latin name ghosted in the art's own #0A06D0. */
+  .lockup{display:flex;align-items:flex-end;gap:18px;margin-top:14px;}
+  .ghost{
+    font-size:62px;line-height:1;font-weight:800;letter-spacing:.01em;
+    color:var(--art);padding-bottom:16px;white-space:nowrap;
+  }
+  .hero > div{position:relative;z-index:1;}
+  .eyebrow{
+    position:relative;display:flex;align-items:center;gap:10px;
+    font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:var(--label2);
+  }
+  .eyebrow s{width:26px;height:1px;background:var(--accent);text-decoration:none;}
+  .eyebrow b{color:var(--label1);font-weight:400;}
+  h1{
+    position:relative;margin:0;
+    font-family:var(--cjk);font-weight:700;font-size:142px;line-height:.88;
+    letter-spacing:-.045em;
+  }
+  h1 span{color:var(--accent);}
+  h1 u{
+    text-decoration:none;display:inline-block;width:20px;height:20px;
+    background:var(--accent);margin-left:10px;transform:translateY(-6px);
+  }
+  .latin{
+    display:flex;align-items:center;gap:16px;margin-top:16px;
+    font-family:var(--mono);font-size:15px;letter-spacing:.46em;color:var(--label1);
+  }
+  .latin s{flex:0 0 auto;width:120px;height:1px;background:var(--line2);text-decoration:none;}
+  .latin i{font-style:normal;letter-spacing:.14em;font-size:10px;color:var(--label2);}
+  .lede{
+    margin-top:18px;max-width:648px;
+    font-family:var(--cjk);font-size:13.5px;line-height:2.0;color:#BDB6B0;
+  }
+  .lede b{color:var(--label1);font-weight:700;}
+  .lede mark{background:none;color:var(--accent);}
+
+  /* ---- the plate: art value above, UI value below, with the lift between ---- */
+  .plate{
+    position:relative;align-self:start;overflow:hidden;
+    border:1px solid var(--line2);
+  }
+  .plate-top{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:9px 12px;background:var(--l1);border-bottom:1px solid var(--line1);
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.20em;color:var(--label2);
+  }
+  .plate-top b{color:var(--label1);font-weight:400;}
+  .band{
+    position:relative;height:86px;padding:12px 14px;
+    display:flex;align-items:flex-start;justify-content:space-between;
+  }
+  .band em{
+    font-style:normal;font-family:var(--mono);font-size:9px;letter-spacing:.18em;
+    display:block;margin-bottom:4px;opacity:.72;
+  }
+  .band strong{font-family:var(--mono);font-size:27px;letter-spacing:.01em;font-weight:700;}
+  .band .rt{text-align:right;font-family:var(--mono);font-size:9px;letter-spacing:.08em;line-height:1.65;}
+  .band .rt i{font-style:normal;display:block;font-size:13px;letter-spacing:.02em;margin-bottom:2px;}
+  .band-art{background:var(--art);color:#F5F5F0;border-bottom:1px solid rgba(245,245,240,.18);}
+  .band-ui{background:var(--accent);color:#101110;}
+  .lift{
+    display:flex;align-items:center;gap:8px;padding:6px 12px;
+    background:var(--l1);border-top:1px solid var(--line1);
+    font-family:var(--mono);font-size:8.5px;letter-spacing:.10em;color:var(--label2);
+  }
+  .lift s{flex:1;height:1px;background:linear-gradient(to right,var(--art),var(--accent));text-decoration:none;}
+  .plate-specs{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    padding:8px 12px 10px;background:var(--l2);
+    font-family:var(--mono);font-size:9px;letter-spacing:.10em;color:var(--label2);
+    border-top:1px solid var(--line1);
+  }
+  .plate-specs b{display:block;font-size:12px;letter-spacing:.02em;margin-top:3px;font-weight:700;color:var(--label1);}
+
+  /* ================= section heads ================= */
+  .sec-head{
+    display:flex;align-items:baseline;gap:12px;
+    margin:16px 0 9px;font-family:var(--mono);font-size:10px;letter-spacing:.20em;color:var(--label2);
+  }
+  .sec-head b{color:var(--label1);font-weight:400;letter-spacing:.22em;}
+  .sec-head s{flex:1;height:1px;background:var(--line1);text-decoration:none;transform:translateY(-3px);}
+  .sec-head em{font-style:normal;color:var(--accent);}
+
+  /* ================= signals ================= */
+  .signals{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+  .sw{background:var(--l1);border:1px solid var(--line1);}
+  .sw-fill{height:86px;position:relative;border-bottom:1px solid rgba(0,0,0,.5);}
+  .sw-fill::after{
+    content:"";position:absolute;inset:0;
+    background-image:linear-gradient(135deg, rgba(255,255,255,.10) 0 1px, transparent 1px 9px);
+    opacity:.5;
+  }
+  .sw-fill .chip{
+    position:absolute;left:12px;bottom:10px;font-family:var(--mono);font-size:9px;
+    letter-spacing:.12em;padding:2px 5px;
+  }
+  .sw-meta{padding:9px 12px 10px;}
+  .sw-role{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--label2);}
+  .sw-name{display:flex;align-items:baseline;justify-content:space-between;margin-top:4px;}
+  .sw-name b{font-family:var(--cjk);font-size:15px;letter-spacing:.02em;font-weight:700;}
+  .sw-name span{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;}
+  .sw-note{margin-top:5px;font-family:var(--cjk);font-size:10.5px;color:#A39C96;line-height:1.5;}
+  .ratio{
+    margin-top:7px;padding-top:6px;border-top:1px solid var(--line1);
+    font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:#A39C96;
+    display:flex;justify-content:space-between;
+  }
+  .ratio b{color:var(--label1);font-weight:700;}
+  .ratio.fail b{color:var(--accent);}
+
+  /* ================= neutrals ================= */
+  .neutrals{display:grid;grid-template-columns:repeat(8,1fr);gap:0;border:1px solid var(--line1);}
+  .n-bar{height:46px;position:relative;}
+  .n-bar span{
+    position:absolute;left:8px;bottom:5px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;
+  }
+  .n-meta{padding:6px 8px 7px;border-top:1px solid var(--line1);}
+  .n-meta b{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--label1);font-weight:400;}
+  .n-meta i{display:block;font-style:normal;font-family:var(--cjk);font-size:9.5px;color:#A39C96;margin-top:2px;}
+
+  /* ================= application ================= */
+  .apply{display:grid;grid-template-columns:1fr 348px 336px;gap:22px;align-items:start;}
+
+  .app{border:1px solid var(--line2);background:var(--base);}
+  .app-bar{
+    display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;
+    background:var(--l1);border-bottom:1px solid var(--line1);
+  }
+  .app-bar .sq{width:10px;height:10px;background:var(--accent);}
+  .app-bar b{font-size:10px;letter-spacing:.22em;font-weight:600;}
+  .app-bar i{font-style:normal;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--label2);}
+  .app-bar .sp{flex:1;}
+  .app-bar .dots{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.1em;}
+  .app-body{display:grid;grid-template-columns:196px 1fr;min-height:214px;}
+  .side{border-right:1px solid var(--line1);padding:9px 0;background:rgba(24,26,24,.45);}
+  .side-t{font-family:var(--mono);font-size:8px;letter-spacing:.20em;color:var(--muted);padding:0 12px 7px;}
+  .side-row{
+    display:flex;align-items:center;gap:8px;height:28px;padding:0 12px 0 10px;
+    font-family:var(--cjk);font-size:11.5px;color:#B9B2AC;border-left:3px solid transparent;
+  }
+  .side-row s{width:5px;height:5px;background:var(--line2);text-decoration:none;flex:0 0 auto;}
+  .side-row.on{background:rgba(125,111,255,.14);border-left-color:var(--accent);color:var(--label1);}
+  .side-row.on s{background:var(--accent);}
+  .side-row.on em{margin-left:auto;font-family:var(--mono);font-style:normal;font-size:8.5px;letter-spacing:.1em;color:var(--accent);}
+  .main{padding:11px 14px;position:relative;}
+  .msg-u{
+    margin-left:auto;max-width:78%;width:fit-content;
+    background:var(--l2);border:1px solid var(--line1);padding:6px 10px;
+    font-family:var(--cjk);font-size:11.5px;color:#E4DED7;
+  }
+  .msg-a{margin-top:11px;border-left:2px solid var(--accent);padding-left:10px;}
+  .msg-a h5{
+    font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--label2);
+    font-weight:400;margin-bottom:4px;
+  }
+  .msg-a p{font-family:var(--cjk);font-size:11.5px;line-height:1.8;color:#C9C2BB;}
+  .msg-a p b{color:var(--label1);}
+  .btns{display:flex;gap:8px;margin-top:10px;}
+  .btn{
+    font-family:var(--cjk);font-size:11px;padding:5px 14px;border:1px solid var(--line2);
+    color:var(--label1);background:transparent;
+  }
+  .btn-solid{background:var(--accent);border-color:var(--accent);color:#101110;font-weight:700;position:relative;}
+  .btn-solid::after{content:"";position:absolute;inset:-4px;border:1px solid var(--accent);opacity:.55;}
+  .btn-ghost{color:#B9B2AC;}
+  .status{
+    position:absolute;right:14px;bottom:9px;display:flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:8.5px;letter-spacing:.10em;color:var(--muted);
+  }
+  .status i{width:5px;height:5px;border-radius:50%;background:var(--accent);display:block;}
+
+  .papercard{background:var(--paper);color:#101110;padding:13px;border:1px solid #cfc9be;}
+  .papercard .pc-top{
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:#6A6460;
+    padding-bottom:7px;border-bottom:1px solid #CFC8BC;
+  }
+  .papercard .pc-top b{color:#101110;font-weight:700;letter-spacing:.18em;}
+  .papercard h6{font-family:var(--cjk);font-size:13px;margin-top:9px;font-weight:700;letter-spacing:.01em;}
+  .papercard .pc-p{font-family:var(--cjk);font-size:10.5px;line-height:1.7;color:#5C5650;margin-top:5px;}
+  .pc-chip{
+    margin-top:9px;display:inline-block;background:var(--accent-onpaper);color:var(--paper);
+    font-family:var(--cjk);font-size:10.5px;font-weight:700;padding:5px 10px;
+  }
+  .pc-row{display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px;}
+  .pc-row span{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;color:#6A6460;}
+  .pc-row b{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;color:#101110;}
+  .pc-fail{
+    margin-top:8px;padding-top:7px;border-top:1px solid #CFC8BC;
+    display:flex;align-items:center;justify-content:space-between;
+    font-family:var(--mono);font-size:9px;letter-spacing:.04em;color:#2831CC;
+  }
+  .pc-fail s{text-decoration:line-through;}
+
+  .rules{border-left:1px solid var(--line1);padding-left:16px;}
+  .rule{display:grid;grid-template-columns:26px 1fr;gap:9px;padding:8px 0;border-bottom:1px solid rgba(52,54,51,.7);}
+  .rule:first-child{padding-top:0;}
+  .rule:last-child{border-bottom:0;}
+  .rule em{font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--accent);}
+  .rule b{display:block;font-family:var(--cjk);font-size:11.5px;font-weight:700;letter-spacing:.01em;}
+  .rule p{font-family:var(--cjk);font-size:10px;line-height:1.62;color:#A39C96;margin-top:2px;}
+
+  /* ================= wash ================= */
+  .wash{display:grid;grid-template-columns:repeat(8,1fr);border:1px solid var(--line1);}
+  .w{height:56px;position:relative;border-right:1px solid rgba(16,17,16,.6);}
+  .w:last-child{border-right:0;}
+  .w b{position:absolute;left:9px;top:7px;font-family:var(--mono);font-size:10px;letter-spacing:.04em;font-weight:700;}
+  .w i{position:absolute;left:9px;bottom:7px;font-style:normal;font-family:var(--cjk);font-size:9.5px;opacity:.82;}
+
+  /* ================= footer ================= */
+  footer{
+    margin-top:auto;padding-top:11px;border-top:1px solid var(--line1);
+    display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+    font-family:var(--mono);font-size:9px;letter-spacing:.10em;color:#898D89;
+  }
+  footer .fleft b{color:var(--label1);font-weight:400;}
+  .barcode{display:flex;align-items:flex-end;gap:2px;height:20px;}
+  .barcode i{display:block;background:rgba(243,239,233,.55);height:100%;}
+  .barcode i:nth-child(3n){height:60%;}
+  .barcode i:nth-child(4n){height:80%;}
+  .barcode i:nth-child(5n){height:45%;}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="frame"></div>
+  <div class="rail rail-l"><span>DSH · THEME PALETTE REFERENCE · NO RADIUS</span></div>
+  <div class="rail rail-r"><span>MEASURED · WCAG 2.1 RELATIVE LUMINANCE · 05</span></div>
+
+  <header>
+    <div class="brand">
+      <span class="mark"></span>
+      <b>ARKNIGHTS: ENDFIELD / DSH THEME</b>
+      <i>PALETTE SPECIMEN — SERIES 05</i>
+    </div>
+    <div class="head-right">
+      <span>ART <em>#0A06D0</em></span>
+      <span>UI <em>#7D6FFF</em></span>
+      <span class="hd-box">2026.11.21</span>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div>
+      <div class="eyebrow"><s></s><b>危机合约 / 浸蓝测试作战</b> 取色 · 深水配色</div>
+      <div class="lockup">
+        <h1>浸<span>蓝</span><u></u></h1>
+        <div class="ghost">SUBMERGE</div>
+      </div>
+      <div class="latin">PALETTE 05 <s></s><i>TOKEN PREFIX · --edge-* · KEY=ABYSS</i></div>
+      <p class="lede">
+        这张 KV 的蓝是铺满整幅的：字大到成为背景，<b>#0A06D0</b> 压在近黑底上只有 1.76:1——它天生是底，不是芯片。
+        做进界面时沿同一支色相抬起，到 <b>#7D6FFF</b> 才点得中。选中、焦点、主操作归它，
+        其余交给黑、灰与骨白；<mark>纸面模式下它反而更深</mark>。
+      </p>
+    </div>
+
+    <div class="plate">
+      <div class="plate-top"><span>SIGNAL PLATE — 01</span><b>LIFT, NOT REPAINT</b></div>
+      <div class="band band-art">
+        <div><em>KEY ART / KV 铺底</em><strong>#0A06D0</strong></div>
+        <div class="rt"><i>1.76:1 ✕</i>对 #101110<br>不可分</div>
+      </div>
+      <div class="band band-ui">
+        <div><em>UI ACCENT / 提亮档</em><strong>#7D6FFF</strong></div>
+        <div class="rt"><i>5.04:1 ✓</i>墨字可读<br>L* 26 → 55</div>
+      </div>
+      <div class="lift"><span>LIFT</span><s></s><span>+29 L*</span></div>
+      <div class="plate-specs">
+        <div>RGB<b>125 111 255</b></div>
+        <div>HUE<b>246°</b></div>
+        <div>LUM<b>22.9%</b></div>
+        <div>INK ON<b>5.04:1</b></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="sec-head"><em>01</em><b>主信号 SIGNAL</b><s></s><span>同一支色相，四个亮度：原画蓝做底，提亮档做芯片，纸面回到原画那支</span></div>
+  <section class="signals">
+    <div class="sw">
+      <div class="sw-fill" style="background:#7D6FFF">
+        <span class="chip" style="background:#101110;color:#7D6FFF">FILL / ICON</span>
+      </div>
+      <div class="sw-meta">
+        <span class="sw-role">--edge-accent</span>
+        <div class="sw-name"><b>浸蓝</b><span>#7D6FFF</span></div>
+        <div class="sw-note">实心底、图标、焦点环、光标。从原画蓝抬起 29 个 L*。</div>
+        <div class="ratio"><span>on #101110</span><b>5.04:1</b></div>
+      </div>
+    </div>
+
+    <div class="sw">
+      <div class="sw-fill" style="background:#8E82FF">
+        <span class="chip" style="background:#F5F5F0;color:#101110">HOVER</span>
+      </div>
+      <div class="sw-meta">
+        <span class="sw-role">--edge-accent-deep</span>
+        <div class="sw-name"><b>点燃一档</b><span>#8E82FF</span></div>
+        <div class="sw-note">悬停 / 按下。下压档只有 3.99:1，所以往上走。</div>
+        <div class="ratio"><span>ink #101110</span><b>6.12:1</b></div>
+      </div>
+    </div>
+
+    <div class="sw">
+      <div class="sw-fill" style="background:#2831CC">
+        <span class="chip" style="background:#E8E8E2;color:#2831CC">ON PAPER</span>
+      </div>
+      <div class="sw-meta">
+        <span class="sw-role">--edge-accent-onpaper</span>
+        <div class="sw-name"><b>纸上蓝</b><span>#2831CC</span></div>
+        <div class="sw-note">亮色模式的字色与填充。原画蓝提一档，不是第二支蓝。</div>
+        <div class="ratio"><span>on #E8E8E2</span><b>7.11:1</b></div>
+      </div>
+    </div>
+
+    <div class="sw">
+      <div class="sw-fill" style="background:#C6BFFF">
+        <span class="chip" style="background:#101110;color:#C6BFFF">SHIMMER</span>
+      </div>
+      <div class="sw-meta">
+        <span class="sw-role">--edge-status-dark-mid</span>
+        <div class="sw-name"><b>亮带</b><span>#C6BFFF</span></div>
+        <div class="sw-note">暗色回合状态的流光中段，比主色再亮一档。</div>
+        <div class="ratio"><span>on #101110</span><b>10.25:1</b></div>
+      </div>
+    </div>
+
+    <div class="sw">
+      <div class="sw-fill" style="background:#0A06D0">
+        <span class="chip" style="background:#F5F5F0;color:#0A06D0">ART ONLY</span>
+      </div>
+      <div class="sw-meta">
+        <span class="sw-role">--art (不导出为令牌)</span>
+        <div class="sw-name"><b>原画蓝</b><span>#0A06D0</span></div>
+        <div class="sw-note">KV 的铺底蓝。只做氛围与大字，永不做芯片。</div>
+        <div class="ratio fail"><span>vs #101110</span><b>1.76:1 ✕</b></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="sec-head"><em>02</em><b>中性 NEUTRAL</b><s></s><span>四套配色共用同一组纸墨：配色只换信号，不换底</span></div>
+  <section class="neutrals">
+    <div class="n"><div class="n-bar" style="background:#101110;border-bottom:1px solid #343633"><span style="color:#A8A29C">#101110</span></div><div class="n-meta"><b>BG / BASE</b><i>焦黑纸底</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#181A18"><span style="color:#A8A29C">#181A18</span></div><div class="n-meta"><b>LAYER-1</b><i>面板 / 气泡</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#1E201D"><span style="color:#A8A29C">#1E201D</span></div><div class="n-meta"><b>LAYER-2</b><i>沉底块</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#343633"><span style="color:#898D89">#343633</span></div><div class="n-meta"><b>LINE-1</b><i>细线 / 分隔</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#4A4D49"><span style="color:#C9C2BB">#4A4D49</span></div><div class="n-meta"><b>LINE-2</b><i>重线 / 边框</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#898D89"><span style="color:#181A18">#898D89</span></div><div class="n-meta"><b>LABEL-2</b><i>次要文字</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#F5F5F0"><span style="color:#4A4D49">#F5F5F0</span></div><div class="n-meta"><b>LABEL-1</b><i>骨白正文</i></div></div>
+    <div class="n"><div class="n-bar" style="background:#E8E8E2"><span style="color:#4A4D49">#E8E8E2</span></div><div class="n-meta"><b>PAPER-LIGHT</b><i>亮色纸底</i></div></div>
+  </section>
+
+  <div class="sec-head"><em>03</em><b>落地 APPLICATION</b><s></s><span>蓝只出现在被选中的那一处，其余仍是黑白</span></div>
+  <section class="apply">
+    <div class="app">
+      <div class="app-bar">
+        <span class="sq"></span><b>END FIELD</b><i>TALOS-II / SECTOR 05</i>
+        <span class="sp"></span><span class="dots">— □ ×</span>
+      </div>
+      <div class="app-body">
+        <div class="side">
+          <div class="side-t">SESSIONS</div>
+          <div class="side-row"><s></s>排期与配额</div>
+          <div class="side-row on"><s></s>浸蓝配色<em>05</em></div>
+          <div class="side-row"><s></s>字体与网格</div>
+          <div class="side-row"><s></s>动效规范</div>
+          <div class="side-row"><s></s>验收清单</div>
+        </div>
+        <div class="main">
+          <div class="msg-u">把信号色换成浸蓝这一套。</div>
+          <div class="msg-a">
+            <h5>ASSISTANT · 02:41:19 · TNUM</h5>
+            <p>已切换。蓝只压在三个位置：<b>选中行、焦点环、主按钮</b>。<br>纸面模式下回到原画蓝 #2831CC。</p>
+            <div class="btns">
+              <button class="btn btn-solid">确认执行</button>
+              <button class="btn btn-ghost">回滚</button>
+            </div>
+          </div>
+          <div class="status"><i></i>STREAMING · 128 t/s · 99.2%</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="papercard">
+      <div class="pc-top"><b>LIGHT / 纸面</b><span>#E8E8E2</span></div>
+      <h6>纸面反而更深</h6>
+      <p class="pc-p">提亮档在纸上只有 3.05:1，只能做填充；当字必须落回原画蓝提亮后的 #2831CC。</p>
+      <div class="pc-chip">纸上蓝 #2831CC</div>
+      <div class="pc-row"><span>ink #101110</span><b>15.38:1</b></div>
+      <div class="pc-fail"><s>#7D6FFF as text</s><span>3.05:1 ✕</span></div>
+    </div>
+
+    <div class="rules">
+      <div class="rule">
+        <em>01</em>
+        <div><b>蓝要提亮才当芯片</b><p>原画蓝 1.76:1：铺满整幅成立，落在 28px 的芯片上就消失。</p></div>
+      </div>
+      <div class="rule">
+        <em>02</em>
+        <div><b>悬停是点燃</b><p>下压档 3.99:1——和重燃赤被否掉的那一档是同一个数，低亮度色相都没有向下余量。</p></div>
+      </div>
+      <div class="rule">
+        <em>03</em>
+        <div><b>纸上回到原画蓝</b><p>不是发明第二支蓝，是把原画那支提亮到能写字：7.11:1。</p></div>
+      </div>
+      <div class="rule">
+        <em>04</em>
+        <div><b>光晕不动</b><p>唯一一套沿用原品牌蓝 alpha（0.08 / 0.10）的配色：它本来就是这支色相。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="sec-head"><em>04</em><b>浓度 WASH</b><s></s><span>同一支蓝，八档透明度；只在黑底上叠加，不叠在纸上</span></div>
+  <section class="wash">
+    <div class="w" style="background:rgba(125,111,255,.04)"><b style="color:#898D89">04%</b><i style="color:#898D89">背景渗透</i></div>
+    <div class="w" style="background:rgba(125,111,255,.08)"><b style="color:#C9C2BB">08%</b><i style="color:#C9C2BB">卡片底</i></div>
+    <div class="w" style="background:rgba(125,111,255,.12)"><b style="color:#E4DED7">12%</b><i style="color:#E4DED7">选中行</i></div>
+    <div class="w" style="background:rgba(125,111,255,.20)"><b style="color:#F5F5F0">20%</b><i style="color:#F5F5F0">描边 / 焦点晕</i></div>
+    <div class="w" style="background:rgba(125,111,255,.32)"><b style="color:#F5F5F0">32%</b><i style="color:#F5F5F0">图表填充</i></div>
+    <div class="w" style="background:rgba(125,111,255,.48)"><b style="color:#F5F5F0">48%</b><i style="color:#F5F5F0">禁用底</i></div>
+    <div class="w" style="background:rgba(125,111,255,.72)"><b style="color:#F5F5F0">72%</b><i style="color:#F5F5F0">浮层压色</i></div>
+    <div class="w" style="background:#7D6FFF"><b style="color:#101110">100%</b><i style="color:#101110">主操作 / 实心</i></div>
+  </section>
+
+  <footer>
+    <div class="fleft"><b>MEASURED, NOT CHOSEN.</b> 对比度按 WCAG 2.1 相对亮度实算，未取整；原画蓝作芯片与提亮档作字的两个用法已标红划除。</div>
+    <div class="barcode">
+      <i style="width:2px"></i><i style="width:1px"></i><i style="width:4px"></i><i style="width:1px"></i>
+      <i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:2px"></i>
+      <i style="width:1px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:2px"></i>
+      <i style="width:1px"></i><i style="width:3px"></i><i style="width:2px"></i><i style="width:1px"></i>
+    </div>
+    <div>DSH-THEME-ENDFIELD / PALETTE DRAFT 05 / 浸蓝</div>
+  </footer>
+</div>
+</body>
+</html>

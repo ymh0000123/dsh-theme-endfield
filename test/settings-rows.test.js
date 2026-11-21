@@ -241,21 +241,33 @@ for (const label of ['主题配色', '等高线背景', '动态等高线']) {
   else fail('row missing: ' + label)
 }
 
-/* --- the palette row: default 谷地黄, and switching writes the field --- */
+/* --- the palette row: ONE dropdown listing every palette, default 谷地黄 ---
+   A <select>, not a cycle button: with four palettes the row has to show the
+   choices at once and mark the live one, instead of naming "what is next". The
+   assertions below read the real option list off the tree, so a palette that
+   exists in the runtime but not in the dropdown (or the reverse) fails here. */
 if (all.includes('谷地黄')) pass('默认配色显示为谷地黄')
 else fail('palette row does not show 谷地黄 as the default')
 
-const paletteBtn = buttons.find((b) => /切换武陵青|切换谷地黄/.test(textOf(b)))
-if (!paletteBtn) fail('no palette switch button rendered')
+const paletteSelect = nodes.find((n) => n.type === 'select' && n.props['aria-label'] === '主题配色')
+if (!paletteSelect) fail('no palette <select> rendered')
 else {
-  // Rendered from the default palette, so the button must OFFER 武陵青.
-  if (/切换武陵青/.test(textOf(paletteBtn))) pass('默认状态下按钮提供「切换武陵青」')
-  else fail('palette button should offer 武陵青 while the default is active, got: ' + textOf(paletteBtn))
-  prefStore.setField('palette', 'valley')
-  try { paletteBtn.props.onClick() } catch (e) { fail('palette toggle threw: ' + e.message) }
-  if (prefStore.get('palette') === 'wuling') pass('点击写入 dsh-theme-endfield.palette=wuling')
-  else fail('palette toggle wrote ' + JSON.stringify(prefStore.get('palette')) + ', expected "wuling"')
+  const opts = (paletteSelect.children || []).filter((c) => c && c.type === 'option')
+  const values = opts.map((o) => o.props.value)
+  const labels = opts.map((o) => textOf(o))
+  if (values.join(',') === 'valley,wuling,ember,abyss') pass('下拉按 PALETTES 顺序列出四套配色')
+  else fail('palette options out of order: ' + JSON.stringify(values))
+  for (const name of ['谷地黄', '武陵青', '重燃赤', '浸蓝']) {
+    if (labels.includes(name)) pass('下拉项存在：' + name)
+    else fail('palette option missing: ' + name)
+  }
+  if (paletteSelect.props.value === 'valley') pass('下拉默认选中 valley')
+  else fail('palette select should start on valley, got ' + JSON.stringify(paletteSelect.props.value))
 }
+/* The CHANGE is deliberately not fired here: it writes a session-local overlay
+   that outranks a served section until the Host echoes back, which would mask the
+   setField()-driven assertions below. The write itself is asserted after the
+   stored-value walk. */
 
 /* --- the two sub-switches must be DISABLED while the layer itself is off --- */
 const findBtn = (re) => buttons.find((b) => re.test(textOf(b)))
@@ -421,17 +433,63 @@ else fail('with the animation on the row should offer 关闭动画')
 prefStore.setField('thunderAnim', '0')
 prefStore.setField('thunder', '0')
 
-/* --- with 武陵青 stored, the row must render the reverse affordance --- */
+/* --- four palettes, one dropdown: the row follows the STORED value ---
+   ORDER MATTERS. A UI change writes a session-local overlay that intentionally
+   wins over a served section until the Host echoes it back (see prefsGetValue),
+   so every state-driven assertion below runs BEFORE the first change — otherwise
+   setField() would be masked by the local edit and the test would read the
+   change's value back to itself. */
+const paletteSelectOf = (tree) => walk(tree).find((el) => el.type === 'select' && el.props['aria-label'] === '主题配色')
+
 prefStore.setField('palette', 'wuling')
 let tree3
 try { tree3 = rendered() } catch (e) { fail('re-render (wuling) threw: ' + e.message); process.exit(1) }
 const text3 = textOf(tree3)
-if (text3.includes('武陵青') && /切换谷地黄/.test(text3)) pass('武陵青 生效时按钮提供「切换谷地黄」')
-else fail('with wuling stored the palette row should offer 切换谷地黄')
+if (text3.includes('武陵青') && paletteSelectOf(tree3).props.value === 'wuling') pass('存了 wuling 时下拉选中武陵青')
+else fail('with wuling stored the palette select should hold wuling, got '
+  + JSON.stringify(paletteSelectOf(tree3).props.value))
 // The accent must be surfaced to the user, in hex.
 if (text3.includes('#14d0d0')) pass('设置行标注 #14d0d0')
 else fail('the palette row should state #14d0d0')
-prefStore.setField('palette', 'valley')
+
+prefStore.setField('palette', 'ember')
+let tree3b
+try { tree3b = rendered() } catch (e) { fail('re-render (ember) threw: ' + e.message); process.exit(1) }
+const text3b = textOf(tree3b)
+if (text3b.includes('重燃赤') && paletteSelectOf(tree3b).props.value === 'ember') pass('存了 ember 时下拉选中重燃赤')
+else fail('with ember stored the palette select should hold ember')
+if (text3b.includes('#FF3B2E')) pass('设置行标注 #FF3B2E')
+else fail('the palette row should state #FF3B2E')
+
+prefStore.setField('palette', 'abyss')
+let tree3c
+try { tree3c = rendered() } catch (e) { fail('re-render (abyss) threw: ' + e.message); process.exit(1) }
+const text3c = textOf(tree3c)
+if (text3c.includes('浸蓝') && paletteSelectOf(tree3c).props.value === 'abyss') pass('存了 abyss 时下拉选中浸蓝')
+else fail('with abyss stored the palette select should hold abyss')
+if (text3c.includes('#7D6FFF')) pass('设置行标注 #7D6FFF')
+else fail('the palette row should state #7D6FFF')
+
+/* Picking an option persists THAT literal — no next/previous arithmetic, so a
+   direct jump across the list (abyss -> valley) must work in one gesture. */
+const abyssSelect = paletteSelectOf(tree3c)
+if (!abyssSelect) fail('no palette select in the 浸蓝 tree')
+else {
+  try { abyssSelect.props.onChange({ target: { value: 'valley' } }) }
+  catch (e) { fail('abyss -> valley change threw: ' + e.message) }
+  if (prefStore.get('palette') === 'valley') pass('下拉选 valley 直接写入（不再逐格循环）')
+  else fail('palette select wrote ' + JSON.stringify(prefStore.get('palette')) + ', expected "valley"')
+  const text3d = textOf(rendered())
+  if (text3d.includes('#fff500')) pass('切换后行内提示跟着换成谷地黄的 #fff500')
+  else fail('after the change the hint should state #fff500 (the hint follows the selected palette)')
+  /* A hand-crafted event must not be able to persist a palette that has no
+     stylesheet. PALETTES is the allow-list; anything else leaves the store be. */
+  const afterSelect = paletteSelectOf(rendered())
+  try { afterSelect.props.onChange({ target: { value: 'chartreuse' } }) }
+  catch (e) { fail('unknown-palette change threw: ' + e.message) }
+  if (prefStore.get('palette') === 'valley') pass('未知配色被拒绝，不写入存储')
+  else fail('an unknown palette reached the store: ' + JSON.stringify(prefStore.get('palette')))
+}
 
 /* --- clicking a switch must write the documented namespace field --- */
 const contourBtn = buttons2.find((b) => /关闭背景|开启背景/.test(textOf(b)))

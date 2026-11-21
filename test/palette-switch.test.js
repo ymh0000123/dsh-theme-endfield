@@ -196,15 +196,85 @@ setTimeout(()=>{
   R('等高线画布已按新配色重绘', changed, 'yellow='+JSON.stringify(yellowCanvas)+' cyan='+JSON.stringify(cyanCanvas))
   R('等高线新配色偏青（B 通道高于 R）', cyanCanvas && cyanCanvas.b>cyanCanvas.r, JSON.stringify(cyanCanvas))
 
-  /* ---- 6. switching the theme off must drop the class ---- */
-  __prefs.setField('enabled','0')
-  if(window.__dispose__) {} // dispose is the run teardown, not the theme switch
-  // Reuse the theme's own unmount path through the settings toggle contract:
-  // flipping ENABLED_KEY and calling the sync is what the row does.
+  /* ---- 5b. FLIP to 重燃赤: the third palette must repaint by the same rules ----
+     Same mechanism, one more step of the cycle. The two things a binary switch
+     used to get wrong are asserted here: the class flip must reach every token
+     (not only the ones that happen to name wuling), and the canvas must be
+     repainted with the RED stroke rather than falling through to the yellow
+     default — which is exactly what a ternary on the wuling class would have done. */
   document.body.classList.remove('theme-endfield-wuling')
-  R('关闭主题后不残留 wuling class', !document.body.classList.contains('theme-endfield-wuling'))
+  document.body.classList.add('theme-endfield-ember')
+  setTimeout(()=>{
+    const emberAccent=v('--edge-accent').toLowerCase()
+    R('强调色变为 #ff3b2e', emberAccent==='#ff3b2e', emberAccent)
+    R('rgb 通道列表切到 255,59,46', v('--edge-accent-rgb').replace(/\\s/g,'')==='255,59,46', v('--edge-accent-rgb'))
+    const emberStatus=getComputedStyle(document.getElementById('status')).color
+    R('回合状态文字换到重燃赤亮色档 rgb(176,31,20)',
+      /176,\\s*31,\\s*20|#b01f14/i.test(emberStatus), emberStatus)
+    const redCanvas=canvasHash()
+    R('等高线画布已按重燃赤重绘（R 主导）',
+      !!redCanvas && redCanvas.n>0 && redCanvas.r>redCanvas.b+8, JSON.stringify(redCanvas))
 
-  document.title=JSON.stringify(window.__RESULTS__)
+    /* The approval band's two chips, measured in this palette. The app paints 拒绝
+       with its error red (seeded here the way the app does: inline on body), which
+       is #ff3b30 against this palette's #ff3b2e accent — one red rendered twice.
+       The scoped rule has to win, or 确认 and 拒绝 become indistinguishable. */
+    document.body.style.setProperty('--dsw-alias-state-error-primary','#ff3b30')
+    const yes=document.createElement('button'); yes.setAttribute('data-cordis-approve','')
+    const no=document.createElement('button'); no.setAttribute('data-cordis-decline','')
+    document.body.appendChild(yes); document.body.appendChild(no)
+    const bgOf=(el)=>getComputedStyle(el).backgroundColor
+    R('重燃赤：确认与拒绝不同色', bgOf(yes)!==bgOf(no), 'yes='+bgOf(yes)+' no='+bgOf(no))
+    R('重燃赤：拒绝落在沉血档而不是信号红', /124,\\s*20,\\s*20|#7c1414/i.test(bgOf(no)), bgOf(no))
+    R('重燃赤：确认仍是主信号', /255,\\s*59,\\s*46|#ff3b2e/i.test(bgOf(yes)), bgOf(yes))
+
+    /* ---- 5c. FLIP to 浸蓝: the fourth palette, and the first DARK accent ----
+       Every earlier palette is lighter than the ink it carries text against, so
+       the accent always reads as a fill on cream. Indigo is the first one that is
+       near the ink's own value in DARK mode (22.9% vs 0.5%), which is where a
+       "the chip is there but not seen" bug would show up — so the assertions go
+       at the accent, its channel list, the paper step and the canvas together. */
+    document.body.classList.remove('theme-endfield-ember')
+    document.body.classList.add('theme-endfield-abyss')
+    setTimeout(()=>{
+      const abyssAccent=v('--edge-accent').toLowerCase()
+      R('强调色变为 #7d6fff', abyssAccent==='#7d6fff', abyssAccent)
+      R('rgb 通道列表切到 125,111,255', v('--edge-accent-rgb').replace(/\\s/g,'')==='125,111,255', v('--edge-accent-rgb'))
+      const abyssStatus=getComputedStyle(document.getElementById('status')).color
+      R('回合状态文字换到浸蓝亮色档 rgb(40,49,204)',
+        /40,\\s*49,\\s*204|#2831cc/i.test(abyssStatus), abyssStatus)
+      const indigoCanvas=canvasHash()
+      R('等高线画布已按浸蓝重绘（B 主导且明显偏靛）',
+        !!indigoCanvas && indigoCanvas.n>0 && indigoCanvas.b>indigoCanvas.r+20 && indigoCanvas.b>indigoCanvas.g+20,
+        JSON.stringify(indigoCanvas))
+
+      /* The ember-only danger override must NOT leak: this palette's 确认 is
+         indigo, so the app's own error red is already distinct and 拒绝 must go
+         back to it. A rule scoped to the wrong class would show up right here. */
+      const abyssYes=document.createElement('button'); abyssYes.setAttribute('data-cordis-approve','')
+      const abyssNo=document.createElement('button'); abyssNo.setAttribute('data-cordis-decline','')
+      document.body.appendChild(abyssYes); document.body.appendChild(abyssNo)
+      const bgOfAbyss=(el)=>getComputedStyle(el).backgroundColor
+      R('浸蓝：确认落到靛蓝而不是红', /125,\\s*111,\\s*255|#7d6fff/i.test(bgOfAbyss(abyssYes)), bgOfAbyss(abyssYes))
+      R('浸蓝：拒绝回到应用错误红（重燃赤的沉血规则不外溢）',
+        /255,\\s*59,\\s*48|#ff3b30/i.test(bgOfAbyss(abyssNo)), bgOfAbyss(abyssNo))
+      R('浸蓝：确认与拒绝不同色', bgOfAbyss(abyssYes)!==bgOfAbyss(abyssNo),
+        'yes='+bgOfAbyss(abyssYes)+' no='+bgOfAbyss(abyssNo))
+
+      /* ---- 6. switching the theme off must drop EVERY palette class ---- */
+      __prefs.setField('enabled','0')
+      if(window.__dispose__) {} // dispose is the run teardown, not the theme switch
+      // Reuse the theme's own unmount path through the settings toggle contract:
+      // flipping ENABLED_KEY and calling the sync is what the row does.
+      document.body.classList.remove('theme-endfield-ember')
+      document.body.classList.remove('theme-endfield-abyss')
+      R('关闭主题后不残留 ember class', !document.body.classList.contains('theme-endfield-ember'))
+      R('关闭主题后不残留 abyss class', !document.body.classList.contains('theme-endfield-abyss'))
+      R('关闭主题后不残留 wuling class', !document.body.classList.contains('theme-endfield-wuling'))
+
+      document.title=JSON.stringify(window.__RESULTS__)
+    },120)
+  },120)
 },120)
 </script></body></html>`)
 

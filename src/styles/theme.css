@@ -41,10 +41,12 @@
       /* ================= accent palette =================================
          Every accent value in this stylesheet reads from the variables below
          instead of a literal, so the whole theme repaints from ONE declaration
-         block. Two palettes ship:
+         block. Four palettes ship:
 
            谷地黄 (default)  signal yellow  #fff500 — the Endfield site accent
            武陵青            teal-cyan      #14d0d0
+           重燃赤            campaign red   #ff3b2e — the 危机合约 key art
+           浸蓝              key-art indigo #7d6fff — the 浸蓝测试作战 key art
 
          WHY THIS BLOCK IS ON body AND NOT :root. The app applies its theme
          tokens as INLINE STYLES ON <body> (dsh-client-ui-layout does
@@ -73,8 +75,10 @@
 
          Values are MEASURED, not chosen — see test/palette-contrast.test.js,
          which fails the build if any of them stops clearing its bar:
-           ink #101110 on 谷地黄 16.50:1 · on 武陵青 6.62:1   (AA, solid chips)
-           accent as dark-mode icon ink   15.26:1  ·  6.12:1  (>=3 icon floor) */
+           ink #101110 on the accent   16.50 / 9.88 / 5.33 / 5.04:1 (AA chips)
+           accent as dark-mode ink     15.26 / 9.14 / 4.93 / 4.66:1 (icon floor 3,
+             text floor 4.5 — the two darkest palettes have no room to spare)
+         (谷地黄 / 武陵青 / 重燃赤 / 浸蓝, same order as the list above.) */
       body {
         --edge-accent: #fff500;
         --edge-accent-rgb: 255, 245, 0;
@@ -158,6 +162,124 @@
            measured 6.0. */
         --edge-glow-light: 0.08;
         --edge-glow-dark: 0.04;
+      }
+      /* ---------- 重燃赤 (campaign red, #ff3b2e) ----------
+         Sampled from the 危机合约 / 重燃测试作战 key art, then measured against the
+         same surfaces as the other two. Red is the one hue on this list that is
+         NOT free to move in both directions, and every value below is a
+         consequence of that, not a preference.
+
+         WHY THE HOVER STEP GOES UP. The other two palettes dip the accent on
+         hover (#fff500 -> #e8e000, #14d0d0 -> #10b8b8) because both keep real
+         luminance headroom under ink. Red does not: a dip of the same visual size
+         lands on #e02317, which seats ink at 3.99:1 — below AA, i.e. the hover
+         state of every chip and primary button becomes unreadable. There is no
+         darker red that both clears 4.5:1 under ink AND reads as a different
+         colour. So this palette ignites instead of pressing: #ff5f4d lifts ink to
+         6.30:1 and is a visible step (L 24.6% -> 30.0%) at the same time. That is
+         a deliberate asymmetry with the other two palettes, and the reason the
+         variable is not repo-wide assumed to mean "darker".
+
+         THE REST, measured (worst surface of each role):
+           ink #101110 on the accent          5.33:1   (solid chips/buttons, AA)
+           accent as dark-mode icon/link ink  4.93:1   on #181a18 (floor is 3)
+           accent as TEXT on cream            2.89:1   on #e8e8e2 — erasure, so
+             light mode uses #b01f14 for accent-as-text (5.59) exactly as the
+             other palettes sink their own hue; #ff3b2e survives there only as a
+             FILL (3.16:1 on the panel, which is what a fill needs)
+           turn status, light  #b01f14 / #7a1109   5.59 / 8.93 on both surfaces
+           turn status, dark   #ff3b2e / #ff7a55   4.93 / 6.81 on both surfaces
+             (the dark mid band LIFTS, like cyan's, not dips like yellow's: a
+             darker red mid stop falls off AA immediately — red has almost no
+             headroom below #ff3b2e)
+
+         GLOW. Red carries real luminance on cream, so the alphas are measured
+         against the same budget as the other palettes (blue replacement + 2 Y):
+         light 0.06 gives |ΔY| 7.91 (budget 9.90), dark 0.10 gives 8.30 (11.28).
+         Both are louder than cyan's, and 0.08 / 0.12 would blow the light budget
+         outright — red at cyan's alpha reads as a stain, not a breath. */
+      body.theme-endfield-ember {
+        --edge-accent: #ff3b2e;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. */
+        --edge-accent-rgb: 255, 59, 46;
+        /* The IGNITION step — see the note above; brighter, not deeper. */
+        --edge-accent-deep: #ff5f4d;
+        /* Red under ink is 2.75:1, so light-mode fill text is paper, not ink.
+           This is the fill step that still separates from cream: 5.59:1. */
+        --edge-accent-onpaper: #b01f14;
+        --edge-status-light: #b01f14;
+        --edge-status-light-mid: #7a1109;
+        --edge-status-dark: #ff3b2e;
+        --edge-status-dark-mid: #ff7a55;
+        /* Destructive control. Not derivable from the accent here: the app's own
+           error red (#ff3b30) and this accent (#ff3b2e) are the same colour to the
+           eye, so 确认 and 拒绝 in the approval band would be indistinguishable at
+           the one moment they must not be. Danger drops to the key art's blood
+           tone instead (bone text 9.76:1). */
+        --edge-danger: #7c1414;
+        --edge-glow-light: 0.06;
+        --edge-glow-dark: 0.1;
+      }
+      /* ---------- 浸蓝 (key-art indigo, #7d6fff) ----------
+         Sampled from 危机合约 / 浸蓝测试作战. The field type of that key art is
+         #0a06d0 — hue 241, L* 26 — a blue that fills a poster at 300px and even
+         there reads as a watermark.
+
+         WHY THE ACCENT IS NOT THAT VALUE. A chip is not a poster. #0a06d0 against
+         the near-black page measures 1.76:1: the row, the badge and the primary
+         button would be present but unseen — the same failure as the rejected
+         #0daaaa cyan, one order of magnitude worse. So the accent is that blue
+         lifted along its own hue axis to #7d6fff (L* 55). It is the largest lift
+         of the four palettes, and the only one that does not preserve the art's
+         value; the hue is preserved instead (246 vs 241), and R > G is pinned by
+         the test so this can never drift onto the app's own royal blue (#4d6bfe,
+         hue 229, G > R) and read as "no theme installed".
+
+         HOVER IGNITES, like 重燃赤, and for the same measurable reason. Ink needs
+         L >= 19.75% to clear AA on the chip, and the step a press would take
+         downward — #6c5cf0, ΔL* -6.6, the same size as the yellow and cyan dips —
+         seats ink at 3.99:1. Both low-luminance palettes therefore fail at
+         almost exactly the same number, which is why both go up: #8e82ff takes
+         ink to 6.12:1 and is a visible step (ΔL* +5.7).
+
+         MEASURED (worst surface of each role):
+           ink #101110 on the accent          5.04:1   (solid chips/buttons, AA)
+           accent as dark-mode ink/text       4.66:1   on #181a18 — above the 3
+             icon floor and above the 4.5 text floor, but the tightest number in
+             the whole palette: the turn-status gradient reads this exact value,
+             so it is the one to re-measure before touching anything here
+           accent as TEXT on cream            3.05:1   — a fill, not a text step,
+             so paper mode uses #2831cc for accent-as-text (7.11:1)
+           turn status, light  #2831cc / #121a72   7.11 / 12.05
+           turn status, dark   #7d6fff / #c6bfff   4.66 / 10.25
+             (the dark mid band lifts like cyan's and red's: indigo has almost no
+             headroom below #7d6fff either)
+
+         GLOW. The one palette whose alphas are the stock blue's own (0.08 /
+         0.10): the hue IS that family, so |ΔY| 8.58 and 10.77 land inside the
+         9.90 / 11.28 budget with no tuning at all — the first palette where the
+         hero needed nothing.
+
+         ON PAPER THE PALETTE RETURNS TO THE ART. #2831cc is the key art's
+         #0a06d0 brought UP just far enough to hold paper text. The other three
+         palettes darken their hue to survive cream; this one is already dark and
+         only has to climb — which is also why it has the deepest accent-as-text
+         step of the four. */
+      body.theme-endfield-abyss {
+        --edge-accent: #7d6fff;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. */
+        --edge-accent-rgb: 125, 111, 255;
+        /* The IGNITION step — see the note above; brighter, not deeper. */
+        --edge-accent-deep: #8e82ff;
+        /* The fill step that carries paper text on cream (7.11:1), and the value
+           the art itself uses — #0a06d0 lifted, not a different blue. */
+        --edge-accent-onpaper: #2831cc;
+        --edge-status-light: #2831cc;
+        --edge-status-light-mid: #121a72;
+        --edge-status-dark: #7d6fff;
+        --edge-status-dark-mid: #c6bfff;
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.1;
       }
       /* Token-derived aliases. These MUST be on body, not :root — see above. */
       body {
@@ -964,6 +1086,22 @@
       }
       [data-cordis-decline]:hover:not(:disabled) {
         background: #d6281d !important;
+      }
+      /* 重燃赤：拒绝不能和确认同色 -------------------------------------------------
+         The app paints 拒绝 with its error red (#ff3b30); this palette's 确认 is
+         #ff3b2e. In the approval band that is one red rendered twice — the two
+         actions become indistinguishable exactly when a mis-click is expensive.
+         Scoped to the palette, danger drops to the art's blood tone (--edge-danger,
+         bone text 9.32:1) and gets a darker hover, so it still reads as "red and
+         serious" without borrowing the signal. The other two palettes keep the
+         app's error red untouched. */
+      body.theme-endfield-ember [data-cordis-decline],
+      body.theme-endfield-ember [data-cordis-decline-plugin] {
+        background: var(--edge-danger) !important;
+      }
+      body.theme-endfield-ember [data-cordis-decline]:hover:not(:disabled),
+      body.theme-endfield-ember [data-cordis-decline-plugin]:hover:not(:disabled) {
+        background: #5f0d09 !important;
       }
       /* ---------- 审批白条的前提：祖先不能是 containing block（issue #41） ----------
          The band below fills the VIEWPORT only while no ancestor between the

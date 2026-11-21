@@ -1077,27 +1077,47 @@
        1.332:1 against the yellow's 1.734:1 — a 23% drop, which reads as the
        feature having quietly weakened on switch. Each palette is therefore tuned
        to the same composited contrast rather than the same number, and
-       test/palette-contrast.test.js fails if the two drift more than 20% apart:
+       test/palette-contrast.test.js fails if any two drift more than 20% apart:
          谷地黄 dark  #fff50033  (0.20)  1.734:1
          谷地黄 light #beaf006b  (0.42)  1.291:1
          武陵青 dark  #14d0d045  (0.27)  1.755:1  (+1.2%)
          武陵青 light #14d0d07a  (0.48)  1.289:1  (-0.2%)
+         重燃赤 dark  #ff3b2e66  (0.40)  1.737:1  (+0.2%)
+         重燃赤 light #ff3b2e36  (0.21)  1.297:1  (+0.5%)
+         浸蓝   dark  #7d6fff61  (0.38)  1.706:1  (-1.6%)
+         浸蓝   light #2831cc26  (0.15)  1.282:1  (-0.7%)
        Both cyan alphas came DOWN from the first version (0.32 / 0.30 at the old
        darker accent): a brighter stroke composites stronger, so holding the same
        on-screen strength means less of it. Light-mode cyan still needs no darkened
-       variant the way yellow does, because it is not close to paper-white. The tags
-       below are what the test greps for, so renaming them breaks the check loudly
-       instead of silently. */
-    const contourStroke = () => {
-      const cyan = isWulingPalette()
-      if (isDarkScheme()) {
-        // EDGE_STROKE_DARK_CYAN: #14d0d045
-        // EDGE_STROKE_DARK_YELLOW: #fff50033
-        return cyan ? '#14d0d045' : '#fff50033'
-      }
-      // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
+       variant the way yellow does, because it is not close to paper-white. Red
+       needs the LOWEST alpha of the three in light mode and the HIGHEST in dark:
+       the same colour moves much further per unit of alpha against cream than
+       against near-black, so a single number would read as a stain on paper or as
+       nothing on black. Indigo repeats red's pattern even more sharply — it is the
+       dimmest accent of the four (L* 55), so its dark stroke needs the highest
+       alpha of any palette (0.38) to reach the same 1.7:1, while on cream the
+       DEEP step carries it at 0.15 instead (the pale accent at any alpha only got
+       to 1.20). The tags below are what the test greps for, so renaming them
+       breaks the check loudly instead of silently.
+
+       Kept as a lookup keyed by palette id rather than a ternary chain: with four
+       palettes a chain silently answers for a name it has never heard of, which is
+       exactly the bug this file already paid for once. */
+    const CONTOUR_STROKE = {
+      // EDGE_STROKE_DARK_YELLOW: #fff50033
+      // EDGE_STROKE_DARK_CYAN: #14d0d045
+      // EDGE_STROKE_DARK_EMBER: #ff3b2e66
+      // EDGE_STROKE_DARK_ABYSS: #7d6fff61
+      dark: { valley: '#fff50033', wuling: '#14d0d045', ember: '#ff3b2e66', abyss: '#7d6fff61' },
       // EDGE_STROKE_LIGHT_YELLOW: #beaf006b
-      return cyan ? '#14d0d07a' : '#beaf006b'
+      // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
+      // EDGE_STROKE_LIGHT_EMBER: #ff3b2e36
+      // EDGE_STROKE_LIGHT_ABYSS: #2831cc26
+      light: { valley: '#beaf006b', wuling: '#14d0d07a', ember: '#ff3b2e36', abyss: '#2831cc26' },
+    }
+    const contourStroke = () => {
+      const table = CONTOUR_STROKE[isDarkScheme() ? 'dark' : 'light']
+      return table[activePalette()] || table.valley
     }
 
     const contourDrawLines = () => {

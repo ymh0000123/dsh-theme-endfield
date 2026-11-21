@@ -180,15 +180,17 @@ const tree = rendered()
 const buttons = walk(tree).filter((n) => n.type === 'button')
 const findBtn = (re) => buttons.find((b) => re.test(textOf(b)))
 
-/* The reported symptom was radius=round and palette=wuling. Toggle BOTH while
+/* The reported symptom was radius=round and palette=wuling. Change BOTH while
    the namespace is unserved; the old bug would fire scope.set for each. */
 const radiusBtn = findBtn(/切换直角|切换圆角/)
 if (!radiusBtn) { fail('no radius toggle button rendered'); process.exit(1) }
 try { radiusBtn.props.onClick() } catch (e) { fail('radius toggle threw: ' + e.message) }
 
-const paletteRow = buttons.filter((b) => /切换武陵青|切换谷地黄/.test(textOf(b)))[0]
-if (!paletteRow) { fail('no palette toggle button rendered'); process.exit(1) }
-try { paletteRow.props.onClick() } catch (e) { fail('palette toggle threw: ' + e.message) }
+/* The palette row is a <select> now, but a pick is the same durable write as a
+   toggle was: it must be HELD while the namespace is unserved, and replayed. */
+const paletteRow = walk(tree).find((el) => el.type === 'select' && el.props['aria-label'] === '主题配色')
+if (!paletteRow) { fail('no palette <select> rendered'); process.exit(1) }
+try { paletteRow.props.onChange({ target: { value: 'wuling' } }) } catch (e) { fail('palette change threw: ' + e.message) }
 
 /* Phase A: nothing durable yet, so NOTHING may reach the wire and both edits
    must be HELD (page-local) for the later replay. `section` in this fake always

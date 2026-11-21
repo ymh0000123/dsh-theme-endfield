@@ -1,5 +1,13 @@
 
     /* ---------- Settings page: 主题 (own settings.section) ---------- */
+    /* Palette copy keys — one map per question the row asks: what is active, and
+       what it looks like. Side by side like this, a fifth palette is a data edit
+       rather than three more ternaries to get wrong. Both maps are keyed by
+       palette id, and PALETTES owns which ids exist and in what order the <select>
+       offers them — so the option list, the allow-list in the change handler and
+       the runtime class table can never drift apart. */
+    const PALETTE_NAME = { valley: 'paletteValley', wuling: 'paletteWuling', ember: 'paletteEmber', abyss: 'paletteAbyss' }
+    const PALETTE_HINT = { valley: 'paletteHintValley', wuling: 'paletteHintWuling', ember: 'paletteHintEmber', abyss: 'paletteHintAbyss' }
     const slots = ctx.get('slots')
     const disposeRows = []
     let disposeSettings = () => { disposeRows.forEach((d) => d()) }
@@ -266,12 +274,26 @@
           /* Palette switch. Everything visual is carried by the class flip inside
              syncPaletteClass(); the only thing that needs explicit work is the
              contour canvas, because a canvas stroke cannot read a CSS variable.
-             The redraw is called directly rather than left to the MutationObserver
-             so the sheet changes in the same frame as the rest of the UI. */
-          const togglePalette = () => {
-            const next = readPalette() === 'wuling' ? 'valley' : 'wuling'
-            prefsSet(PALETTE_KEY, next)
-            setPalette(next)
+             The redraw is called directly rather than left to a later observer so
+             the sheet changes in the same frame as the rest of the UI.
+
+             A <select> rather than a cycle button. With four palettes, "click
+             until the one you want comes around" stopped being a control and
+             became a memory game — the button also had to answer a question
+             nobody asked ("what is next?") instead of showing the choices. The
+             dropdown lists every palette at once and the current one is the
+             value, so nothing has to be inferred from the previous state.
+
+             `value` is the OPTION the user picked, not a captured React state:
+             after a language switch or a late-served section the panel's state
+             can lag, but the intent of a pick is still exactly what the option
+             says. PALETTES is the allow-list (the same array the option list is
+             built from), so a corrupt or hand-crafted event cannot persist a
+             palette no stylesheet defines. */
+          const setPaletteValue = (value) => {
+            if (PALETTES.indexOf(value) === -1) return
+            prefsSet(PALETTE_KEY, value)
+            setPalette(value)
             syncPaletteClass()
             if (contourWrap !== null) contourRefresh(false)
           }
@@ -653,32 +675,35 @@
               ]),
               row('palette', false, [
                 R.createElement('span', { style: labelStyle },
-                  t('paletteRow') + t('sep') + t(palette === 'wuling' ? 'paletteWuling' : 'paletteValley'),
+                  t('paletteRow') + t('sep') + t(PALETTE_NAME[palette] || PALETTE_NAME.valley),
                   R.createElement('span', { style: hintStyle },
-                    t(palette === 'wuling' ? 'paletteHintWuling' : 'paletteHintValley')
+                    t(PALETTE_HINT[palette] || PALETTE_HINT.valley)
                   )
                 ),
-                // A colour switch should show the colour it offers, not only name it.
                 R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', alignItems: 'center' } },
+                  // A colour switch should show the colour it offers, not only name it:
+                  // the dropdown can only print the name, so the live accent stays
+                  // beside it as a chip. --edge-accent only exists while the theme
+                  // stylesheet is mounted; with the theme off the chip falls back to
+                  // the app's own filled surface so it stays visible.
                   R.createElement('span', {
                     'aria-hidden': 'true',
                     style: {
                       width: '14px',
                       height: '14px',
                       flex: '0 0 auto',
-                      // --edge-accent only exists while the theme stylesheet is
-                      // mounted; with the theme off the chip falls back to the
-                      // app's own filled surface so it stays visible.
                       background: enabled ? 'var(--edge-accent)' : 'var(--dsw-alias-interactive-bg-hover-solid)',
                       border: '1px solid var(--dsw-alias-border-l2)',
                       borderRadius: mode === 'round' ? '999px' : '0',
                     },
                   }),
-                  R.createElement('button', {
-                    type: 'button',
-                    onClick: togglePalette,
-                    style: btnStyleFor(true),
-                  }, t(palette === 'wuling' ? 'paletteToValley' : 'paletteToWuling'))
+                  R.createElement('select', {
+                    'aria-label': t('paletteRow'), value: palette,
+                    onChange: (event) => setPaletteValue(event.target.value),
+                    style: { color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)',
+                      border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 10px' },
+                  }, PALETTES.map((value) => R.createElement('option', { key: value, value },
+                    t(PALETTE_NAME[value] || PALETTE_NAME.valley))))
                 )
               ]),
               row('glass', false, [

@@ -63,6 +63,8 @@ const varIn = (block, name) => {
 
 const YELLOW_SEL = 'body'          // the default palette lives on plain body
 const CYAN_SEL = 'body.theme-endfield-wuling'
+const EMBER_SEL = 'body.theme-endfield-ember'
+const ABYSS_SEL = 'body.theme-endfield-abyss'
 
 /* The default-palette block is the one that DEFINES --edge-accent (plain `body {`
    appears many times in this stylesheet, so find the right occurrence). */
@@ -78,14 +80,20 @@ const defaultBlock = (() => {
   }
 })()
 const cyanBlock = blockOf('      ' + CYAN_SEL)
+const emberBlock = blockOf('      ' + EMBER_SEL)
+const abyssBlock = blockOf('      ' + ABYSS_SEL)
 
 if (defaultBlock === null) { fail('no body block defines --edge-accent (谷地黄 palette missing)'); }
 if (cyanBlock === null) { fail('no ' + CYAN_SEL + ' block found (武陵青 palette missing)'); }
+if (emberBlock === null) { fail('no ' + EMBER_SEL + ' block found (重燃赤 palette missing)'); }
+if (abyssBlock === null) { fail('no ' + ABYSS_SEL + ' block found (浸蓝 palette missing)'); }
 if (failures) { console.error('\n' + failures + ' palette check(s) failed'); process.exit(1) }
 
 const palettes = {
   '谷地黄': defaultBlock,
   '武陵青': cyanBlock,
+  '重燃赤': emberBlock,
+  '浸蓝': abyssBlock,
 }
 
 /* ---------- 1. accent used as a SOLID FILL under ink text ----------
@@ -170,6 +178,10 @@ const strokes = {
   '谷地黄 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_YELLOW')), LIGHT_BGS['bg-base']],
   '武陵青 dark': [strokeOf(tagged('EDGE_STROKE_DARK_CYAN')), DARK_BGS['bg-base']],
   '武陵青 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_CYAN')), LIGHT_BGS['bg-base']],
+  '重燃赤 dark': [strokeOf(tagged('EDGE_STROKE_DARK_EMBER')), DARK_BGS['bg-base']],
+  '重燃赤 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_EMBER')), LIGHT_BGS['bg-base']],
+  '浸蓝 dark': [strokeOf(tagged('EDGE_STROKE_DARK_ABYSS')), DARK_BGS['bg-base']],
+  '浸蓝 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_ABYSS')), LIGHT_BGS['bg-base']],
 }
 const strokeContrast = {}
 let strokesFound = true
@@ -180,16 +192,20 @@ for (const [k, [s, bg]] of Object.entries(strokes)) {
 if (strokesFound) {
   for (const mode of ['dark', 'light']) {
     const y = strokeContrast['谷地黄 ' + mode]
-    const c = strokeContrast['武陵青 ' + mode]
-    const drift = Math.abs(c - y) / y
-    const line = mode + ' 等高线描边强度：谷地黄 ' + y.toFixed(3) + ':1 / 武陵青 ' + c.toFixed(3) + ':1'
-    // 20% of the yellow value: enough room for a hue that cannot hit the same
-    // composite exactly, tight enough that neither palette reads as broken.
-    if (drift <= 0.20) pass(line + '（相差 ' + (drift * 100).toFixed(1) + '%，两配色观感一致）')
-    else fail(line + ' — ' + (drift * 100).toFixed(1) + '% apart; one palette will read much louder than the other')
-    // A stroke below ~1.06:1 is not visible at all (README's perceptual floor).
-    if (c >= 1.06) pass('武陵青 ' + mode + ' 等高线在感知下限之上')
-    else fail('武陵青 ' + mode + ' contour stroke is below the 1.06:1 perceptual floor')
+    // Every non-default palette is compared against the same yellow reference,
+    // not against whichever palette happened to be checked last.
+    for (const name of ['武陵青', '重燃赤', '浸蓝']) {
+      const c = strokeContrast[name + ' ' + mode]
+      const drift = Math.abs(c - y) / y
+      const line = mode + ' 等高线描边强度：谷地黄 ' + y.toFixed(3) + ':1 / ' + name + ' ' + c.toFixed(3) + ':1'
+      // 20% of the yellow value: enough room for a hue that cannot hit the same
+      // composite exactly, tight enough that no palette reads as broken.
+      if (drift <= 0.20) pass(line + '（相差 ' + (drift * 100).toFixed(1) + '%，观感一致）')
+      else fail(line + ' — ' + (drift * 100).toFixed(1) + '% apart; one palette will read much louder than the other')
+      // A stroke below ~1.06:1 is not visible at all (README's perceptual floor).
+      if (c >= 1.06) pass(name + ' ' + mode + ' 等高线在感知下限之上')
+      else fail(name + ' ' + mode + ' contour stroke is below the 1.06:1 perceptual floor')
+    }
   }
 }
 
@@ -237,19 +253,28 @@ for (const [name, block] of Object.entries(palettes)) {
   }
 }
 
-/* ---------- 6. the two palettes must actually differ ---------- */
+/* ---------- 6. every palette must actually differ ---------- */
 const ay = varIn(palettes['谷地黄'], '--edge-accent')
 const ac = varIn(palettes['武陵青'], '--edge-accent')
-if (ay !== null && ac !== null) {
-  if (ay.toLowerCase() !== ac.toLowerCase()) pass('两套配色的强调色不同：' + ay + ' / ' + ac)
-  else fail('both palettes define the same --edge-accent — the switch would do nothing')
+const ae = varIn(palettes['重燃赤'], '--edge-accent')
+const aa = varIn(palettes['浸蓝'], '--edge-accent')
+const accents = { '谷地黄': ay, '武陵青': ac, '重燃赤': ae, '浸蓝': aa }
+for (const [a, av] of Object.entries(accents)) {
+  for (const [b, bv] of Object.entries(accents)) {
+    if (a >= b || av === null || bv === null) continue
+    if (av.toLowerCase() !== bv.toLowerCase()) pass('配色强调色互不相同：' + a + ' ' + av + ' / ' + b + ' ' + bv)
+    else fail(a + ' and ' + b + ' define the same --edge-accent — that step of the cycle would do nothing')
+  }
 }
 /* Every accent value in this package is written as HEX, so assert the notation as
    well as the colour. The first version carried the accent in two notations (hex in
    CSS, rgb() in the settings row and the canvas strokes), which is exactly how two
    spellings of one colour drift apart. */
-if (ac !== null && /^#[0-9a-f]{6}$/i.test(ac)) pass('武陵青 强调色为 6 位十六进制：' + ac)
-else fail('武陵青 --edge-accent should be a 6-digit hex value, got ' + ac)
+for (const [name, av] of Object.entries(accents)) {
+  if (av === null) continue
+  if (/^#[0-9a-f]{6}$/i.test(av)) pass(name + ' 强调色为 6 位十六进制：' + av)
+  else fail(name + ' --edge-accent should be a 6-digit hex value, got ' + av)
+}
 
 /* ---------- 7. 武陵青 must be BRIGHT enough to partner the signal yellow ----------
    The reported defect was that the first cyan read as too dark beside the yellow it
@@ -271,6 +296,66 @@ if (ac !== null) {
   const [r, g, b] = hex(ac)
   if (g === b && r < g * 0.5) pass('武陵青 仍在青碧色轴上（R 低、G=B）：' + [r, g, b].join(', '))
   else fail('武陵青 ' + ac + ' has drifted off the teal axis (expect low R, G == B)')
+}
+
+/* ---------- 8. 重燃赤: the hover step must BRIGHTEN, not deepen ----------
+   The other two palettes dip on hover and still clear AA under ink. Red has no
+   room below #ff3b2e: #e02317 seats ink at 3.99:1, i.e. the hover state of every
+   chip and primary button becomes unreadable. This palette therefore ignites
+   (#ff5f4d, 6.30:1). Pinned as a direction, not just a number, because "make the
+   three palettes consistent" is exactly the edit that would undo it. */
+if (ae !== null) {
+  const deep = varIn(palettes['重燃赤'], '--edge-accent-deep')
+  if (deep === null) fail('重燃赤: --edge-accent-deep is not defined')
+  else {
+    const la = lum(hex(ae)), ld = lum(hex(deep))
+    if (ld > la) pass('重燃赤 悬停档是「点燃」而非「压深」：' + ae + ' L ' + (la * 100).toFixed(1)
+      + '% -> ' + deep + ' L ' + (ld * 100).toFixed(1) + '%')
+    else fail('重燃赤 --edge-accent-deep ' + deep + ' is darker than the accent — red has no AA room below '
+      + ae + ' (the rejected #e02317 was 3.99:1 under ink)')
+  }
+  /* Hue integrity: the signal must stay a red-orange, not drift to crimson-brown
+     (G==B) or to ember orange (G close to R), where it collides with the warning role. */
+  const [r, g, b] = hex(ae)
+  if (r > g * 2 && g > b) pass('重燃赤 仍在红轴上（R 主导、B 最低）：' + [r, g, b].join(', '))
+  else fail('重燃赤 ' + ae + ' has drifted off the red axis (expect R > 2G and G > B)')
+}
+
+/* ---------- 9. 浸蓝: indigo, and the same ignition rule as 重燃赤 ----------
+   The key art's own blue (#0a06d0) is 1.76:1 against the near-black page, so the
+   accent is that hue lifted to #7d6fff. Three things are pinned here:
+     - the hover step BRIGHTENS (a downward step of the usual size, #6c5cf0,
+       seats ink at 3.99:1 — the same number the rejected red hover hit, because
+       both hues sit at the bottom of the luminance range);
+     - the hue stays indigo (B dominant, and R > G, which separates it from the
+       app's own royal blue #4d6bfe where G > R);
+     - the paper step is DEEPER than the accent and still on the art's hue, i.e.
+       light mode returns to the key art's blue rather than inventing a second
+       colour. */
+if (aa !== null) {
+  const la = lum(hex(aa))
+  const deep = varIn(palettes['浸蓝'], '--edge-accent-deep')
+  if (deep === null) fail('浸蓝: --edge-accent-deep is not defined')
+  else {
+    const ld = lum(hex(deep))
+    if (ld > la) pass('浸蓝 悬停档是「点燃」而非「压深」：' + aa + ' L ' + (la * 100).toFixed(1)
+      + '% -> ' + deep + ' L ' + (ld * 100).toFixed(1) + '%')
+    else fail('浸蓝 --edge-accent-deep ' + deep + ' is darker than the accent — indigo has no AA room below '
+      + aa + ' (the rejected #6c5cf0 was 3.99:1 under ink)')
+  }
+  const [r, g, b] = hex(aa)
+  if (b > r + 80 && r > g) pass('浸蓝 仍在靛蓝色轴上（B 主导、R > G，不会退化成应用的皇家蓝）：' + [r, g, b].join(', '))
+  else fail('浸蓝 ' + aa + ' has drifted off the indigo axis (expect B > R + 80 and R > G)')
+  const op = varIn(palettes['浸蓝'], '--edge-accent-onpaper')
+  if (op === null) fail('浸蓝: --edge-accent-onpaper is not defined')
+  else if (lum(hex(op)) < la) pass('浸蓝 纸面档比强调色更深（回到原画蓝）：' + aa + ' -> ' + op)
+  else fail('浸蓝 --edge-accent-onpaper ' + op + ' must be DEEPER than the accent on cream')
+  /* The accent is the brightest of the two blues, so it is the one that carries
+     the dark-mode gradient text — assert it clears text contrast, not just icons. */
+  let worst = Infinity
+  for (const bg of Object.values(DARK_BGS)) worst = Math.min(worst, ratio(hex(aa), bg))
+  if (worst >= 4.5) pass('浸蓝 作暗色回合状态文字：' + worst.toFixed(2) + ':1 (AA 4.5)')
+  else fail('浸蓝 accent as dark-mode text is ' + worst.toFixed(2) + ':1 — the turn-status gradient would fail AA')
 }
 
 console.log('')

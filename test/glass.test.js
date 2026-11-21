@@ -6,7 +6,7 @@ const {launch,boot}=require('./fixtures/chrome-cdp.js')
   await boot(browser,path.resolve(__dirname,'..'))
   assert.equal(await browser.evaluate('document.body.hasAttribute("data-endfield-glass")'),false)
   const original=await browser.evaluate('JSON.stringify(document.querySelector("[data-composer-card]").getBoundingClientRect().toJSON())')
-  for(const dark of [false,true])for(const palette of ['valley','wuling']) {
+  for(const dark of [false,true])for(const palette of ['valley','wuling','ember','abyss']) {
     await browser.evaluate(`document.body.toggleAttribute('data-ds-dark-theme',${dark});__prefs.setItem('dsh-theme-endfield-palette',${JSON.stringify(palette)})`)
     for(const [level,radius,alpha] of [['subtle',8,dark?.64:.68],['standard',14,dark?.76:.8],['strong',22,dark?.88:.9]]){
       await browser.evaluate(`__prefs.setItem('dsh-theme-endfield-glass',${JSON.stringify(level)})`)
