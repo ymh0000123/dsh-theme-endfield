@@ -196,6 +196,11 @@
        unmount() — a `let` declared further down would still be in its temporal dead
        zone at that point and throw a ReferenceError. */
     let contourSwitchSig = ''
+    /* One-shot report for the failure mode that made issue #45 look like a dead
+       feature rather than a broken locator: a rendered shell, an enabled switch,
+       and no frame we can honestly mount into. Repeating it per mutation would
+       flood the console, so it fires at most once per page. */
+    let contourFrameWarned = false
 
     const CONTOUR_STEP = 6      // balanced sampling/detail point for 1px contour strokes
     const CONTOUR_LEVELS = 20
@@ -1357,15 +1362,43 @@
        layer to a question card. '_centerCol' and '_sidebarCol' are each unique to
        the layout frame, so the frame is identified as their parent. Matching on the
        module SUFFIX rather than the current hash keeps this working across an app
-       rebuild that rehashes the module. */
+       rebuild that rehashes the module.
+
+       WHY AN ANCESTOR WALK AND NOT `col.parentElement`. DSH 0.14's shell puts an
+       anonymous wrapper between the frame and each column, and that wrapper is
+       `display: contents`. A contents box generates no layout box, so its own
+       getBoundingClientRect() is 0x0 for its whole life — the old
+       parentElement-then-measure lookup therefore measured the WRAPPER, failed the
+       size test, and returned null while the real frame sat one level further up.
+       Because the rejection is a plain `return null`, nothing threw and nothing
+       logged: the switch stayed on, no layer existed, the console was clean, and
+       the only visible symptom was a background that never appeared (issue #45).
+
+       So: walk up to the first ancestor that actually has a box and is not
+       `display: contents`, and let a POSITIONED one win, because the layer is
+       position:absolute/inset:0 and needs that ancestor as its containing block.
+       The first sized-but-static ancestor is kept as a fallback only, so shells
+       that positioned the frame itself (0.1.x / 0.2.x) behave exactly as before.
+       The walk is bounded and stops below body: mounting the sheet on the body
+       would cover the window instead of one column layout. */
     const findAppFrame = () => {
       if (typeof document === 'undefined') return null
       const col = document.querySelector('[class$="_centerCol"], [class*="_centerCol "]')
-      const frame = col !== null ? col.parentElement : null
-      if (frame === null) return null
-      const r = frame.getBoundingClientRect()
-      if (r.width === 0 || r.height === 0) return null
-      return frame
+      if (col === null) return null
+      const canMeasureStyle = typeof getComputedStyle === 'function'
+      let node = col.parentElement
+      let sized = null
+      for (let depth = 0; depth < 6 && node !== null && node !== document.body; depth++) {
+        const r = node.getBoundingClientRect()
+        const cs = canMeasureStyle ? getComputedStyle(node) : null
+        if (r.width > 0 && r.height > 0 && (cs === null || cs.display !== 'contents')) {
+          // No getComputedStyle (bare test DOM) == the pre-0.14 contract: first sized parent wins.
+          if (cs === null || cs.position !== 'static') return node
+          if (sized === null) sized = node
+        }
+        node = node.parentElement
+      }
+      return sized
     }
 
     // DOM sampling stays outside the extraction kernel, which remains usable
@@ -1623,6 +1656,17 @@
           // bring us back here rather than the layer never mounting.
           if (contourWrap !== null) contourTeardown()
           contourSwitchSig = ''
+          /* ...but "not yet" and "never" call for different fixes, and from here
+             they are indistinguishable without saying so. Only warn once a column
+             exists: that means the shell HAS rendered, so a missing frame is a
+             locator break rather than boot timing — which is exactly the state
+             issue #45 shipped in, with a clean console. */
+          if (!contourFrameWarned && document.querySelector('[class$="_centerCol"], [class*="_centerCol "]') !== null) {
+            contourFrameWarned = true
+            try {
+              console.warn('[dsh-theme-endfield:contour] the layout column is on screen but no ancestor with a layout box could be used as the app frame; the contour layer stays unmounted. The DSH shell probably changed its wrapper structure — the layer needs an ancestor that renders a box (not display:contents) and is position:relative.')
+            } catch (e) { /* logging is never load-bearing */ }
+          }
           return
         }
         if (contourWrap !== null && contourHost !== host) contourTeardown()
