@@ -1325,8 +1325,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       else document.body.classList.remove('theme-endfield-round')
     }
 
-    /* ---------- accent palette: 谷地黄 (default) / 武陵青 / 重燃赤 / 浸蓝 ----------
-       The palette is ONE class on <body>; the stylesheet defines all four
+    /* ---------- accent palette: 谷地黄 (default) / 武陵青 / 重燃赤 / 浸蓝 / 基石蓝 ----------
+       The palette is ONE class on <body>; the stylesheet defines all five
        variable sets, so switching is a class flip with no restyling work here.
        Because the app applies its theme tokens as inline body styles and this
        theme's token overrides are var(--edge-accent) references, those tokens
@@ -1335,9 +1335,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
 
        'valley' (谷地黄, signal yellow) is the DEFAULT, so an unset field and any
        unrecognised value both mean yellow. Only the exact literals 'wuling' /
-       'ember' / 'abyss' select the others, which keeps a corrupt stored value
-       (schema rejects / outside the fallback) from silently changing the shipped
-       look.
+       'ember' / 'abyss' / 'foundation' select the others, which keeps a corrupt
+       stored value (schema rejects / outside the fallback) from silently changing
+       the shipped look.
 
        The map is the single place that knows a palette's class name. Everything
        downstream asks activePalette() instead of testing one class by name, so a
@@ -1354,12 +1354,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       wuling: 'theme-endfield-wuling',
       ember: 'theme-endfield-ember',
       abyss: 'theme-endfield-abyss',
+      foundation: 'theme-endfield-foundation',
     }
     /* Order is the shipped order, not a set: the settings row lists these as the
        options of its <select>, so this array is simultaneously the allow-list for
        a stored value and the order the user reads. The reading order is
-       deliberate — default (warm), cool, hot, deep. */
-    const PALETTES = ['valley', 'wuling', 'ember', 'abyss']
+       deliberate — default (warm), cool, hot, deep, ice. */
+    const PALETTES = ['valley', 'wuling', 'ember', 'abyss', 'foundation']
     const readPalette = () => {
       const stored = prefsGet(PALETTE_KEY)
       return PALETTES.indexOf(stored) === -1 ? 'valley' : stored
@@ -1379,6 +1380,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     const isWulingPalette = () => activePalette() === 'wuling'
     const isEmberPalette = () => activePalette() === 'ember'
     const isAbyssPalette = () => activePalette() === 'abyss'
+    const isFoundationPalette = () => activePalette() === 'foundation'
     /* No nextPalette() any more: the settings row is a <select>, so "which one do
        I get" is answered by the option the user picked rather than by arithmetic
        over this array. The order above still matters — it is the option order. */
@@ -1569,7 +1571,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
            context, both boxes paint in the same step, and the mark is still the
            later sibling. Verified by test/watermark-stacking.test.js. */
         s.zIndex = '0'
-        s.fontSize = '9.5vw'
+        /* The size travels with the per-palette word (see --edge-wordmark-size):
+           a longer mark at this size would clip at the frame edge. The fallback
+           is the shipped 9.5vw so the mark still sizes itself with the theme
+           stylesheet detached. */
+        s.fontSize = 'var(--edge-wordmark-size, 9.5vw)'
         s.transform = ''
       } else {
         // Fill the conversation column and sit behind its content. z-index:-1 paints
@@ -1583,7 +1589,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         s.bottom = '0'
         s.height = ''
         s.zIndex = '-1'
-        s.fontSize = '9.5vw'
+        /* The size travels with the per-palette word (see --edge-wordmark-size):
+           a longer mark at this size would clip at the frame edge. The fallback
+           is the shipped 9.5vw so the mark still sizes itself with the theme
+           stylesheet detached. */
+        s.fontSize = 'var(--edge-wordmark-size, 9.5vw)'
         s.transform = ''
       }
     }
@@ -2820,12 +2830,14 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       // EDGE_STROKE_DARK_CYAN: #14d0d045
       // EDGE_STROKE_DARK_EMBER: #ff3b2e66
       // EDGE_STROKE_DARK_ABYSS: #7d6fff61
-      dark: { valley: '#fff50033', wuling: '#14d0d045', ember: '#ff3b2e66', abyss: '#7d6fff61' },
+      // EDGE_STROKE_DARK_FOUNDATION: #4b93ff55
+      dark: { valley: '#fff50033', wuling: '#14d0d045', ember: '#ff3b2e66', abyss: '#7d6fff61', foundation: '#4b93ff55' },
       // EDGE_STROKE_LIGHT_YELLOW: #beaf006b
       // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
       // EDGE_STROKE_LIGHT_EMBER: #ff3b2e36
       // EDGE_STROKE_LIGHT_ABYSS: #2831cc26
-      light: { valley: '#beaf006b', wuling: '#14d0d07a', ember: '#ff3b2e36', abyss: '#2831cc26' },
+      // EDGE_STROKE_LIGHT_FOUNDATION: #1b3fb022
+      light: { valley: '#beaf006b', wuling: '#14d0d07a', ember: '#ff3b2e36', abyss: '#2831cc26', foundation: '#1b3fb022' },
     }
     const contourStroke = () => {
       const table = CONTOUR_STROKE[isDarkScheme() ? 'dark' : 'light']
@@ -6323,6 +6335,69 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         --edge-glow-light: 0.08;
         --edge-glow-dark: 0.1;
       }
+      /* ---------- 基石蓝 (The Foundation, #4b93ff) ----------
+         Requested in issue #46 with a key art attached: seven figures in blue and
+         white before a winged reliquary, everything on a field of #000008 – #181828.
+         The art carries TWO blues and the choice between them is the whole design:
+           · robe/field blue  #2a3cd2  (hue 234, most saturated colour in the frame)
+           · reliquary light  #6eb9ff  (hue 208, the highlight the eye lands on)
+         The field blue is unusable as a chip for the same reason 浸蓝's #0a06d0 was —
+         it sits at 1.8:1 on this palette's near-black — and it also lands within
+         12 degrees of 浸蓝's accent, i.e. a fifth palette the user cannot tell from
+         the fourth. So the accent is the RELIQUARY LIGHT, taken down its own hue
+         until it can carry ink: #6eb9ff at L* 72 becomes #4b93ff at L* 61.
+         Hue stays at 216 — inside the 208–234 band the art itself occupies, and far
+         enough from the app's own royal blue (#4d6bfe, hue 229, G < R) that a chip
+         cannot be mistaken for "no theme installed". This is the only palette whose
+         accent is darker than the colour it was sampled from; the other four climb.
+
+         HOVER IGNITES, for the third time, and this is the honest reason: the dip
+         used by 谷地黄 and 武陵青 (ΔL* -6.6) still measures 4.95:1 under ink, so it
+         would be legal — but it leaves 0.45 of headroom on the most-reused pairing
+         in the theme, and the next nudge of the accent eats it. The light goes up
+         instead (#7ab2ff, ΔL* +7, ink 8.69:1), which is also the only direction the
+         reference ever moves: every blue in that frame is light coming out of
+         something.
+
+         MEASURED (worst surface of each role):
+           ink #101110 on the accent          6.23:1   (solid chips/buttons, AA)
+           accent as dark-mode ink/text       5.76:1   on #181a18
+           accent as TEXT on cream            2.47:1   — a fill, never a text step,
+             so paper mode uses #1b3fb0 for accent-as-text (7.16:1)
+           turn status, light  #1b3fb0 / #0b2a74   7.16 / 10.69
+           turn status, dark   #4b93ff / #a9c6ff   5.76 / 10.18
+             (the dark mid band lifts like the other three: the icy #a9c6ff is the
+             art's own white-blue highlight, not an invented tint)
+
+         GLOW. Alphas are lower than the stock 0.08 / 0.08 on the dark side because
+         this is the brightest accent of the five: |ΔY| 7.37 light and 10.44 dark
+         against a 9.90 / 11.28 budget. 0.09 dark would have read at 11.1, inside the
+         budget but on its edge; 0.085 keeps a breath of room.
+
+         WORDMARK. This palette is the reason the background word is a variable at
+         all — the requester asked for "The Foundation" in the background instead of
+         "Endfield" (see the watermark section below). 5.3vw is not a guess: at the
+         shipped 9.5vw / 0.1em tracking, "ENDFIELD" sets 5.70em wide, so matching
+         that measure for the 13-glyph "THE FOUNDATION" (10.24em) needs 5.30vw. */
+      body.theme-endfield-foundation {
+        --edge-accent: #4b93ff;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. */
+        --edge-accent-rgb: 75, 147, 255;
+        /* The IGNITION step — see the note above; brighter, not deeper. */
+        --edge-accent-deep: #7ab2ff;
+        /* Blue under ink is 2.47:1, so light-mode text on a filled accent is paper.
+           This is the fill step that still separates from cream: 7.16:1. */
+        --edge-accent-onpaper: #1b3fb0;
+        --edge-status-light: #1b3fb0;
+        --edge-status-light-mid: #0b2a74;
+        --edge-status-dark: #4b93ff;
+        --edge-status-dark-mid: #a9c6ff;
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.085;
+        /* The one palette that renames the decoration rather than recolouring it. */
+        --edge-wordmark: 'THE FOUNDATION';
+        --edge-wordmark-size: 5.3vw;
+      }
       /* Token-derived aliases. These MUST be on body, not :root — see above. */
       body {
         --edge-signal: var(--edge-accent);
@@ -6447,6 +6522,15 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          Floor is ~1.06:1, below which the mark reads as absent. */
       body {
         --edge-wm-alpha: 0.13;
+        /* What the mark SAYS, and how big. Both are variables for one reason: 基石蓝
+           asks for a different name in the same decorative role, and a second copy of
+           the rule behind body.theme-endfield-foundation would be two places to keep
+           in sync with the JS that sizes the element.
+           The size travels with the word instead of being fixed, because the marks
+           must occupy the same measure (5.70em) or the wider one clips at the frame
+           edge. See the foundation block for the arithmetic. */
+        --edge-wordmark: 'ENDFIELD';
+        --edge-wordmark-size: 9.5vw;
       }
       body[data-ds-dark-theme] {
         --edge-wm-alpha: 0.085;
@@ -6456,7 +6540,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          have nothing to rewrite — the brand name cannot be turned into "终末地" or
          similar. The element's own text stays empty; ::before carries the letters. */
       [data-endfield-watermark]::before {
-        content: 'ENDFIELD';
+        /* Still CSS-generated, so page translators (which walk text nodes) have
+           nothing to rewrite; only the source string became a variable, so 基石蓝
+           can print THE FOUNDATION through the identical rule. */
+        content: var(--edge-wordmark, 'ENDFIELD');
         display: block;
         white-space: nowrap;
       }
@@ -9391,10 +9478,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       paletteWuling: '武陵青',
       paletteEmber: '重燃赤',
       paletteAbyss: '浸蓝',
+      paletteFoundation: '基石蓝',
       paletteHintValley: '默认信号黄 #fff500（终末地官网强调色）',
       paletteHintWuling: '青碧色强调 #14d0d0，用于按钮、悬停、选中行与等高线',
       paletteHintEmber: '战役红 #FF3B2E（危机合约取色），压黑底 5.33:1；纸上落一档 #B01F14',
       paletteHintAbyss: '靛蓝强调 #7D6FFF（浸蓝测试作战取色），压黑底 5.04:1；纸上回到原画蓝 #2831CC',
+      paletteHintFoundation: '电光蓝 #4B93FF（The Foundation 圣所取色），压黑底 6.23:1；纸上落一档 #1B3FB0，背景大字随之改为 THE FOUNDATION',
       radiusRow: '主题圆角',
       radiusRound: '圆角',
       radiusSquare: '直角',
@@ -9590,10 +9679,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       paletteWuling: 'Wuling Cyan',
       paletteEmber: 'Rekindle Red',
       paletteAbyss: 'Immersed Blue',
+      paletteFoundation: 'Foundation Blue',
       paletteHintValley: 'Default signal yellow #fff500 (the Endfield site accent)',
       paletteHintWuling: 'Teal-cyan accent #14d0d0 for buttons, hover, selected rows and contours',
       paletteHintEmber: 'Campaign red #FF3B2E from the Contingency Contract art — 5.33:1 on ink, sinks to #B01F14 on paper',
       paletteHintAbyss: 'Indigo accent #7D6FFF from the Immersed Blue key art — 5.04:1 on ink, returns to the art\'s own #2831CC on paper',
+      paletteHintFoundation: 'Reliquary blue #4B93FF from The Foundation key art — 6.23:1 on ink, sinks to #1B3FB0 on paper, and renames the background mark to THE FOUNDATION',
       radiusRow: 'Corners',
       radiusRound: 'Rounded',
       radiusSquare: 'Square',
@@ -9782,8 +9873,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        palette id, and PALETTES owns which ids exist and in what order the <select>
        offers them — so the option list, the allow-list in the change handler and
        the runtime class table can never drift apart. */
-    const PALETTE_NAME = { valley: 'paletteValley', wuling: 'paletteWuling', ember: 'paletteEmber', abyss: 'paletteAbyss' }
-    const PALETTE_HINT = { valley: 'paletteHintValley', wuling: 'paletteHintWuling', ember: 'paletteHintEmber', abyss: 'paletteHintAbyss' }
+    const PALETTE_NAME = { valley: 'paletteValley', wuling: 'paletteWuling', ember: 'paletteEmber', abyss: 'paletteAbyss', foundation: 'paletteFoundation' }
+    const PALETTE_HINT = { valley: 'paletteHintValley', wuling: 'paletteHintWuling', ember: 'paletteHintEmber', abyss: 'paletteHintAbyss', foundation: 'paletteHintFoundation' }
     const slots = ctx.get('slots')
     const disposeRows = []
     let disposeSettings = () => { disposeRows.forEach((d) => d()) }

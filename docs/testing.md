@@ -167,16 +167,16 @@ npm run test:corners                          # 源码级：stadium/圆形规则
 ## 配色
 
 ```bash
-node test/palette-contrast.test.js   # 四套配色每个角色的对比度（从真实 CSS 里读值）
-node test/palette-switch.test.js     # 真实浏览器里切换配色，22 项断言
+node test/palette-contrast.test.js   # 五套配色每个角色的对比度（从真实 CSS 里读值）
+node test/palette-switch.test.js     # 真实浏览器里切换配色，47 项断言
 node test/settings-buttons.test.js   # 强调色底上的按钮文字对比度（32 项，含回归守卫）
 node test/tools/hover-check.js       # 用 CDP 真的移动鼠标，验证真实 :hover 规则（3 个面，24 项）
 node test/tools/verify-shots.js      # 解码四张截图统计强调色像素
 ```
 
-**`palette-contrast.test.js`** 从 `client.js` 的实际样式表里把变量读出来再验算。覆盖 67 项：实心底 + 墨色字达 AA、悬停档同样达标、回合状态四个色标对**两种**可能底色都达 AA、暗色强调色作图标墨色 ≥3、四套配色的等高线合成对比度都以谷地黄为基准相差 ≤20% 且高于 1.06 感知下限、hero 光晕不比原品牌蓝更响（该 `*_heroGlow` 模块在 0.2 已不存在，规则保留为自愈钩子）、四套配色两两不同、强调色写成 6 位十六进制、**武陵青的亮度必须落在 45%–56% 区间且留在青碧色轴上**、**重燃赤的悬停档必须是提亮方向、强调色必须留在红轴上**（`#e02317` 那种加深只有 3.99:1，被钉成方向断言），以及**浸蓝同样必须提亮、必须留在靛蓝色轴上（B 主导且 R > G，否则会退化成应用自己的皇家蓝）、纸面档必须比强调色更深**。
+**`palette-contrast.test.js`** 从 `client.js` 的实际样式表里把变量读出来再验算。覆盖 85 项：实心底 + 墨色字达 AA、悬停档同样达标、回合状态四个色标对**两种**可能底色都达 AA、暗色强调色作图标墨色 ≥3、五套配色的等高线合成对比度都以谷地黄为基准相差 ≤20% 且高于 1.06 感知下限、hero 光晕不比原品牌蓝更响（该 `*_heroGlow` 模块在 0.2 已不存在，规则保留为自愈钩子）、五套配色两两不同、强调色写成 6 位十六进制、**武陵青的亮度必须落在 45%–56% 区间且留在青碧色轴上**、**重燃赤的悬停档必须是提亮方向、强调色必须留在红轴上**（`#e02317` 那种加深只有 3.99:1，被钉成方向断言），**浸蓝同样必须提亮、必须留在靛蓝色轴上（B 主导且 R > G，否则会退化成应用自己的皇家蓝）、纸面档必须比强调色更深**，以及**基石蓝也要提亮、必须留在电光蓝轴上（B 主导且 G 明显高于 R，否则会漂到应用皇家蓝那一带）**。
 
-**`palette-switch.test.js`** 在真实浏览器里跑真实 `client.js`，并**按应用的真实方式把令牌写成 `<body>` 行内样式**——用样式表 `:root` 假装会让测试通过而线上坏掉，这种不对称正是它存在的理由。断言：默认是谷地黄且不带 class；11 个变量全部**非空**；`--dsw-alias-brand-primary` 在切换后**自动**变成青色（令牌层没有重新注册）；`rgba(var(--rgb), α)` 型半透明色块随之切换；**回合状态文字换色**（0.2 的 `<hash>_running` 读 `--dsw-alias-label-deep-diving`，页面按 0.2 的真实 CSS 造形，量的是真实机制而不是 0.1.x 的渐变文本）；**画布被重绘且新描边偏青**（B 通道高于 R）；再切到重燃赤时强调色变成 `#ff3b2e`、回合状态换成 `#b01f14`、画布重绘为红色（R 主导，证明 canvas 没有掉回黄色默认分支）；再切到浸蓝时强调色变成 `#7d6fff`、回合状态换成 `#2831cc`、画布重绘为靛蓝（B 通道同时高于 R 和 G），并且**审批白条上「确认」落靛蓝、「拒绝」回到应用错误红**——重燃赤那条限定了 class 的沉血规则不许外溢；关闭主题后三套 class 都不残留。
+**`palette-switch.test.js`** 在真实浏览器里跑真实 `client.js`，并**按应用的真实方式把令牌写成 `<body>` 行内样式**——用样式表 `:root` 假装会让测试通过而线上坏掉，这种不对称正是它存在的理由。断言：默认是谷地黄且不带 class；11 个变量全部**非空**；`--dsw-alias-brand-primary` 在切换后**自动**变成青色（令牌层没有重新注册）；`rgba(var(--rgb), α)` 型半透明色块随之切换；**回合状态文字换色**（0.2 的 `<hash>_running` 读 `--dsw-alias-label-deep-diving`，页面按 0.2 的真实 CSS 造形，量的是真实机制而不是 0.1.x 的渐变文本）；**画布被重绘且新描边偏青**（B 通道高于 R）；再切到重燃赤时强调色变成 `#ff3b2e`、回合状态换成 `#b01f14`、画布重绘为红色（R 主导，证明 canvas 没有掉回黄色默认分支）；再切到浸蓝时强调色变成 `#7d6fff`、回合状态换成 `#2831cc`、画布重绘为靛蓝（B 通道同时高于 R 和 G），并且**审批白条上「确认」落靛蓝、「拒绝」回到应用错误红**——重燃赤那条限定了 class 的沉血规则不许外溢；再切到基石蓝时强调色变成 `#4b93ff`、回合状态换成 `#1b3fb0`、画布重绘为电光蓝（B 主导且 G 高于 R）；同一段里还量**背景大字的级联**——往页面里插一个带 `data-endfield-watermark` 的节点，`::before` 的 `content` 必须是 `"THE FOUNDATION"`、`--edge-wordmark-size` 必须是 `5.3vw`，退回默认配色后两者都要变回 `ENDFIELD` / `9.5vw`；关闭主题后四套 class 都不残留。
 
 **`settings-buttons.test.js`** 读计算样式，用同特异度的 `.HOVERPROBE` 类替代 `:hover`。这是合理的层叠等价，但反向对照暴露了它的边界（见[验证方法论](engineering-notes.md#计算样式触发不了-hover)），因此有了下一个脚本。
 
@@ -299,7 +299,7 @@ node test/settings-locale.test.js   # 跟随语言设置（zh/en 词典对齐 + 
 
 **`settings-rows.test.js`** 不用浏览器也不用 React：以**记录型 `React` / `slots` + 假的设置 transport**（`test/fixtures/settings-scope.js`）在进程内跑一次真实 `apply()`，抓下设置面板真正的元素树。设置页是用户唯一能碰到这些开关的入口，而那里的错误（抛异常、漏 key、开关写错了 DSH 设置的字段）check.js 与画布测试都看不见。
 
-> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置服务**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 transport：除 `settings-config-forms.test.js` 之外的用例走旧世代 `ctx.settingsScope`（fixture 的 `settingsScopeStub`，在内存里扮演 `<settings.yaml>` 的命名字段节），新世代由 `configFormsStub` 扮演 `ctx.configForms`（命名空间 = profile entry id）。断言 34 行齐全且归入 5 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐 / 05 音频）与配色样式规则都在、配色行是一个按 `PALETTES` 顺序列出四套配色的下拉（默认选中谷地黄）、存了 `wuling` / `ember` / `abyss` 时选中项跟着走并标注 `#14d0d0` / `#FF3B2E` / `#7D6FFF`、选 `valley` 一次直写 `palette=valley`（不必逐格循环）、未知配色被拒绝不落盘、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
+> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置服务**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 transport：除 `settings-config-forms.test.js` 之外的用例走旧世代 `ctx.settingsScope`（fixture 的 `settingsScopeStub`，在内存里扮演 `<settings.yaml>` 的命名字段节），新世代由 `configFormsStub` 扮演 `ctx.configForms`（命名空间 = profile entry id）。断言 34 行齐全且归入 5 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐 / 05 音频）与配色样式规则都在、配色行是一个按 `PALETTES` 顺序列出五套配色的下拉（默认选中谷地黄）、存了 `wuling` / `ember` / `abyss` / `foundation` 时选中项跟着走并标注 `#14d0d0` / `#FF3B2E` / `#7D6FFF` / `#4B93FF`、选 `valley` 一次直写 `palette=valley`（不必逐格循环）、未知配色被拒绝不落盘、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
 
 **`settings-durable-hold.test.js`**（旧世代 `settingsScope` 路径；0.1.7 上同一份写入 gate / 补写契约由 `settings-config-forms.test.js` 覆盖）用**两阶段假 `ctx.settingsScope`** 复现那条历史告警：宿主半部 `ctx.settings.register(...)` 尚未跑、命名空间还没进 Host 的 served 列表前，scope 快照是 `{ status:'unavailable', writable:true, mode:'host' }`——单看 `writable` 会照写不误却落不到盘。它先在未就绪态切「圆角 / 武陵青」，断言**没有任何 `scope.set` 出线**（旧 bug 会打 `commit … status= unavailable` 并静默丢脏）；随后模拟文档 committed、命名空间进入 served 列表、快照翻为 `status:'ready'`，断言订阅路径把两份 held 编辑**自动补写**进文档，且不会重复写两遍（replay 有 re-entrancy 护栏）。
 

@@ -174,7 +174,11 @@
            context, both boxes paint in the same step, and the mark is still the
            later sibling. Verified by test/watermark-stacking.test.js. */
         s.zIndex = '0'
-        s.fontSize = '9.5vw'
+        /* The size travels with the per-palette word (see --edge-wordmark-size):
+           a longer mark at this size would clip at the frame edge. The fallback
+           is the shipped 9.5vw so the mark still sizes itself with the theme
+           stylesheet detached. */
+        s.fontSize = 'var(--edge-wordmark-size, 9.5vw)'
         s.transform = ''
       } else {
         // Fill the conversation column and sit behind its content. z-index:-1 paints
@@ -188,7 +192,11 @@
         s.bottom = '0'
         s.height = ''
         s.zIndex = '-1'
-        s.fontSize = '9.5vw'
+        /* The size travels with the per-palette word (see --edge-wordmark-size):
+           a longer mark at this size would clip at the frame edge. The fallback
+           is the shipped 9.5vw so the mark still sizes itself with the theme
+           stylesheet detached. */
+        s.fontSize = 'var(--edge-wordmark-size, 9.5vw)'
         s.transform = ''
       }
     }

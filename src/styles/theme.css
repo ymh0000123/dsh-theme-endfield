@@ -281,6 +281,69 @@
         --edge-glow-light: 0.08;
         --edge-glow-dark: 0.1;
       }
+      /* ---------- 基石蓝 (The Foundation, #4b93ff) ----------
+         Requested in issue #46 with a key art attached: seven figures in blue and
+         white before a winged reliquary, everything on a field of #000008 – #181828.
+         The art carries TWO blues and the choice between them is the whole design:
+           · robe/field blue  #2a3cd2  (hue 234, most saturated colour in the frame)
+           · reliquary light  #6eb9ff  (hue 208, the highlight the eye lands on)
+         The field blue is unusable as a chip for the same reason 浸蓝's #0a06d0 was —
+         it sits at 1.8:1 on this palette's near-black — and it also lands within
+         12 degrees of 浸蓝's accent, i.e. a fifth palette the user cannot tell from
+         the fourth. So the accent is the RELIQUARY LIGHT, taken down its own hue
+         until it can carry ink: #6eb9ff at L* 72 becomes #4b93ff at L* 61.
+         Hue stays at 216 — inside the 208–234 band the art itself occupies, and far
+         enough from the app's own royal blue (#4d6bfe, hue 229, G < R) that a chip
+         cannot be mistaken for "no theme installed". This is the only palette whose
+         accent is darker than the colour it was sampled from; the other four climb.
+
+         HOVER IGNITES, for the third time, and this is the honest reason: the dip
+         used by 谷地黄 and 武陵青 (ΔL* -6.6) still measures 4.95:1 under ink, so it
+         would be legal — but it leaves 0.45 of headroom on the most-reused pairing
+         in the theme, and the next nudge of the accent eats it. The light goes up
+         instead (#7ab2ff, ΔL* +7, ink 8.69:1), which is also the only direction the
+         reference ever moves: every blue in that frame is light coming out of
+         something.
+
+         MEASURED (worst surface of each role):
+           ink #101110 on the accent          6.23:1   (solid chips/buttons, AA)
+           accent as dark-mode ink/text       5.76:1   on #181a18
+           accent as TEXT on cream            2.47:1   — a fill, never a text step,
+             so paper mode uses #1b3fb0 for accent-as-text (7.16:1)
+           turn status, light  #1b3fb0 / #0b2a74   7.16 / 10.69
+           turn status, dark   #4b93ff / #a9c6ff   5.76 / 10.18
+             (the dark mid band lifts like the other three: the icy #a9c6ff is the
+             art's own white-blue highlight, not an invented tint)
+
+         GLOW. Alphas are lower than the stock 0.08 / 0.08 on the dark side because
+         this is the brightest accent of the five: |ΔY| 7.37 light and 10.44 dark
+         against a 9.90 / 11.28 budget. 0.09 dark would have read at 11.1, inside the
+         budget but on its edge; 0.085 keeps a breath of room.
+
+         WORDMARK. This palette is the reason the background word is a variable at
+         all — the requester asked for "The Foundation" in the background instead of
+         "Endfield" (see the watermark section below). 5.3vw is not a guess: at the
+         shipped 9.5vw / 0.1em tracking, "ENDFIELD" sets 5.70em wide, so matching
+         that measure for the 13-glyph "THE FOUNDATION" (10.24em) needs 5.30vw. */
+      body.theme-endfield-foundation {
+        --edge-accent: #4b93ff;
+        /* Same colour, channel-list form, for the ~30 rgba() washes. */
+        --edge-accent-rgb: 75, 147, 255;
+        /* The IGNITION step — see the note above; brighter, not deeper. */
+        --edge-accent-deep: #7ab2ff;
+        /* Blue under ink is 2.47:1, so light-mode text on a filled accent is paper.
+           This is the fill step that still separates from cream: 7.16:1. */
+        --edge-accent-onpaper: #1b3fb0;
+        --edge-status-light: #1b3fb0;
+        --edge-status-light-mid: #0b2a74;
+        --edge-status-dark: #4b93ff;
+        --edge-status-dark-mid: #a9c6ff;
+        --edge-glow-light: 0.08;
+        --edge-glow-dark: 0.085;
+        /* The one palette that renames the decoration rather than recolouring it. */
+        --edge-wordmark: 'THE FOUNDATION';
+        --edge-wordmark-size: 5.3vw;
+      }
       /* Token-derived aliases. These MUST be on body, not :root — see above. */
       body {
         --edge-signal: var(--edge-accent);
@@ -405,6 +468,15 @@
          Floor is ~1.06:1, below which the mark reads as absent. */
       body {
         --edge-wm-alpha: 0.13;
+        /* What the mark SAYS, and how big. Both are variables for one reason: 基石蓝
+           asks for a different name in the same decorative role, and a second copy of
+           the rule behind body.theme-endfield-foundation would be two places to keep
+           in sync with the JS that sizes the element.
+           The size travels with the word instead of being fixed, because the marks
+           must occupy the same measure (5.70em) or the wider one clips at the frame
+           edge. See the foundation block for the arithmetic. */
+        --edge-wordmark: 'ENDFIELD';
+        --edge-wordmark-size: 9.5vw;
       }
       body[data-ds-dark-theme] {
         --edge-wm-alpha: 0.085;
@@ -414,7 +486,10 @@
          have nothing to rewrite — the brand name cannot be turned into "终末地" or
          similar. The element's own text stays empty; ::before carries the letters. */
       [data-endfield-watermark]::before {
-        content: 'ENDFIELD';
+        /* Still CSS-generated, so page translators (which walk text nodes) have
+           nothing to rewrite; only the source string became a variable, so 基石蓝
+           can print THE FOUNDATION through the identical rule. */
+        content: var(--edge-wordmark, 'ENDFIELD');
         display: block;
         white-space: nowrap;
       }

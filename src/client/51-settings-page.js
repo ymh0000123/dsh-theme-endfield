@@ -6,8 +6,8 @@
        palette id, and PALETTES owns which ids exist and in what order the <select>
        offers them — so the option list, the allow-list in the change handler and
        the runtime class table can never drift apart. */
-    const PALETTE_NAME = { valley: 'paletteValley', wuling: 'paletteWuling', ember: 'paletteEmber', abyss: 'paletteAbyss' }
-    const PALETTE_HINT = { valley: 'paletteHintValley', wuling: 'paletteHintWuling', ember: 'paletteHintEmber', abyss: 'paletteHintAbyss' }
+    const PALETTE_NAME = { valley: 'paletteValley', wuling: 'paletteWuling', ember: 'paletteEmber', abyss: 'paletteAbyss', foundation: 'paletteFoundation' }
+    const PALETTE_HINT = { valley: 'paletteHintValley', wuling: 'paletteHintWuling', ember: 'paletteHintEmber', abyss: 'paletteHintAbyss', foundation: 'paletteHintFoundation' }
     const slots = ctx.get('slots')
     const disposeRows = []
     let disposeSettings = () => { disposeRows.forEach((d) => d()) }

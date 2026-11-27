@@ -65,6 +65,7 @@ const YELLOW_SEL = 'body'          // the default palette lives on plain body
 const CYAN_SEL = 'body.theme-endfield-wuling'
 const EMBER_SEL = 'body.theme-endfield-ember'
 const ABYSS_SEL = 'body.theme-endfield-abyss'
+const FOUNDATION_SEL = 'body.theme-endfield-foundation'
 
 /* The default-palette block is the one that DEFINES --edge-accent (plain `body {`
    appears many times in this stylesheet, so find the right occurrence). */
@@ -82,11 +83,13 @@ const defaultBlock = (() => {
 const cyanBlock = blockOf('      ' + CYAN_SEL)
 const emberBlock = blockOf('      ' + EMBER_SEL)
 const abyssBlock = blockOf('      ' + ABYSS_SEL)
+const foundationBlock = blockOf('      ' + FOUNDATION_SEL)
 
 if (defaultBlock === null) { fail('no body block defines --edge-accent (谷地黄 palette missing)'); }
 if (cyanBlock === null) { fail('no ' + CYAN_SEL + ' block found (武陵青 palette missing)'); }
 if (emberBlock === null) { fail('no ' + EMBER_SEL + ' block found (重燃赤 palette missing)'); }
 if (abyssBlock === null) { fail('no ' + ABYSS_SEL + ' block found (浸蓝 palette missing)'); }
+if (foundationBlock === null) { fail('no ' + FOUNDATION_SEL + ' block found (基石蓝 palette missing)'); }
 if (failures) { console.error('\n' + failures + ' palette check(s) failed'); process.exit(1) }
 
 const palettes = {
@@ -94,6 +97,7 @@ const palettes = {
   '武陵青': cyanBlock,
   '重燃赤': emberBlock,
   '浸蓝': abyssBlock,
+  '基石蓝': foundationBlock,
 }
 
 /* ---------- 1. accent used as a SOLID FILL under ink text ----------
@@ -182,6 +186,8 @@ const strokes = {
   '重燃赤 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_EMBER')), LIGHT_BGS['bg-base']],
   '浸蓝 dark': [strokeOf(tagged('EDGE_STROKE_DARK_ABYSS')), DARK_BGS['bg-base']],
   '浸蓝 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_ABYSS')), LIGHT_BGS['bg-base']],
+  '基石蓝 dark': [strokeOf(tagged('EDGE_STROKE_DARK_FOUNDATION')), DARK_BGS['bg-base']],
+  '基石蓝 light': [strokeOf(tagged('EDGE_STROKE_LIGHT_FOUNDATION')), LIGHT_BGS['bg-base']],
 }
 const strokeContrast = {}
 let strokesFound = true
@@ -194,7 +200,7 @@ if (strokesFound) {
     const y = strokeContrast['谷地黄 ' + mode]
     // Every non-default palette is compared against the same yellow reference,
     // not against whichever palette happened to be checked last.
-    for (const name of ['武陵青', '重燃赤', '浸蓝']) {
+    for (const name of ['武陵青', '重燃赤', '浸蓝', '基石蓝']) {
       const c = strokeContrast[name + ' ' + mode]
       const drift = Math.abs(c - y) / y
       const line = mode + ' 等高线描边强度：谷地黄 ' + y.toFixed(3) + ':1 / ' + name + ' ' + c.toFixed(3) + ':1'
@@ -258,7 +264,8 @@ const ay = varIn(palettes['谷地黄'], '--edge-accent')
 const ac = varIn(palettes['武陵青'], '--edge-accent')
 const ae = varIn(palettes['重燃赤'], '--edge-accent')
 const aa = varIn(palettes['浸蓝'], '--edge-accent')
-const accents = { '谷地黄': ay, '武陵青': ac, '重燃赤': ae, '浸蓝': aa }
+const af = varIn(palettes['基石蓝'], '--edge-accent')
+const accents = { '谷地黄': ay, '武陵青': ac, '重燃赤': ae, '浸蓝': aa, '基石蓝': af }
 for (const [a, av] of Object.entries(accents)) {
   for (const [b, bv] of Object.entries(accents)) {
     if (a >= b || av === null || bv === null) continue

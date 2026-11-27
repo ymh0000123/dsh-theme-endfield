@@ -1,6 +1,6 @@
 
-    /* ---------- accent palette: 谷地黄 (default) / 武陵青 / 重燃赤 / 浸蓝 ----------
-       The palette is ONE class on <body>; the stylesheet defines all four
+    /* ---------- accent palette: 谷地黄 (default) / 武陵青 / 重燃赤 / 浸蓝 / 基石蓝 ----------
+       The palette is ONE class on <body>; the stylesheet defines all five
        variable sets, so switching is a class flip with no restyling work here.
        Because the app applies its theme tokens as inline body styles and this
        theme's token overrides are var(--edge-accent) references, those tokens
@@ -9,9 +9,9 @@
 
        'valley' (谷地黄, signal yellow) is the DEFAULT, so an unset field and any
        unrecognised value both mean yellow. Only the exact literals 'wuling' /
-       'ember' / 'abyss' select the others, which keeps a corrupt stored value
-       (schema rejects / outside the fallback) from silently changing the shipped
-       look.
+       'ember' / 'abyss' / 'foundation' select the others, which keeps a corrupt
+       stored value (schema rejects / outside the fallback) from silently changing
+       the shipped look.
 
        The map is the single place that knows a palette's class name. Everything
        downstream asks activePalette() instead of testing one class by name, so a
@@ -28,12 +28,13 @@
       wuling: 'theme-endfield-wuling',
       ember: 'theme-endfield-ember',
       abyss: 'theme-endfield-abyss',
+      foundation: 'theme-endfield-foundation',
     }
     /* Order is the shipped order, not a set: the settings row lists these as the
        options of its <select>, so this array is simultaneously the allow-list for
        a stored value and the order the user reads. The reading order is
-       deliberate — default (warm), cool, hot, deep. */
-    const PALETTES = ['valley', 'wuling', 'ember', 'abyss']
+       deliberate — default (warm), cool, hot, deep, ice. */
+    const PALETTES = ['valley', 'wuling', 'ember', 'abyss', 'foundation']
     const readPalette = () => {
       const stored = prefsGet(PALETTE_KEY)
       return PALETTES.indexOf(stored) === -1 ? 'valley' : stored
@@ -53,6 +54,7 @@
     const isWulingPalette = () => activePalette() === 'wuling'
     const isEmberPalette = () => activePalette() === 'ember'
     const isAbyssPalette = () => activePalette() === 'abyss'
+    const isFoundationPalette = () => activePalette() === 'foundation'
     /* No nextPalette() any more: the settings row is a <select>, so "which one do
        I get" is answered by the option the user picked rather than by arithmetic
        over this array. The order above still matters — it is the option order. */

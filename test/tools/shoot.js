@@ -1,6 +1,6 @@
 /**
  * shoot.js — render the real client.js over a mock of the app and save PNGs for
- * visual review: both colour schemes x all four accent palettes (谷地黄 / 武陵青 / 重燃赤 / 浸蓝).
+ * visual review: both colour schemes x all five accent palettes (谷地黄 / 武陵青 / 重燃赤 / 浸蓝 / 基石蓝).
  * Correctness checks live in the .test.js files; this exists purely so the result
  * can be LOOKED at.
  *
@@ -30,7 +30,7 @@ if (!chrome) { console.error('no chrome'); process.exit(1) }
    reads the stored field and puts one class on <body>. Nothing else differs
    between the renders, which is the point — if a surface does not change colour,
    it is not reading the palette variables. */
-const PALETTE_LABEL = { valley: '谷地黄 #fff500', wuling: '武陵青 #14d0d0', ember: '重燃赤 #ff3b2e', abyss: '浸蓝 #7d6fff' }
+const PALETTE_LABEL = { valley: '谷地黄 #fff500', wuling: '武陵青 #14d0d0', ember: '重燃赤 #ff3b2e', abyss: '浸蓝 #7d6fff', foundation: '基石蓝 #4b93ff' }
 const mk = (dark, palette) => `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body,#root{height:100%;margin:0}
   :root{
@@ -181,7 +181,7 @@ const mk = (dark, palette) => `<!doctype html><html><head><meta charset="utf-8">
 
 fs.mkdirSync(OUT, { recursive: true })
 fs.copyFileSync(path.join(ROOT, 'client.js'), path.join(OUT, 'client.js'))
-const PALETTES = ['valley', 'wuling', 'ember', 'abyss']
+const PALETTES = ['valley', 'wuling', 'ember', 'abyss', 'foundation']
 for (const palette of PALETTES) {
   for (const dark of [false, true]) {
     const name = 'shot-' + palette + '-' + (dark ? 'dark' : 'light')

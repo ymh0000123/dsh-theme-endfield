@@ -1108,12 +1108,14 @@
       // EDGE_STROKE_DARK_CYAN: #14d0d045
       // EDGE_STROKE_DARK_EMBER: #ff3b2e66
       // EDGE_STROKE_DARK_ABYSS: #7d6fff61
-      dark: { valley: '#fff50033', wuling: '#14d0d045', ember: '#ff3b2e66', abyss: '#7d6fff61' },
+      // EDGE_STROKE_DARK_FOUNDATION: #4b93ff55
+      dark: { valley: '#fff50033', wuling: '#14d0d045', ember: '#ff3b2e66', abyss: '#7d6fff61', foundation: '#4b93ff55' },
       // EDGE_STROKE_LIGHT_YELLOW: #beaf006b
       // EDGE_STROKE_LIGHT_CYAN: #14d0d07a
       // EDGE_STROKE_LIGHT_EMBER: #ff3b2e36
       // EDGE_STROKE_LIGHT_ABYSS: #2831cc26
-      light: { valley: '#beaf006b', wuling: '#14d0d07a', ember: '#ff3b2e36', abyss: '#2831cc26' },
+      // EDGE_STROKE_LIGHT_FOUNDATION: #1b3fb022
+      light: { valley: '#beaf006b', wuling: '#14d0d07a', ember: '#ff3b2e36', abyss: '#2831cc26', foundation: '#1b3fb022' },
     }
     const contourStroke = () => {
       const table = CONTOUR_STROKE[isDarkScheme() ? 'dark' : 'light']

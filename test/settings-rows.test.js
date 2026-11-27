@@ -242,7 +242,7 @@ for (const label of ['主题配色', '等高线背景', '动态等高线']) {
 }
 
 /* --- the palette row: ONE dropdown listing every palette, default 谷地黄 ---
-   A <select>, not a cycle button: with four palettes the row has to show the
+   A <select>, not a cycle button: with five palettes the row has to show the
    choices at once and mark the live one, instead of naming "what is next". The
    assertions below read the real option list off the tree, so a palette that
    exists in the runtime but not in the dropdown (or the reverse) fails here. */
@@ -255,9 +255,9 @@ else {
   const opts = (paletteSelect.children || []).filter((c) => c && c.type === 'option')
   const values = opts.map((o) => o.props.value)
   const labels = opts.map((o) => textOf(o))
-  if (values.join(',') === 'valley,wuling,ember,abyss') pass('下拉按 PALETTES 顺序列出四套配色')
+  if (values.join(',') === 'valley,wuling,ember,abyss,foundation') pass('下拉按 PALETTES 顺序列出五套配色')
   else fail('palette options out of order: ' + JSON.stringify(values))
-  for (const name of ['谷地黄', '武陵青', '重燃赤', '浸蓝']) {
+  for (const name of ['谷地黄', '武陵青', '重燃赤', '浸蓝', '基石蓝']) {
     if (labels.includes(name)) pass('下拉项存在：' + name)
     else fail('palette option missing: ' + name)
   }
@@ -469,6 +469,19 @@ if (text3c.includes('浸蓝') && paletteSelectOf(tree3c).props.value === 'abyss'
 else fail('with abyss stored the palette select should hold abyss')
 if (text3c.includes('#7D6FFF')) pass('设置行标注 #7D6FFF')
 else fail('the palette row should state #7D6FFF')
+
+/* 基石蓝 is the fifth option and the only palette that renames the decorative
+   mark. This walk stays on the setField() side of the click below — once the
+   dropdown has been used, its session-local overlay outranks the store and would
+   mask this. */
+prefStore.setField('palette', 'foundation')
+let treeFound
+try { treeFound = rendered() } catch (e) { fail('re-render (foundation) threw: ' + e.message); process.exit(1) }
+const textFound = textOf(treeFound)
+if (textFound.includes('基石蓝') && paletteSelectOf(treeFound).props.value === 'foundation') pass('存了 foundation 时下拉选中基石蓝')
+else fail('with foundation stored the palette select should hold foundation')
+if (textFound.includes('#4B93FF')) pass('设置行标注 #4B93FF')
+else fail('the palette row should state #4B93FF')
 
 /* Picking an option persists THAT literal — no next/previous arithmetic, so a
    direct jump across the list (abyss -> valley) must work in one gesture. */

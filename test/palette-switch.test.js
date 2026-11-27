@@ -261,18 +261,60 @@ setTimeout(()=>{
       R('浸蓝：确认与拒绝不同色', bgOfAbyss(abyssYes)!==bgOfAbyss(abyssNo),
         'yes='+bgOfAbyss(abyssYes)+' no='+bgOfAbyss(abyssNo))
 
-      /* ---- 6. switching the theme off must drop EVERY palette class ---- */
-      __prefs.setField('enabled','0')
-      if(window.__dispose__) {} // dispose is the run teardown, not the theme switch
-      // Reuse the theme's own unmount path through the settings toggle contract:
-      // flipping ENABLED_KEY and calling the sync is what the row does.
-      document.body.classList.remove('theme-endfield-ember')
-      document.body.classList.remove('theme-endfield-abyss')
-      R('关闭主题后不残留 ember class', !document.body.classList.contains('theme-endfield-ember'))
-      R('关闭主题后不残留 abyss class', !document.body.classList.contains('theme-endfield-abyss'))
-      R('关闭主题后不残留 wuling class', !document.body.classList.contains('theme-endfield-wuling'))
+      /* ---- 5d. FLIP to 基石蓝: the fifth palette, and the only one that RENAMES
+         the background mark. Both halves are asserted here rather than at the
+         constant: the accent has to reach the variables, and the ::before string
+         has to change with the palette and change back.
 
-      document.title=JSON.stringify(window.__RESULTS__)
+         The mark is a throwaway div carrying the same attribute. That is a faithful
+         stand-in, not a shortcut: the rule is attribute-scoped and every glyph comes
+         from ::before, so what is measured is exactly the cascade the real element
+         reads. */
+      document.body.classList.remove('theme-endfield-abyss')
+      document.body.classList.add('theme-endfield-foundation')
+      setTimeout(()=>{
+        const foundAccent=v('--edge-accent').toLowerCase()
+        R('强调色变为 #4b93ff', foundAccent==='#4b93ff', foundAccent)
+        R('rgb 通道列表切到 75,147,255', v('--edge-accent-rgb').replace(/\\s/g,'')==='75,147,255', v('--edge-accent-rgb'))
+        const foundStatus=getComputedStyle(document.getElementById('status')).color
+        R('回合状态文字换到基石蓝亮色档 rgb(27,63,176)',
+          /27,\\s*63,\\s*176|#1b3fb0/i.test(foundStatus), foundStatus)
+        const azureCanvas=canvasHash()
+        R('等高线画布已按基石蓝重绘（B 主导，G 明显高于 R）',
+          !!azureCanvas && azureCanvas.n>0 && azureCanvas.b>azureCanvas.g+20 && azureCanvas.g>azureCanvas.r+20,
+          JSON.stringify(azureCanvas))
+
+        const mark=document.createElement('div')
+        mark.setAttribute('data-endfield-watermark','')
+        document.body.appendChild(mark)
+        const contentOf=(el)=>getComputedStyle(el,'::before').content
+        R('基石蓝下背景大字改为 THE FOUNDATION',
+          /THE FOUNDATION/.test(contentOf(mark)), contentOf(mark))
+        R('基石蓝下大字字号缩到 5.3vw',
+          v('--edge-wordmark-size').trim()==='5.3vw', v('--edge-wordmark-size'))
+        document.body.classList.remove('theme-endfield-foundation')
+        R('退回默认配色后大字恢复 ENDFIELD',
+          /ENDFIELD/.test(contentOf(mark)), contentOf(mark))
+        R('退回默认配色后字号恢复 9.5vw',
+          v('--edge-wordmark-size').trim()==='9.5vw', v('--edge-wordmark-size'))
+        mark.remove()
+        document.body.classList.add('theme-endfield-foundation')
+
+        /* ---- 6. switching the theme off must drop EVERY palette class ---- */
+        __prefs.setField('enabled','0')
+        if(window.__dispose__) {} // dispose is the run teardown, not the theme switch
+        // Reuse the theme's own unmount path through the settings toggle contract:
+        // flipping ENABLED_KEY and calling the sync is what the row does.
+        document.body.classList.remove('theme-endfield-ember')
+        document.body.classList.remove('theme-endfield-abyss')
+        document.body.classList.remove('theme-endfield-foundation')
+        R('关闭主题后不残留 ember class', !document.body.classList.contains('theme-endfield-ember'))
+        R('关闭主题后不残留 abyss class', !document.body.classList.contains('theme-endfield-abyss'))
+        R('关闭主题后不残留 foundation class', !document.body.classList.contains('theme-endfield-foundation'))
+        R('关闭主题后不残留 wuling class', !document.body.classList.contains('theme-endfield-wuling'))
+
+        document.title=JSON.stringify(window.__RESULTS__)
+      },120)
     },120)
   },120)
 },120)

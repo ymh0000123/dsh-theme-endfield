@@ -205,7 +205,7 @@ if (openIdx < 0) {
     // Every non-default palette must exist as an override block, or that step of
     // the cycle is inert. Driven by a list so a palette added to the client but
     // forgotten in the sheet fails here instead of silently doing nothing.
-    for (const cls of ['theme-endfield-wuling', 'theme-endfield-ember', 'theme-endfield-abyss']) {
+    for (const cls of ['theme-endfield-wuling', 'theme-endfield-ember', 'theme-endfield-abyss', 'theme-endfield-foundation']) {
       if (new RegExp('body\\.' + cls + '\\s*\\{').test(stripped)) {
         pass(cls + ' palette block is present')
       } else {
