@@ -158,16 +158,18 @@ const buttons = nodes.filter((n) => n.type === 'button')
    passed while a tenth row was on screen). The independent total below is what
    makes that impossible now. */
 /* The row set is the union of several lines of work: the theme / background /
-   animation / thunder rows, the balance-capsule cluster (position, sidebar and
-   pointer auto-hide, credit readout) and the 11 audio rows. The count is
-   asserted below against the rendered tree as well, so a row that exists in the
-   page but not in this list still fails. */
-const ROW_KEYS = ['theme', 'palette', 'glass', 'radius', 'contour', 'contour-anim', 'contour-trail', 'contour-renderer', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'scroll-anim', 'scroll-anim-level', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim', 'balance-capsule', 'balance-capsule-position', 'balance-capsule-sidebar-hide', 'balance-capsule-hover-hide', 'credit-display', 'audio', 'audio-boot', 'audio-start', 'audio-done', 'audio-volume', 'audio-attention', 'audio-fail', 'audio-source', 'audio-dir', 'audio-human', 'audio-diag']
+   animation / thunder rows (including the one that customises the announcement
+   words; the letter line under them is fixed decoration, not a row), the
+   balance-capsule cluster (position, sidebar and pointer auto-hide,
+   credit readout) and the 11 audio rows. The count is asserted below against the
+   rendered tree as well, so a row that exists in the page but not in this list
+   still fails. */
+const ROW_KEYS = ['theme', 'palette', 'glass', 'radius', 'contour', 'contour-anim', 'contour-trail', 'contour-renderer', 'contour-fps', 'contour-speed', 'contour-scroll-pause', 'scroll-anim', 'scroll-anim-level', 'watermark', 'watermark-persist', 'loader', 'thunder', 'thunder-anim', 'thunder-text', 'balance-capsule', 'balance-capsule-position', 'balance-capsule-sidebar-hide', 'balance-capsule-hover-hide', 'credit-display', 'audio', 'audio-boot', 'audio-start', 'audio-done', 'audio-volume', 'audio-attention', 'audio-fail', 'audio-source', 'audio-dir', 'audio-human', 'audio-diag']
 const rows = nodes.filter((n) => n.type === 'div' && n.props && ROW_KEYS.includes(n.props.key))
 const groups = (tree.children || []).filter((c) => c && c.type === 'div' && c.props && /^group-/.test(c.props.key))
 
-if (rows.length === 34) pass('panel has all 34 setting rows')
-else fail('expected 34 rows, found ' + rows.length)
+if (rows.length === 35) pass('panel has all 35 setting rows')
+else fail('expected 35 rows, found ' + rows.length)
 
 /* Count the rows the way the PAGE defines them. Since the folding subsections
    landed, a row is no longer a DIRECT child of its group container — it sits

@@ -184,6 +184,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       loader: '0',
       thunder: '0',
       thunderAnim: '0',
+      /* 播报词。空串 = 沿用内置文案（「任务开始」/「任务完成」），这样升级本身
+         不会改变任何人的界面。底部那行字母是固定装饰，没有字段。 */
+      thunderStartText: '',
+      thunderDoneText: '',
       /* 顶部余额胶囊 — opt-in, like thunder: a fixed capsule at the top center
          of the frame showing the account balance, fed by the host-side
          /theme-endfield/balance route. Ships OFF so an upgrade never adds a
@@ -284,6 +288,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       'dsh-theme-endfield-loader': 'loader',
       'dsh-theme-endfield-thunder': 'thunder',
       'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+      'dsh-theme-endfield-thunder-start-text': 'thunderStartText',
+      'dsh-theme-endfield-thunder-done-text': 'thunderDoneText',
       'dsh-theme-endfield-balance-capsule': 'balanceCapsule',
       'dsh-theme-endfield-credit-display': 'creditDisplay',
       'dsh-theme-endfield-balance-capsule-position': 'balanceCapsulePosition',
@@ -357,6 +363,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     const AUDIO_STATE_URL = '/theme-endfield/audio/state'
     const AUDIO_PREVIEW_URL = '/theme-endfield/audio/preview'
     const AUDIO_ATTENTION_URL = '/theme-endfield/audio/attention'
+    /* One slot at a time, raw wav body. The host caps the body at the same
+       number, so this check only saves a doomed round trip; the authoritative
+       limits (wav format, 2.5 s duration) live in lib/audio.js. */
+    const AUDIO_UPLOAD_URL = '/theme-endfield/audio/upload'
+    const AUDIO_UPLOAD_LIMIT = 8 * 1024 * 1024
     /* ---------- 顶部余额胶囊 (host half owns the balance query) ----------
        The page cannot reach the account service itself — only Host consumers
        can obtain the request credential — so the capsule polls the host-side
@@ -4442,8 +4453,67 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
        With it off the word still appears instantly, holds 3s and leaves; only the
        scale punch and the fade are dropped. */
     const THUNDER_ANIM_KEY = 'dsh-theme-endfield-thunder-anim'
+    /* 播报词：默认值仍是这两句，自定义字段留空即沿用它们——升级不会改变任何人
+       的界面，清空输入框也就等于恢复默认。 */
     const THUNDER_START = '任务开始'
     const THUNDER_DONE = '任务完成'
+    const THUNDER_START_TEXT_KEY = 'dsh-theme-endfield-thunder-start-text'
+    const THUNDER_DONE_TEXT_KEY = 'dsh-theme-endfield-thunder-done-text'
+    /* 大字下方的字母行——**跟着这张板走，但仍然不是可编辑字段**。
+       它不写死成同一个串：开始与完成各有一个内置落款，播报词本身若是一串
+       拉丁字母（用户把大字改成英文时），就取那串词做落款——上面写什么，下面
+       就是它的大写字形，两行才像同一块板上的东西。
+       为什么仍然不给输入框：这行用萨卡兹字形渲染，字形只与 A-Z / 0-9 一一对应，
+       而游戏里这类串本身也多是装饰性直替。让用户直接填，等于把「这串字读作
+       什么」这个项目自己都答不出的问题丢给别人；跟随大字则是可验证的——下面
+       永远是上面的字形化，不是另一句需要翻译的话。 */
+    const THUNDER_FOOTER_START = 'MISSION START'
+    const THUNDER_FOOTER_DONE = 'MISSION COMPLETE'
+    /* 落款比大字多一档余量：拉丁串转大写后最容易撞上的是窄屏换行，18 个字符位
+       在最小字号下仍能放进 88vw（样式表里是同一条 nowrap 规则）。 */
+    const THUNDER_FOOTER_LIMIT = 18
+    const THUNDER_TEXT_LIMIT = 24
+    const clampText = (value, limit) => Array.from(value).slice(0, limit).join('')
+    /**
+     * One announcement word, custom or shipped.
+     *
+     * Read at the moment the word is shown, never cached at apply() time: the
+     * settings field writes the pref and the next task boundary uses it, with no
+     * reload and no second source of truth for the default.
+     *
+     * @param key - the pref key holding the custom text.
+     * @param fallback - the shipped word, used when the field is blank.
+     */
+    const thunderWord = (key, fallback) => {
+      const raw = prefsGet(key)
+      if (typeof raw !== 'string') return fallback
+      const text = raw.trim()
+      return text === '' ? fallback : clampText(text, THUNDER_TEXT_LIMIT)
+    }
+    const thunderStartWord = () => thunderWord(THUNDER_START_TEXT_KEY, THUNDER_START)
+    const thunderDoneWord = () => thunderWord(THUNDER_DONE_TEXT_KEY, THUNDER_DONE)
+    /**
+     * The letter line that goes under one announcement word.
+     *
+     * A Latin word is used AS the footer — uppercased, punctuation dropped — so the
+     * two lines always belong to each other: `DEPLOY` up top means `DEPLOY` below,
+     * in Sarkaz glyphs. A Chinese word (the shipped default, and the common custom
+     * case) cannot be transcribed — the font maps glyphs to A-Z/0-9 only — so it
+     * falls back to the built-in caption for that kind of plate.
+     *
+     * The whole word must be printable ASCII, not merely contain some: 「开工 v2」
+     * would otherwise produce a two-character footer that reads as a typo. Falling
+     * back is the honest outcome there, and it keeps the rule one sentence long.
+     *
+     * @param word - the announcement word actually being shown.
+     * @param fallback - the built-in caption for this kind of plate.
+     */
+    const thunderFooter = (word, fallback) => {
+      if (typeof word !== 'string' || !/^[\x20-\x7E]+$/.test(word)) return fallback
+      const latin = word.toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (latin === '') return fallback
+      return clampText(latin, THUNDER_FOOTER_LIMIT)
+    }
     // Hold time, per the request: visible for 3s, then gone.
     const THUNDER_MS = 3000
     // Default OFF (=== '1' rather than !== '0'): opt-in, like the boot animation.
@@ -4473,8 +4543,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     /* Announce one word. A second call inside the 3s window REPLACES the first
        (turn/end immediately followed by a queued turn/start is a real sequence), so
        the node is rebuilt rather than reused — that restarts the CSS animation,
-       which merely re-setting textContent would not. */
-    const showThunder = (text) => {
+       which merely re-setting textContent would not.
+
+       `caption` is the fallback letter line, not the final one: the plate derives its
+       footer from the word it is about to draw (see thunderFooter), so a caller only
+       has to say which KIND of plate this is. */
+    const showThunder = (text, caption) => {
       if (!isEnabled() || !isThunderOn()) return
       if (typeof document === 'undefined' || !document.body) return
       destroyThunder()
@@ -4492,6 +4566,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       word.setAttribute('data-endfield-thunder-word', '')
       word.textContent = text
       el.appendChild(word)
+      /* 底部字母行：装饰签名，内容由大字派生（见 thunderFooter）。独立节点而不是
+         并进 word.textContent，否则它会继承大字那条 clamp(44px, 13vw, 176px)，
+         变成第二行铺满屏幕的字。 */
+      const line = document.createElement('span')
+      line.setAttribute('data-endfield-thunder-footer', '')
+      line.textContent = thunderFooter(text, caption)
+      el.appendChild(line)
       document.body.appendChild(el)
       thunderEl = el
       /* CLICK ANYWHERE TO DISMISS EARLY, without waiting out the 3s.
@@ -4714,7 +4795,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           thunderLastRunning = next
           // First readable value is the baseline, not an edge — see the note above.
           if (prev === null) return
-          showThunder(next ? THUNDER_START : THUNDER_DONE)
+          showThunder(next ? thunderStartWord() : thunderDoneWord(),
+            next ? THUNDER_FOOTER_START : THUNDER_FOOTER_DONE)
         })
       } catch (e) {
         unsub = null
@@ -6052,6 +6134,30 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
     })
 
     disposeStyles = insertCss(`
+      /* 萨卡兹字形：内嵌的 EndfieldByButan.ttf（罗醭坦，CC BY-NC 4.0，非商用）。
+
+         为什么是 base64 而不是 assets 里的 ttf 或一条宿主路由：本插件的交付物
+         只有 client.js 一个文件（见 src/client/manifest.js 的开头），字体放外部
+         就得再挂一条静态路由，而路由在 webServer 缺席时不存在——那时底部字母行
+         会悄悄退回系统字体，属于「看起来像坏了」。内联 19KB 换来零依赖、零请求、
+         单文件不变。原字体仍留在 assets/fonts/ 作为出处与可复现来源，
+         test/sarkaz-font.test.js 用 SHA-256 钉住两者一致。
+
+         字体只覆盖 A-Z a-z 0-9 与部分标点（U+0020–U+007E 为主）：汉字、č/š/ğ
+         这类带变音符的拼写没有字形，会按 font-family 回退到系统字体，这是刻意的
+         ——装饰行里混排中文时不该整行变空白。
+
+         本文件由 scripts/build-font.js 生成，不要手改：改字体后跑 npm run font:build。 */
+      @font-face {
+        font-family: "Endfield Sarkaz";
+        font-style: normal;
+        /* 字体只有 Regular：声明 400 并让使用处不做合成加粗，否则字形会被撑变形。 */
+        font-weight: 400;
+        /* 内联数据不会有网络等待，block 只是保证「先有字形再画」，
+           避免 3 秒的播报窗口里先闪一帧拉丁字母。 */
+        font-display: block;
+        src: url("data:font/ttf;base64,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ABUAFgAXABgAGQAaABsAHAAdAB4AHwAgACEAIgAjACQAJQAmACcAKAApACoAKwAsAC0ALgAvADAAMQAyADMANAA1ADYANwA4ADkAOgA7ADwAPQA+AD8AQABBAEIAQwBEAEUARgBHAEgASQBKAEsATABNAE4ATwBQAFEAUgBTAFQAVQBWAFcAWABZAFoAWwBcAF0AXgBfAGAAYQCjAIQAhQC9AJYA6ACGAI4AiwCdAQMApACKANoAgwCTAPIA8wCNAJcAiADDAN4A8QCeAQQA9QD0APYAogCtAMkAxwCuAGIAYwCQAGQAywBlAMgAygDPAMwAzQDOAOkAZgDTANAA0QCvAGcA8ACRANYA1ADVAGgA6wDtAIkAagBpAGsAbQBsAG4AoABvAHEAcAByAHMAdQB0AHYAdwDqAHgAegB5AHsAfQB8ALgAoQB/AH4AgACBAOwA7gC6AQUBBgEHAQgBCQEKAQsBDAENAQ4BDwCyALMAtgC3AMQAtAC1AMUAggDCAIcAqwC+AL8AvAEQAREBEgETARQAjAEVARYBFwEYAO8BGQCSAJwBGgEbARwAwADBC2h5cGhlbm1pbnVzDWd1aWxsZW1ldGxlZnQOZ3VpbGxlbWV0cmlnaHQIaWRvdGxlc3MJZ3JhdmVjb21iCWFjdXRlY29tYg5jaXJjdW1mbGV4Y29tYgl0aWxkZWNvbWIKbWFjcm9uY29tYg1kb3RhY2NlbnRjb21iDGRpZXJlc2lzY29tYghyaW5nY29tYgljYXJvbmNvbWILY2VkaWxsYWNvbWIPZnJlbmNoZnJhbmNzaWduCGxpcmFzaWduCnBlc2V0YXNpZ24EZXVybwpudW1lcm9zaWduE3BhcnRpYWxkaWZmZXJlbnRpYWwJaW5jcmVtZW50C25hcnlwcm9kdWN0DW5hcnlzdW1tYXRpb24Kc3F1YXJlcm9vdA1hbG1vc3RlcXVhbHRvEWxlc3N0aGFub3JlcXVhbHRvFGdyZWF0ZXJ0aGFub3JlcXVhbHRvAAEAAf//AA8AAAAAAAAAAAAAAAAAAAAAAAAAAACPAI8BZQH0AfQD6AV4AAAD6APoAAAAAAV4AAAD6APoAAAAALAALCCwAFVYRVkgIEu4AA5RS7AGU1pYsDQbsChZYGYgilVYsAIlYbkIAAgAY2MjYhshIbAAWbAAQyNEsgABAENgQi2w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OCFZsTABFCstsEcssQA6Ky6xMAEUKy2wSCyxADsrISMgIDywBiNCIzixMAEUK7AGQy6wMCstsEkssAAVIEewACNCsgABARUUEy6wNiotsEossAAVIEewACNCsgABARUUEy6wNiotsEsssQABFBOwNyotsEwssDkqLbBNLLAAFkUjIC4gRoojYTixMAEUKy2wTiywCiNCsE0rLbBPLLIAAEYrLbBQLLIAAUYrLbBRLLIBAEYrLbBSLLIBAUYrLbBTLLIAAEcrLbBULLIAAUcrLbBVLLIBAEcrLbBWLLIBAUcrLbBXLLMAAABDKy2wWCyzAAEAQystsFksswEAAEMrLbBaLLMBAQBDKy2wWyyzAAABQystsFwsswABAUMrLbBdLLMBAAFDKy2wXiyzAQEBQystsF8ssgAARSstsGAssgABRSstsGEssgEARSstsGIssgEBRSstsGMssgAASCstsGQssgABSCstsGUssgEASCstsGYssgEBSCstsGcsswAAAEQrLbBoLLMAAQBEKy2waSyzAQAARCstsGosswEBAEQrLbBrLLMAAAFEKy2wbCyzAAEBRCstsG0sswEAAUQrLbBuLLMBAQFEKy2wbyyxADwrLrEwARQrLbBwLLEAPCuwQCstsHEssQA8K7BBKy2wciywABaxADwrsEIrLbBzLLEBPCuwQCstsHQssQE8K7BBKy2wdSywABaxATwrsEIrLbB2LLEAPSsusTABFCstsHcssQA9K7BAKy2weCyxAD0rsEErLbB5LLEAPSuwQistsHossQE9K7BAKy2weyyxAT0rsEErLbB8LLEBPSuwQistsH0ssQA+Ky6xMAEUKy2wfiyxAD4rsEArLbB/LLEAPiuwQSstsIAssQA+K7BCKy2wgSyxAT4rsEArLbCCLLEBPiuwQSstsIMssQE+K7BCKy2whCyxAD8rLrEwARQrLbCFLLEAPyuwQCstsIYssQA/K7BBKy2whyyxAD8rsEIrLbCILLEBPyuwQCstsIkssQE/K7BBKy2wiiyxAT8rsEIrLbCLLLILAANFUFiwBhuyBAIDRVgjIRshWVlCK7AIZbADJFB4sQUBFUVYMFktAEu4AMhSWLEBAY5ZsAG5CAAIAGNwsQAHQrIZAQAqsQAHQrMNCQEKKrEAB0KzFgYBCiqxAAhCugOAAAEACyqxAAlCugCAAAEACyq5AAMAAESxJAGIUViwQIhYuQADAGREsSgBiFFYuAgAiFi5AAMAAERZG7EnAYhRWLoIgAABBECIY1RYuQADAABEWVlZWVmzEAYBDiq4Af+FsASNsQIARLMFZAYAREQA") format("truetype");
+      }
       /* endfield-build/2026-10-06-darker-dim — read this to tell which build's sheet is mounted.
          Kept literal (no template interpolation): check.js requires the stylesheet literal to be
          interpolation-free. test/theme-sheet-refresh.test.js pins it equal to SHEET_MARKER. */
@@ -8716,6 +8822,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
         inset: 0;
         z-index: 2147482000;
         display: flex;
+        /* Column, not row: the optional 底部字母行 sits UNDER the word. With a
+           single child the two directions lay out identically, so the plate that
+           shipped before the footer existed is unchanged. */
+        flex-direction: column;
+        gap: clamp(4px, 1.2vh, 14px);
         align-items: center;
         justify-content: center;
         pointer-events: none;
@@ -8745,6 +8856,47 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           0 0 46px rgba(var(--edge-accent-rgb), 0.45);
         animation: endfield-thunder-word 3000ms cubic-bezier(0.16, 1, 0.3, 1) 1 both;
       }
+      /* 底部字母行：跟着本张板走的装饰落款（文本由 31-thunder.js 的
+         thunderFooter() 从大字派生），不是可编辑的一行字。A separate node with
+         its own scale and its own fade: inheriting the word's
+         clamp(44px, 13vw, 176px) would make a second screen-filling line instead of
+         a caption.
+         字体只有 Regular，所以这里必须自己压掉继承来的 700——合成加粗会把几何
+         字形撑变形；字号也要单独一档，方块字身在 11px 下会糊成一条毛边；字距
+         收窄到 0.16em，宽字距是按拉丁字母的窄字身定的，套到方块字形上会散架。
+         字号上限比 SARKAZ 时代低一档：落款现在可能是 MISSION COMPLETE 这样的长串，
+         16 个字形位乘以行高要在 320px 宽的屏幕上仍放得下 —— 见下面的 nowrap。 */
+      [data-endfield-thunder-footer] {
+        font-family: "Endfield Sarkaz", ui-monospace, "Cascadia Mono", "Consolas", "Courier New", monospace;
+        font-weight: 400;
+        font-size: clamp(14px, 2.4vw, 36px);
+        line-height: 1.2;
+        letter-spacing: 0.16em;
+        text-indent: 0.16em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.9);
+        /* nowrap, not pre-wrap: the caption may contain a space (MISSION START),
+           and breaking there would turn it into two ragged lines. The font size
+           above is chosen so the longest built-in caption still fits 88vw. */
+        white-space: nowrap;
+        max-width: 88vw;
+        text-align: center;
+        text-shadow:
+          0 0 2px rgba(16, 17, 16, 0.55),
+          0 2px 12px rgba(16, 17, 16, 0.6);
+        /* 底板的 gap 是按拉丁字母定的：换成方块字形后行高更实，同样的缝看起来像
+           贴在大字下沿上。补一段，视觉间隔才和大字相称。 */
+        margin-top: clamp(4px, 1.4vh, 16px);
+        animation: endfield-thunder-footer 3000ms ease-out 1 both;
+      }
+      /* Fade only: the plate already carries the slam, and a second overshoot
+         two sizes smaller reads as a glitch rather than as emphasis. */
+      @keyframes endfield-thunder-footer {
+        0%   { opacity: 0; transform: translateY(-0.3em); }
+        8%   { opacity: 1; transform: none; }
+        80%  { opacity: 1; transform: none; }
+        100% { opacity: 0; transform: none; }
+      }
       /* The slam: overshoot in, hold, then fade. Keyframe percentages are the 3s
          hold expressed as one timeline, so a single animation covers entry, hold and
          exit and nothing has to be re-timed in JS. */
@@ -8772,7 +8924,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          'opacity: 0' and rely on the keyframes to bring the word in, so cancelling
          only 'animation' would leave a permanently invisible plate. */
       [data-endfield-thunder][data-endfield-thunder-still],
-      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-word] {
+      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-word],
+      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-footer] {
         animation: none;
         opacity: 1;
         transform: none;
@@ -8782,7 +8935,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
          without going through showThunder(). */
       @media (prefers-reduced-motion: reduce) {
         [data-endfield-thunder],
-        [data-endfield-thunder] [data-endfield-thunder-word] {
+        [data-endfield-thunder] [data-endfield-thunder-word],
+        [data-endfield-thunder] [data-endfield-thunder-footer] {
           animation: none;
           opacity: 1;
           transform: none;
@@ -9567,6 +9721,12 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       thunderAnimHintOn: '大字由大缩小砸入并淡出（关闭后为直接显示，仍保持 3 秒）',
       thunderAnimHintOff: '默认关闭；大字直接出现、3 秒后消失，不做缩放与淡入淡出',
       thunderAnimHintReduced: '系统已开启「减少动态效果」，当前直接显示',
+      /* 播报词：默认留空即沿用原样（「任务开始」/「任务完成」），所以升级不会
+         改变任何人的界面。底部那行字母是固定装饰，没有对应文案可以填。 */
+      thunderTextRow: '播报词',
+      thunderTextHint: '两句都可改；留空用默认「任务开始」/「任务完成」，最多 24 字',
+      thunderTextStart: '开始',
+      thunderTextDone: '完成',
       /* 顶部余额胶囊：数据由宿主路由代理（页面拿不到账户凭证），所以提示里
           说明「余额来自本机服务」而不是承诺实时精确。 */
       balanceRow: '顶部余额胶囊',
@@ -9634,6 +9794,17 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       audioFileBundled: '内置合成音',
       audioFileOwn: '自定义文件',
       audioFileMissing: '未找到文件',
+      /* 上传：文件落在插件自己的目录里（不是用户填的目录），所以「恢复内置」
+         只删自己写的那一个文件，永远不会碰用户自己的素材。 */
+      audioUpload: '上传 wav',
+      audioUploadHint: '选一个 16-bit PCM WAV（不超过 2.5 秒），立即替换该槽位的声音',
+      audioUploadOk: '已替换该槽位的音效',
+      audioUploadFail: '上传失败',
+      audioUploadTooBig: '文件超过 8 MB',
+      audioUploadUnsupported: '当前浏览器不支持读取本地文件',
+      audioRestore: '恢复内置',
+      audioRestoreHint: '删除上传的覆盖音，回落到自定义目录 / 工作区 / 桌面 / 内置音',
+      audioRestoreOk: '已恢复内置音',
       audioHumanOnlyRow: '开始音仅认会话框',
       audioHumanOnlyOn: '仅会话框',
       audioHumanOnlyOff: '宽松模式',
@@ -9764,6 +9935,13 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       thunderAnimHintOn: 'The word punches in from oversized and fades out (appears instantly when off, still held 3s)',
       thunderAnimHintOff: 'Off by default; the word appears instantly and leaves after 3s, with no scaling or fading',
       thunderAnimHintReduced: 'Your system asks for reduced motion, so it appears instantly',
+      /* Blank means "keep the shipped words", so upgrading never changes what
+         anyone sees. The letter line under the big word is fixed decoration
+         and has no field of its own. */
+      thunderTextRow: 'Announcement words',
+      thunderTextHint: 'Both words can be changed; blank keeps the shipped 任务开始 / 任务完成, 24 characters max',
+      thunderTextStart: 'Start',
+      thunderTextDone: 'Finish',
       balanceRow: 'Balance capsule',
       balanceOn: 'Turn on',
       balanceOff: 'Turn off',
@@ -9825,6 +10003,18 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
       audioSoundDirDefault: 'Not set (Desktop / workspace / bundled)',
       audioFileRow: 'Current source',
       audioFileBundled: 'Bundled synthesized tone',
+      /* The upload lands in a directory the plugin owns (not the one typed into
+         the field above), so "restore" only ever deletes a file this plugin
+         wrote — never the user's own material. */
+      audioUpload: 'Upload wav',
+      audioUploadHint: 'Pick a 16-bit PCM WAV (2.5 s max); it replaces this slot immediately',
+      audioUploadOk: 'Slot sound replaced',
+      audioUploadFail: 'Upload failed',
+      audioUploadTooBig: 'File is larger than 8 MB',
+      audioUploadUnsupported: 'This browser cannot read local files',
+      audioRestore: 'Restore built-in',
+      audioRestoreHint: 'Delete the uploaded override and fall back to the custom directory / workspace / Desktop / bundled tone',
+      audioRestoreOk: 'Built-in tone restored',
       audioFileOwn: 'Your own file',
       audioFileMissing: 'No file found',
       audioHumanOnlyRow: 'Start sound: composer only',
@@ -9939,6 +10129,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
           const [audioDiag, setAudioDiag] = R.useState(isAudioDiagOn())
           const [hostState, setHostState] = R.useState(null)
           const [previewNote, setPreviewNote] = R.useState('')
+          /* Upload feedback lives in its OWN note, shown on the 「当前音源」 row
+             instead of the diagnostics row: what an upload changes is exactly
+             what that row lists, and the diagnostics row is where preview
+             results already land (they are about playback, not about files). */
+          const [soundNote, setSoundNote] = R.useState('')
           /* 二级折叠子节的展开表。一个对象存全部子节（id -> bool），而不是每个
              子节一个 useState：这些子节由同一个 render 函数内联构造，没有独立
              的组件类型，逐节建 hook 既无法命名也无法稳定计数。缺省（未登记）
@@ -10255,11 +10450,11 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                appears at some unpredictable later moment gives the user no way to
                tell whether it worked. The preview runs BEFORE the watcher attaches,
                so it cannot be mistaken for a real edge. */
-            if (next) showThunder(THUNDER_START)
+            if (next) showThunder(thunderStartWord(), THUNDER_FOOTER_START)
             else destroyThunder()
             syncThunder()
           }
-          const previewThunder = () => { showThunder(THUNDER_DONE) }
+          const previewThunder = () => { showThunder(thunderDoneWord(), THUNDER_FOOTER_DONE) }
           const toggleBalanceCapsule = () => {
             const next = !isBalanceCapsuleOn()
             prefsSet(BALANCE_KEY, next ? '1' : '0')
@@ -10327,6 +10522,18 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             destroyBalanceCapsule()
             showBalanceCapsule(true)
           }
+          /* 播报词: same writing rules as the custom sound directory —
+             defaultValue + commit on blur/Enter, no per-keystroke state. These
+             fields are read at the next task boundary, so echoing every keystroke
+             into the settings store would buy nothing. The value is clamped to the
+             same limit the renderer applies, so what is stored is exactly what
+             will be drawn. 底部字母行没有对应的输入：它跟着大字走——拉丁词直接
+             转成字形，中文词落回与播报种类绑定的内置落款，见 31-thunder.js 的
+             thunderFooter()。 */
+          const applyThunderText = (key, value, limit) => {
+            const text = typeof value === 'string' ? clampText(value.trim(), limit) : ''
+            prefsSet(key, text)
+          }
           const toggleThunderAnim = () => {
             const next = !isThunderAnimOn()
             prefsSet(THUNDER_ANIM_KEY, next ? '1' : '0')
@@ -10335,7 +10542,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                the plate accordingly. Replaying now is what makes the change legible —
                the difference between the two modes is only visible during the entry,
                so a silent toggle would look like it did nothing. */
-            showThunder(THUNDER_START)
+            showThunder(thunderStartWord(), THUNDER_FOOTER_START)
           }
           const toggleMode = () => {
             const next = (prefsGet(RADIUS_KEY) || 'square') === 'round' ? 'square' : 'round'
@@ -10366,6 +10573,105 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             disabled: !audioOn,
             title: audioOn ? '' : t('audioNeedOn'),
           }, t('audioTest') + ' · ' + t(labelKey))
+          /* ---------- 上传 / 恢复一个槽位自己的音效 ----------
+             The page neither stores nor plays the file: it hands the bytes to
+             the host, which validates the wav, writes it into its OWN directory
+             and re-resolves the slot. What the panel shows afterwards is the
+             host's answer (the 「当前音源」 row), never an assumption — the same
+             contract the previews already follow.
+
+             The picker is built on demand rather than kept in the tree: a hidden
+             <input type=file> per slot would add five nodes every render for a
+             control whose only job is to open the OS dialog, and the slot it
+             belongs to travels in the change handler's closure. */
+          const applyUploadResult = (result, okKey) => {
+            if (result && result.ok) {
+              setSoundNote(t(okKey))
+              refreshHostState()
+              return
+            }
+            setSoundNote(t('audioUploadFail') + (result && result.why ? t('sep') + result.why : ''))
+          }
+          const uploadSlot = (slot, file) => {
+            setSoundNote('')
+            if (file === undefined || file === null) return
+            if (typeof fetch !== 'function' || typeof FileReader !== 'function') {
+              setSoundNote(t('audioUploadUnsupported'))
+              return
+            }
+            if (typeof file.size === 'number' && file.size > AUDIO_UPLOAD_LIMIT) {
+              setSoundNote(t('audioUploadTooBig'))
+              return
+            }
+            const reader = new FileReader()
+            reader.onerror = () => setSoundNote(t('audioUploadUnsupported'))
+            reader.onload = () => {
+              const bytes = reader.result
+              if (!(bytes instanceof ArrayBuffer)) {
+                setSoundNote(t('audioUploadUnsupported'))
+                return
+              }
+              fetch(AUDIO_UPLOAD_URL + '?slot=' + encodeURIComponent(slot), {
+                method: 'POST',
+                headers: { 'content-type': 'application/octet-stream' },
+                body: bytes,
+              })
+                .then((res) => res.json().catch(() => ({ ok: false, why: 'bad response' })))
+                .then((json) => applyUploadResult(json, 'audioUploadOk'))
+                .catch(() => setSoundNote(t('audioUploadFail')))
+            }
+            reader.readAsArrayBuffer(file)
+          }
+          const pickSoundFile = (slot) => {
+            if (typeof document === 'undefined' || typeof document.createElement !== 'function') return
+            const input = document.createElement('input')
+            input.type = 'file'
+            input.accept = '.wav,audio/wav,audio/x-wav'
+            if (typeof input.setAttribute === 'function') input.setAttribute('data-endfield-audio-pick', slot)
+            /* A stripped host (or a settings test double) can hand back an element
+               without listeners or click(); the picker then cannot report a
+               choice, so it does nothing rather than throwing out of an onClick —
+               which would take the whole panel render path down with it. */
+            if (typeof input.addEventListener !== 'function' || typeof input.click !== 'function') return
+            input.addEventListener('change', () => {
+              uploadSlot(slot, input.files && input.files[0])
+            })
+            input.click()
+          }
+          const restoreSlot = (slot) => {
+            setSoundNote('')
+            if (typeof fetch !== 'function') return
+            fetch(AUDIO_UPLOAD_URL + '?slot=' + encodeURIComponent(slot) + '&action=remove', { method: 'POST' })
+              .then((res) => res.json().catch(() => ({ ok: false, why: 'bad response' })))
+              .then((json) => applyUploadResult(json, 'audioRestoreOk'))
+              .catch(() => setSoundNote(t('audioUploadFail')))
+          }
+          /* The slot's name is already on the row's left half, so the button
+             itself stays a verb; the title carries the format rule that the
+             host will enforce anyway. */
+          const audioUploadButton = (slot) => R.createElement('button', {
+            key: 'audio-upload-' + slot,
+            type: 'button',
+            onClick: () => pickSoundFile(slot),
+            style: btnStyleFor(false, !audioOn),
+            disabled: !audioOn,
+            title: audioOn ? t('audioUploadHint') : t('audioNeedOn'),
+          }, t('audioUpload'))
+          /* Only an override this plugin wrote can be restored; a file picked up
+             from the configured directory, the workspace or the Desktop is the
+             user's own and is never touched from here. */
+          const audioRestoreButton = (slot) => {
+            const state = slotState(slot)
+            if (state === undefined || state.uploaded !== true) return null
+            return R.createElement('button', {
+              key: 'audio-restore-' + slot,
+              type: 'button',
+              onClick: () => restoreSlot(slot),
+              style: btnStyleFor(false, !audioOn),
+              disabled: !audioOn,
+              title: t('audioRestoreHint'),
+            }, t('audioRestore'))
+          }
           const toggleAudio = () => {
             const next = !isAudioOn()
             prefsSet(AUDIO_ENABLED_KEY, next ? '1' : '0')
@@ -10454,6 +10760,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
             return rows.join('　·　')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
+          /* 行内文本框（自定义目录、播报词共用）。宽度由调用处补，
+             其余属性保持一致，免得两行输入框在同一个面板里长得不一样。 */
+          const textFieldStyle = { color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' }
           /* The switches are grouped into five concerns so the page can be
              scanned instead of read as a flat list: 主题 (master switch +
              appearance), 背景 (contour sheet + watermark), 动画 (output scroll
@@ -10813,7 +11122,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   R.createElement('button', { type: 'button', onClick: toggleThunder, style: btnStyleFor(thunderOn) }, t(thunderOn ? 'thunderOff' : 'thunderOn'))
                 )
               ]),
-              row('thunder-anim', true, [
+              row('thunder-anim', false, [
                 R.createElement('span', { style: labelStyle },
                   t('thunderAnimRow') + t('sep') + stateOf(thunderAnim),
                   R.createElement('span', { style: hintStyle },
@@ -10832,6 +11141,40 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   disabled: !thunderOn,
                   title: thunderOn ? '' : t('thunderNeed'),
                 }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
+              ]),
+              /* 播报词：两句话各一个输入框，留空 = 内置文案（值仍写进偏好，
+                 所以「清空」本身就是恢复默认，不需要第三个按钮）。 */
+              row('thunder-text', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('thunderTextRow'),
+                  R.createElement('span', { style: hintStyle }, t('thunderTextHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('thunderTextStart'),
+                    defaultValue: thunderStartWord(),
+                    placeholder: THUNDER_START,
+                    maxLength: THUNDER_TEXT_LIMIT,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') applyThunderText(THUNDER_START_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT)
+                    },
+                    onBlur: (event) => applyThunderText(THUNDER_START_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT),
+                    style: Object.assign({}, textFieldStyle, { width: '96px' }),
+                  }),
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('thunderTextDone'),
+                    defaultValue: thunderDoneWord(),
+                    placeholder: THUNDER_DONE,
+                    maxLength: THUNDER_TEXT_LIMIT,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') applyThunderText(THUNDER_DONE_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT)
+                    },
+                    onBlur: (event) => applyThunderText(THUNDER_DONE_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT),
+                    style: Object.assign({}, textFieldStyle, { width: '96px' }),
+                  })
+                )
               ]),
               ]),
               subSection('balance', 'subBalance', stateOf(balanceOn), [
@@ -10976,7 +11319,9 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                     type: 'button', onClick: toggleAudioBoot,
                     style: btnStyleFor(audioBoot, !audioOn), disabled: !audioOn,
                     title: audioOn ? '' : t('audioNeedOn'),
-                  }, t(audioBoot ? 'audioBootOff' : 'audioBootOn'))
+                  }, t(audioBoot ? 'audioBootOff' : 'audioBootOn')),
+                  audioUploadButton('boot'),
+                  audioRestoreButton('boot')
                 )
               ]),
               row('audio-start', false, [
@@ -10984,8 +11329,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   t('audioStartRow') + t('sep') + stateOf(audioStart),
                   R.createElement('span', { style: hintStyle }, t('audioStartHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
                   audioTestButton('turn-start', 'audioSlotStart'),
+                  audioUploadButton('turn-start'),
+                  audioRestoreButton('turn-start'),
                   R.createElement('button', {
                     type: 'button', onClick: toggleAudioStart,
                     style: btnStyleFor(audioStart, !audioOn), disabled: !audioOn,
@@ -10998,8 +11345,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   t('audioDoneRow') + t('sep') + stateOf(audioDone),
                   R.createElement('span', { style: hintStyle }, t('audioDoneHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
                   audioTestButton('turn-done', 'audioSlotDone'),
+                  audioUploadButton('turn-done'),
+                  audioRestoreButton('turn-done'),
                   R.createElement('button', {
                     type: 'button', onClick: toggleAudioDone,
                     style: btnStyleFor(audioDone, !audioOn), disabled: !audioOn,
@@ -11043,7 +11392,8 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
               row('audio-source', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioFileRow') + t('sep') + sourceSummary(),
-                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
+                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail()),
+                  soundNote === '' ? null : R.createElement('span', { style: hintStyle, color: 'var(--edge-accent)' }, soundNote)
                 ),
                 R.createElement('button', {
                   type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
@@ -11063,7 +11413,7 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                     placeholder: t('audioSoundDirDefault'),
                     onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
                     onBlur: (event) => applySoundDir(event.target.value),
-                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
+                    style: Object.assign({}, textFieldStyle, { width: '200px' }),
                   })
                 )
               ]),
@@ -11076,8 +11426,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   t('audioAttentionRow') + t('sep') + stateOf(audioTestReady()),
                   R.createElement('span', { style: hintStyle }, t('audioReservedHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                  audioTestButton('attention', 'audioSlotAttention')
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                  audioTestButton('attention', 'audioSlotAttention'),
+                  audioUploadButton('attention'),
+                  audioRestoreButton('attention')
                 )
               ]),
               row('audio-fail', false, [
@@ -11085,8 +11437,10 @@ function apply(ctx) {    // Idempotency: the installed bundle can be applied mor
                   t('audioTurnFailRow') + t('sep') + stateOf(audioTestReady()),
                   R.createElement('span', { style: hintStyle }, t('audioReservedHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                  audioTestButton('turn-fail', 'audioSlotFail')
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                  audioTestButton('turn-fail', 'audioSlotFail'),
+                  audioUploadButton('turn-fail'),
+                  audioRestoreButton('turn-fail')
                 )
               ]),
               row('audio-diag', true, [

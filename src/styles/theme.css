@@ -2662,6 +2662,11 @@
         inset: 0;
         z-index: 2147482000;
         display: flex;
+        /* Column, not row: the optional 底部字母行 sits UNDER the word. With a
+           single child the two directions lay out identically, so the plate that
+           shipped before the footer existed is unchanged. */
+        flex-direction: column;
+        gap: clamp(4px, 1.2vh, 14px);
         align-items: center;
         justify-content: center;
         pointer-events: none;
@@ -2691,6 +2696,47 @@
           0 0 46px rgba(var(--edge-accent-rgb), 0.45);
         animation: endfield-thunder-word 3000ms cubic-bezier(0.16, 1, 0.3, 1) 1 both;
       }
+      /* 底部字母行：跟着本张板走的装饰落款（文本由 31-thunder.js 的
+         thunderFooter() 从大字派生），不是可编辑的一行字。A separate node with
+         its own scale and its own fade: inheriting the word's
+         clamp(44px, 13vw, 176px) would make a second screen-filling line instead of
+         a caption.
+         字体只有 Regular，所以这里必须自己压掉继承来的 700——合成加粗会把几何
+         字形撑变形；字号也要单独一档，方块字身在 11px 下会糊成一条毛边；字距
+         收窄到 0.16em，宽字距是按拉丁字母的窄字身定的，套到方块字形上会散架。
+         字号上限比 SARKAZ 时代低一档：落款现在可能是 MISSION COMPLETE 这样的长串，
+         16 个字形位乘以行高要在 320px 宽的屏幕上仍放得下 —— 见下面的 nowrap。 */
+      [data-endfield-thunder-footer] {
+        font-family: "Endfield Sarkaz", ui-monospace, "Cascadia Mono", "Consolas", "Courier New", monospace;
+        font-weight: 400;
+        font-size: clamp(14px, 2.4vw, 36px);
+        line-height: 1.2;
+        letter-spacing: 0.16em;
+        text-indent: 0.16em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.9);
+        /* nowrap, not pre-wrap: the caption may contain a space (MISSION START),
+           and breaking there would turn it into two ragged lines. The font size
+           above is chosen so the longest built-in caption still fits 88vw. */
+        white-space: nowrap;
+        max-width: 88vw;
+        text-align: center;
+        text-shadow:
+          0 0 2px rgba(16, 17, 16, 0.55),
+          0 2px 12px rgba(16, 17, 16, 0.6);
+        /* 底板的 gap 是按拉丁字母定的：换成方块字形后行高更实，同样的缝看起来像
+           贴在大字下沿上。补一段，视觉间隔才和大字相称。 */
+        margin-top: clamp(4px, 1.4vh, 16px);
+        animation: endfield-thunder-footer 3000ms ease-out 1 both;
+      }
+      /* Fade only: the plate already carries the slam, and a second overshoot
+         two sizes smaller reads as a glitch rather than as emphasis. */
+      @keyframes endfield-thunder-footer {
+        0%   { opacity: 0; transform: translateY(-0.3em); }
+        8%   { opacity: 1; transform: none; }
+        80%  { opacity: 1; transform: none; }
+        100% { opacity: 0; transform: none; }
+      }
       /* The slam: overshoot in, hold, then fade. Keyframe percentages are the 3s
          hold expressed as one timeline, so a single animation covers entry, hold and
          exit and nothing has to be re-timed in JS. */
@@ -2718,7 +2764,8 @@
          'opacity: 0' and rely on the keyframes to bring the word in, so cancelling
          only 'animation' would leave a permanently invisible plate. */
       [data-endfield-thunder][data-endfield-thunder-still],
-      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-word] {
+      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-word],
+      [data-endfield-thunder][data-endfield-thunder-still] [data-endfield-thunder-footer] {
         animation: none;
         opacity: 1;
         transform: none;
@@ -2728,7 +2775,8 @@
          without going through showThunder(). */
       @media (prefers-reduced-motion: reduce) {
         [data-endfield-thunder],
-        [data-endfield-thunder] [data-endfield-thunder-word] {
+        [data-endfield-thunder] [data-endfield-thunder-word],
+        [data-endfield-thunder] [data-endfield-thunder-footer] {
           animation: none;
           opacity: 1;
           transform: none;

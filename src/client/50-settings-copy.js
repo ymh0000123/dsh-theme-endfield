@@ -140,6 +140,12 @@
       thunderAnimHintOn: '大字由大缩小砸入并淡出（关闭后为直接显示，仍保持 3 秒）',
       thunderAnimHintOff: '默认关闭；大字直接出现、3 秒后消失，不做缩放与淡入淡出',
       thunderAnimHintReduced: '系统已开启「减少动态效果」，当前直接显示',
+      /* 播报词：默认留空即沿用原样（「任务开始」/「任务完成」），所以升级不会
+         改变任何人的界面。底部那行字母是固定装饰，没有对应文案可以填。 */
+      thunderTextRow: '播报词',
+      thunderTextHint: '两句都可改；留空用默认「任务开始」/「任务完成」，最多 24 字',
+      thunderTextStart: '开始',
+      thunderTextDone: '完成',
       /* 顶部余额胶囊：数据由宿主路由代理（页面拿不到账户凭证），所以提示里
           说明「余额来自本机服务」而不是承诺实时精确。 */
       balanceRow: '顶部余额胶囊',
@@ -207,6 +213,17 @@
       audioFileBundled: '内置合成音',
       audioFileOwn: '自定义文件',
       audioFileMissing: '未找到文件',
+      /* 上传：文件落在插件自己的目录里（不是用户填的目录），所以「恢复内置」
+         只删自己写的那一个文件，永远不会碰用户自己的素材。 */
+      audioUpload: '上传 wav',
+      audioUploadHint: '选一个 16-bit PCM WAV（不超过 2.5 秒），立即替换该槽位的声音',
+      audioUploadOk: '已替换该槽位的音效',
+      audioUploadFail: '上传失败',
+      audioUploadTooBig: '文件超过 8 MB',
+      audioUploadUnsupported: '当前浏览器不支持读取本地文件',
+      audioRestore: '恢复内置',
+      audioRestoreHint: '删除上传的覆盖音，回落到自定义目录 / 工作区 / 桌面 / 内置音',
+      audioRestoreOk: '已恢复内置音',
       audioHumanOnlyRow: '开始音仅认会话框',
       audioHumanOnlyOn: '仅会话框',
       audioHumanOnlyOff: '宽松模式',
@@ -337,6 +354,13 @@
       thunderAnimHintOn: 'The word punches in from oversized and fades out (appears instantly when off, still held 3s)',
       thunderAnimHintOff: 'Off by default; the word appears instantly and leaves after 3s, with no scaling or fading',
       thunderAnimHintReduced: 'Your system asks for reduced motion, so it appears instantly',
+      /* Blank means "keep the shipped words", so upgrading never changes what
+         anyone sees. The letter line under the big word is fixed decoration
+         and has no field of its own. */
+      thunderTextRow: 'Announcement words',
+      thunderTextHint: 'Both words can be changed; blank keeps the shipped 任务开始 / 任务完成, 24 characters max',
+      thunderTextStart: 'Start',
+      thunderTextDone: 'Finish',
       balanceRow: 'Balance capsule',
       balanceOn: 'Turn on',
       balanceOff: 'Turn off',
@@ -398,6 +422,18 @@
       audioSoundDirDefault: 'Not set (Desktop / workspace / bundled)',
       audioFileRow: 'Current source',
       audioFileBundled: 'Bundled synthesized tone',
+      /* The upload lands in a directory the plugin owns (not the one typed into
+         the field above), so "restore" only ever deletes a file this plugin
+         wrote — never the user's own material. */
+      audioUpload: 'Upload wav',
+      audioUploadHint: 'Pick a 16-bit PCM WAV (2.5 s max); it replaces this slot immediately',
+      audioUploadOk: 'Slot sound replaced',
+      audioUploadFail: 'Upload failed',
+      audioUploadTooBig: 'File is larger than 8 MB',
+      audioUploadUnsupported: 'This browser cannot read local files',
+      audioRestore: 'Restore built-in',
+      audioRestoreHint: 'Delete the uploaded override and fall back to the custom directory / workspace / Desktop / bundled tone',
+      audioRestoreOk: 'Built-in tone restored',
       audioFileOwn: 'Your own file',
       audioFileMissing: 'No file found',
       audioHumanOnlyRow: 'Start sound: composer only',

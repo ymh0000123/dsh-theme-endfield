@@ -72,6 +72,11 @@
           const [audioDiag, setAudioDiag] = R.useState(isAudioDiagOn())
           const [hostState, setHostState] = R.useState(null)
           const [previewNote, setPreviewNote] = R.useState('')
+          /* Upload feedback lives in its OWN note, shown on the 「当前音源」 row
+             instead of the diagnostics row: what an upload changes is exactly
+             what that row lists, and the diagnostics row is where preview
+             results already land (they are about playback, not about files). */
+          const [soundNote, setSoundNote] = R.useState('')
           /* 二级折叠子节的展开表。一个对象存全部子节（id -> bool），而不是每个
              子节一个 useState：这些子节由同一个 render 函数内联构造，没有独立
              的组件类型，逐节建 hook 既无法命名也无法稳定计数。缺省（未登记）
@@ -388,11 +393,11 @@
                appears at some unpredictable later moment gives the user no way to
                tell whether it worked. The preview runs BEFORE the watcher attaches,
                so it cannot be mistaken for a real edge. */
-            if (next) showThunder(THUNDER_START)
+            if (next) showThunder(thunderStartWord(), THUNDER_FOOTER_START)
             else destroyThunder()
             syncThunder()
           }
-          const previewThunder = () => { showThunder(THUNDER_DONE) }
+          const previewThunder = () => { showThunder(thunderDoneWord(), THUNDER_FOOTER_DONE) }
           const toggleBalanceCapsule = () => {
             const next = !isBalanceCapsuleOn()
             prefsSet(BALANCE_KEY, next ? '1' : '0')
@@ -460,6 +465,18 @@
             destroyBalanceCapsule()
             showBalanceCapsule(true)
           }
+          /* 播报词: same writing rules as the custom sound directory —
+             defaultValue + commit on blur/Enter, no per-keystroke state. These
+             fields are read at the next task boundary, so echoing every keystroke
+             into the settings store would buy nothing. The value is clamped to the
+             same limit the renderer applies, so what is stored is exactly what
+             will be drawn. 底部字母行没有对应的输入：它跟着大字走——拉丁词直接
+             转成字形，中文词落回与播报种类绑定的内置落款，见 31-thunder.js 的
+             thunderFooter()。 */
+          const applyThunderText = (key, value, limit) => {
+            const text = typeof value === 'string' ? clampText(value.trim(), limit) : ''
+            prefsSet(key, text)
+          }
           const toggleThunderAnim = () => {
             const next = !isThunderAnimOn()
             prefsSet(THUNDER_ANIM_KEY, next ? '1' : '0')
@@ -468,7 +485,7 @@
                the plate accordingly. Replaying now is what makes the change legible —
                the difference between the two modes is only visible during the entry,
                so a silent toggle would look like it did nothing. */
-            showThunder(THUNDER_START)
+            showThunder(thunderStartWord(), THUNDER_FOOTER_START)
           }
           const toggleMode = () => {
             const next = (prefsGet(RADIUS_KEY) || 'square') === 'round' ? 'square' : 'round'
@@ -499,6 +516,105 @@
             disabled: !audioOn,
             title: audioOn ? '' : t('audioNeedOn'),
           }, t('audioTest') + ' · ' + t(labelKey))
+          /* ---------- 上传 / 恢复一个槽位自己的音效 ----------
+             The page neither stores nor plays the file: it hands the bytes to
+             the host, which validates the wav, writes it into its OWN directory
+             and re-resolves the slot. What the panel shows afterwards is the
+             host's answer (the 「当前音源」 row), never an assumption — the same
+             contract the previews already follow.
+
+             The picker is built on demand rather than kept in the tree: a hidden
+             <input type=file> per slot would add five nodes every render for a
+             control whose only job is to open the OS dialog, and the slot it
+             belongs to travels in the change handler's closure. */
+          const applyUploadResult = (result, okKey) => {
+            if (result && result.ok) {
+              setSoundNote(t(okKey))
+              refreshHostState()
+              return
+            }
+            setSoundNote(t('audioUploadFail') + (result && result.why ? t('sep') + result.why : ''))
+          }
+          const uploadSlot = (slot, file) => {
+            setSoundNote('')
+            if (file === undefined || file === null) return
+            if (typeof fetch !== 'function' || typeof FileReader !== 'function') {
+              setSoundNote(t('audioUploadUnsupported'))
+              return
+            }
+            if (typeof file.size === 'number' && file.size > AUDIO_UPLOAD_LIMIT) {
+              setSoundNote(t('audioUploadTooBig'))
+              return
+            }
+            const reader = new FileReader()
+            reader.onerror = () => setSoundNote(t('audioUploadUnsupported'))
+            reader.onload = () => {
+              const bytes = reader.result
+              if (!(bytes instanceof ArrayBuffer)) {
+                setSoundNote(t('audioUploadUnsupported'))
+                return
+              }
+              fetch(AUDIO_UPLOAD_URL + '?slot=' + encodeURIComponent(slot), {
+                method: 'POST',
+                headers: { 'content-type': 'application/octet-stream' },
+                body: bytes,
+              })
+                .then((res) => res.json().catch(() => ({ ok: false, why: 'bad response' })))
+                .then((json) => applyUploadResult(json, 'audioUploadOk'))
+                .catch(() => setSoundNote(t('audioUploadFail')))
+            }
+            reader.readAsArrayBuffer(file)
+          }
+          const pickSoundFile = (slot) => {
+            if (typeof document === 'undefined' || typeof document.createElement !== 'function') return
+            const input = document.createElement('input')
+            input.type = 'file'
+            input.accept = '.wav,audio/wav,audio/x-wav'
+            if (typeof input.setAttribute === 'function') input.setAttribute('data-endfield-audio-pick', slot)
+            /* A stripped host (or a settings test double) can hand back an element
+               without listeners or click(); the picker then cannot report a
+               choice, so it does nothing rather than throwing out of an onClick —
+               which would take the whole panel render path down with it. */
+            if (typeof input.addEventListener !== 'function' || typeof input.click !== 'function') return
+            input.addEventListener('change', () => {
+              uploadSlot(slot, input.files && input.files[0])
+            })
+            input.click()
+          }
+          const restoreSlot = (slot) => {
+            setSoundNote('')
+            if (typeof fetch !== 'function') return
+            fetch(AUDIO_UPLOAD_URL + '?slot=' + encodeURIComponent(slot) + '&action=remove', { method: 'POST' })
+              .then((res) => res.json().catch(() => ({ ok: false, why: 'bad response' })))
+              .then((json) => applyUploadResult(json, 'audioRestoreOk'))
+              .catch(() => setSoundNote(t('audioUploadFail')))
+          }
+          /* The slot's name is already on the row's left half, so the button
+             itself stays a verb; the title carries the format rule that the
+             host will enforce anyway. */
+          const audioUploadButton = (slot) => R.createElement('button', {
+            key: 'audio-upload-' + slot,
+            type: 'button',
+            onClick: () => pickSoundFile(slot),
+            style: btnStyleFor(false, !audioOn),
+            disabled: !audioOn,
+            title: audioOn ? t('audioUploadHint') : t('audioNeedOn'),
+          }, t('audioUpload'))
+          /* Only an override this plugin wrote can be restored; a file picked up
+             from the configured directory, the workspace or the Desktop is the
+             user's own and is never touched from here. */
+          const audioRestoreButton = (slot) => {
+            const state = slotState(slot)
+            if (state === undefined || state.uploaded !== true) return null
+            return R.createElement('button', {
+              key: 'audio-restore-' + slot,
+              type: 'button',
+              onClick: () => restoreSlot(slot),
+              style: btnStyleFor(false, !audioOn),
+              disabled: !audioOn,
+              title: t('audioRestoreHint'),
+            }, t('audioRestore'))
+          }
           const toggleAudio = () => {
             const next = !isAudioOn()
             prefsSet(AUDIO_ENABLED_KEY, next ? '1' : '0')
@@ -587,6 +703,9 @@
             return rows.join('　·　')
           }
           const pageStyle = { maxWidth: '640px', padding: '4px 0 16px' }
+          /* 行内文本框（自定义目录、播报词共用）。宽度由调用处补，
+             其余属性保持一致，免得两行输入框在同一个面板里长得不一样。 */
+          const textFieldStyle = { color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' }
           /* The switches are grouped into five concerns so the page can be
              scanned instead of read as a flat list: 主题 (master switch +
              appearance), 背景 (contour sheet + watermark), 动画 (output scroll
@@ -946,7 +1065,7 @@
                   R.createElement('button', { type: 'button', onClick: toggleThunder, style: btnStyleFor(thunderOn) }, t(thunderOn ? 'thunderOff' : 'thunderOn'))
                 )
               ]),
-              row('thunder-anim', true, [
+              row('thunder-anim', false, [
                 R.createElement('span', { style: labelStyle },
                   t('thunderAnimRow') + t('sep') + stateOf(thunderAnim),
                   R.createElement('span', { style: hintStyle },
@@ -965,6 +1084,40 @@
                   disabled: !thunderOn,
                   title: thunderOn ? '' : t('thunderNeed'),
                 }, t(thunderAnim ? 'thunderAnimOff' : 'thunderAnimOn'))
+              ]),
+              /* 播报词：两句话各一个输入框，留空 = 内置文案（值仍写进偏好，
+                 所以「清空」本身就是恢复默认，不需要第三个按钮）。 */
+              row('thunder-text', false, [
+                R.createElement('span', { style: labelStyle },
+                  t('thunderTextRow'),
+                  R.createElement('span', { style: hintStyle }, t('thunderTextHint'))
+                ),
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('thunderTextStart'),
+                    defaultValue: thunderStartWord(),
+                    placeholder: THUNDER_START,
+                    maxLength: THUNDER_TEXT_LIMIT,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') applyThunderText(THUNDER_START_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT)
+                    },
+                    onBlur: (event) => applyThunderText(THUNDER_START_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT),
+                    style: Object.assign({}, textFieldStyle, { width: '96px' }),
+                  }),
+                  R.createElement('input', {
+                    type: 'text',
+                    'aria-label': t('thunderTextDone'),
+                    defaultValue: thunderDoneWord(),
+                    placeholder: THUNDER_DONE,
+                    maxLength: THUNDER_TEXT_LIMIT,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') applyThunderText(THUNDER_DONE_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT)
+                    },
+                    onBlur: (event) => applyThunderText(THUNDER_DONE_TEXT_KEY, event.target.value, THUNDER_TEXT_LIMIT),
+                    style: Object.assign({}, textFieldStyle, { width: '96px' }),
+                  })
+                )
               ]),
               ]),
               subSection('balance', 'subBalance', stateOf(balanceOn), [
@@ -1109,7 +1262,9 @@
                     type: 'button', onClick: toggleAudioBoot,
                     style: btnStyleFor(audioBoot, !audioOn), disabled: !audioOn,
                     title: audioOn ? '' : t('audioNeedOn'),
-                  }, t(audioBoot ? 'audioBootOff' : 'audioBootOn'))
+                  }, t(audioBoot ? 'audioBootOff' : 'audioBootOn')),
+                  audioUploadButton('boot'),
+                  audioRestoreButton('boot')
                 )
               ]),
               row('audio-start', false, [
@@ -1117,8 +1272,10 @@
                   t('audioStartRow') + t('sep') + stateOf(audioStart),
                   R.createElement('span', { style: hintStyle }, t('audioStartHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
                   audioTestButton('turn-start', 'audioSlotStart'),
+                  audioUploadButton('turn-start'),
+                  audioRestoreButton('turn-start'),
                   R.createElement('button', {
                     type: 'button', onClick: toggleAudioStart,
                     style: btnStyleFor(audioStart, !audioOn), disabled: !audioOn,
@@ -1131,8 +1288,10 @@
                   t('audioDoneRow') + t('sep') + stateOf(audioDone),
                   R.createElement('span', { style: hintStyle }, t('audioDoneHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
                   audioTestButton('turn-done', 'audioSlotDone'),
+                  audioUploadButton('turn-done'),
+                  audioRestoreButton('turn-done'),
                   R.createElement('button', {
                     type: 'button', onClick: toggleAudioDone,
                     style: btnStyleFor(audioDone, !audioOn), disabled: !audioOn,
@@ -1176,7 +1335,8 @@
               row('audio-source', false, [
                 R.createElement('span', { style: labelStyle },
                   t('audioFileRow') + t('sep') + sourceSummary(),
-                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail())
+                  R.createElement('span', { style: hintStyle, wordBreak: 'break-all' }, sourceDetail()),
+                  soundNote === '' ? null : R.createElement('span', { style: hintStyle, color: 'var(--edge-accent)' }, soundNote)
                 ),
                 R.createElement('button', {
                   type: 'button', onClick: () => { setPreviewNote(''); refreshHostState() },
@@ -1196,7 +1356,7 @@
                     placeholder: t('audioSoundDirDefault'),
                     onKeyDown: (event) => { if (event.key === 'Enter') applySoundDir(event.target.value) },
                     onBlur: (event) => applySoundDir(event.target.value),
-                    style: { width: '200px', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)', padding: '6px 8px', fontSize: '12px' },
+                    style: Object.assign({}, textFieldStyle, { width: '200px' }),
                   })
                 )
               ]),
@@ -1209,8 +1369,10 @@
                   t('audioAttentionRow') + t('sep') + stateOf(audioTestReady()),
                   R.createElement('span', { style: hintStyle }, t('audioReservedHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                  audioTestButton('attention', 'audioSlotAttention')
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                  audioTestButton('attention', 'audioSlotAttention'),
+                  audioUploadButton('attention'),
+                  audioRestoreButton('attention')
                 )
               ]),
               row('audio-fail', false, [
@@ -1218,8 +1380,10 @@
                   t('audioTurnFailRow') + t('sep') + stateOf(audioTestReady()),
                   R.createElement('span', { style: hintStyle }, t('audioReservedHint'))
                 ),
-                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto' } },
-                  audioTestButton('turn-fail', 'audioSlotFail')
+                R.createElement('span', { style: { display: 'flex', gap: '8px', flex: '0 0 auto', flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                  audioTestButton('turn-fail', 'audioSlotFail'),
+                  audioUploadButton('turn-fail'),
+                  audioRestoreButton('turn-fail')
                 )
               ]),
               row('audio-diag', true, [

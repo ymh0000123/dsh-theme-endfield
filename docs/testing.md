@@ -299,7 +299,7 @@ node test/settings-locale.test.js   # 跟随语言设置（zh/en 词典对齐 + 
 
 **`settings-rows.test.js`** 不用浏览器也不用 React：以**记录型 `React` / `slots` + 假的设置 transport**（`test/fixtures/settings-scope.js`）在进程内跑一次真实 `apply()`，抓下设置面板真正的元素树。设置页是用户唯一能碰到这些开关的入口，而那里的错误（抛异常、漏 key、开关写错了 DSH 设置的字段）check.js 与画布测试都看不见。
 
-> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置服务**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 transport：除 `settings-config-forms.test.js` 之外的用例走旧世代 `ctx.settingsScope`（fixture 的 `settingsScopeStub`，在内存里扮演 `<settings.yaml>` 的命名字段节），新世代由 `configFormsStub` 扮演 `ctx.configForms`（命名空间 = profile entry id）。断言 34 行齐全且归入 5 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐 / 05 音频）与配色样式规则都在、配色行是一个按 `PALETTES` 顺序列出五套配色的下拉（默认选中谷地黄）、存了 `wuling` / `ember` / `abyss` / `foundation` 时选中项跟着走并标注 `#14d0d0` / `#FF3B2E` / `#7D6FFF` / `#4B93FF`、选 `valley` 一次直写 `palette=valley`（不必逐格循环）、未知配色被拒绝不落盘、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
+> 说明：这个插件从 **`localStorage` 迁移到了 DSH 的持久化设置服务**（见 features.md / engineering-notes.md）。因此设置类测试不再往浏览器存储里塞值，而是驱动假的 transport：除 `settings-config-forms.test.js` 之外的用例走旧世代 `ctx.settingsScope`（fixture 的 `settingsScopeStub`，在内存里扮演 `<settings.yaml>` 的命名字段节），新世代由 `configFormsStub` 扮演 `ctx.configForms`（命名空间 = profile entry id）。断言 35 行齐全且归入 5 个分组容器、key 唯一、分组标题（01 主题 / 02 背景 / 03 动画 / 04 娱乐 / 05 音频）与配色样式规则都在、配色行是一个按 `PALETTES` 顺序列出五套配色的下拉（默认选中谷地黄）、存了 `wuling` / `ember` / `abyss` / `foundation` 时选中项跟着走并标注 `#14d0d0` / `#FF3B2E` / `#7D6FFF` / `#4B93FF`、选 `valley` 一次直写 `palette=valley`（不必逐格循环）、未知配色被拒绝不落盘、图层关闭时子开关为 disabled、开启后恢复可用，雷霆大字与大字入场动画均默认为关、说明文字包含「任务开始」/「任务完成」与 3 秒、**子开关只写自己的字段而不误写主开关的**，以及点击确实写入文档里那个 DSH 设置字段。
 
 **`settings-durable-hold.test.js`**（旧世代 `settingsScope` 路径；0.1.7 上同一份写入 gate / 补写契约由 `settings-config-forms.test.js` 覆盖）用**两阶段假 `ctx.settingsScope`** 复现那条历史告警：宿主半部 `ctx.settings.register(...)` 尚未跑、命名空间还没进 Host 的 served 列表前，scope 快照是 `{ status:'unavailable', writable:true, mode:'host' }`——单看 `writable` 会照写不误却落不到盘。它先在未就绪态切「圆角 / 武陵青」，断言**没有任何 `scope.set` 出线**（旧 bug 会打 `commit … status= unavailable` 并静默丢脏）；随后模拟文档 committed、命名空间进入 served 列表、快照翻为 `status:'ready'`，断言订阅路径把两份 held 编辑**自动补写**进文档，且不会重复写两遍（replay 有 re-entrancy 护栏）。
 
@@ -363,6 +363,30 @@ node test/loader-late-prefs.test.js    # 设置节晚于 apply() 到达时，动
 
 ---
 
+## 音频通知与音效上传
+
+```bash
+node test/audio-notify.test.js           # 四个真实时刻、防噪、开关与默认静音
+node test/audio-upload.test.js           # 上传 / 恢复：校验、优先级、时长缓存
+node test/audio-attention-watch.test.js  # 界面观察兜底（确认框、轮询）
+node test/host-no-inject.test.js         # 宿主没有 ctx.inject 时照常挂载
+```
+
+**`audio-upload.test.js`** 直接 require `lib/audio.js`，配一个临时上传目录和一个桩 `ctx`，因此不碰真实播放器、也不碰用户的目录。断言的都是「按钮看起来成功、实际没生效」这一类静默失败：
+
+- **非 WAV 体被拒绝**（把 mp3 改名成 .wav 是最常见的误用），且被拒绝时**不留文件**；
+- **超过 2.5 秒被拒绝**——防抖窗就是 2.5 秒，更长会在下一次播报时还在响；
+- 槽位名必须是白名单里的五个之一（请求体里的 `../` 之类不可能变成路径）；
+- 合法上传后**解析结果优先于内置音**（否则同名的旧文件会把它静默盖掉）、快照标记 `uploaded`、**只影响该槽位**；
+- 替换后**时长缓存失效**（旧时长会卡住「仍在播报」的闸门，表现为下一次播报被吞掉）；
+- 「恢复内置」删掉文件并回落到原链路，重复调用**幂等**；没有可解析的主目录时明确拒绝而不是假装成功。
+
+> 变异验证 3 类，都必须报错：把上传目录从 `soundDirs()` 的首位挪到最后（第 4 条红）、去掉 `durationCache.delete`（第 5 条红）、允许写 `../` 之类的槽位名（第 3 条红）。
+
+路由接线由 `audio-notify.test.js` 另跑一段：`DSH_HOME` 指向临时目录后，用真正的 prefix handler 打 `POST /upload`（200 / 400 / 413）、`action=remove`、以及带 `..%2F` 的非法槽位；断言的是「页面真正会说话的那一层」——查询串解析、原始字节读取、8 MB 上限与 JSON 外壳。
+
+---
+
 ## 雷霆大字
 
 ```bash
@@ -371,7 +395,7 @@ node test/tools/thunder-shot.js     # 真实渲染截图 + 像素对比度断言
 node test/thunder-dismiss.test.js   # 点击关闭：真实指针事件 + 命中测试 + 监听器核账
 ```
 
-**`thunder-edges.test.js`** 在进程内跑真实 `client.js`，配一个按运行时契约造形的假 `sessions` 服务和一个**可控时钟**，因此 3 秒窗口是被断言的而不是被等待的。覆盖：关闭时**不订阅**（零开销）；`false→true` 播「任务开始」、`true→false` 播「任务完成」；**同值连续推送 25 次不重复播报**；2999ms 仍在、3000ms 已隐藏；入场动画默认关闭时大字带静态标记、开启后不带，且两种状态下 3 秒时长都不变；系统「减少动态效果」压过已开启的动画开关；切进已在运行的会话不误报、但其结束仍播报；离开的会话被退订；关闭主题会移除大字并退订、重新开启会恢复；**服务迟到后仍能自动接上**；**新契约（当前会话 = 列表里被 `mainView` retain 的那一行）下能接上**、旧 `current` 契约仍兼容、列表连 `subscribe()` 都没有时靠有界重试补上；`ctx.effect` 拆除时释放全部订阅与节点。
+**`thunder-edges.test.js`** 在进程内跑真实 `client.js`，配一个按运行时契约造形的假 `sessions` 服务和一个**可控时钟**，因此 3 秒窗口是被断言的而不是被等待的。覆盖：关闭时**不订阅**（零开销）；`false→true` 播「任务开始」、`true→false` 播「任务完成」；**同值连续推送 25 次不重复播报**；2999ms 仍在、3000ms 已隐藏；入场动画默认关闭时大字带静态标记、开启后不带，且两种状态下 3 秒时长都不变；系统「减少动态效果」压过已开启的动画开关；切进已在运行的会话不误报、但其结束仍播报；离开的会话被退订；关闭主题会移除大字并退订、重新开启会恢复；**服务迟到后仍能自动接上**；**新契约（当前会话 = 列表里被 `mainView` retain 的那一行）下能接上**、旧 `current` 契约仍兼容、列表连 `subscribe()` 都没有时靠有界重试补上；`ctx.effect` 拆除时释放全部订阅与节点；**播报词与跟随大字的底部字母行**（留空＝内置文案、清空即恢复且不必刷新、字母行是独立节点而不并进大字文本、开始与完成各有一条内置落款所以不再恒定、拉丁播报词直接充当落款且丢标点保留空格、中文与中英混排落回内置而不拼半句、旧文档里残留的 `thunderFooter` 键不会复活输入框行为）。
 
 另有 14 条**样式契约**断言（固定定位、居中、`pointer-events: none`、`font-weight: 900`、`clamp()` 字号、白色字面量、层级低于加载屏、`prefers-reduced-motion`、静态分支取消动画并强制 `opacity: 1`）——这些是本机无布局引擎时看不见、却最容易被后续重构悄悄改掉的视觉事实。
 
@@ -443,6 +467,15 @@ node test/font-scope.test.js   # 第三方挂件字体 + 主题自有表面字�
 - 根令牌与 `body` 解析值**与应用声明逐字相同**（`--dsw-font-family` / `--ds-font-family-code` 都没被改写）；
 - 挂件与其数字拿回**应用字体栈**，且 `font-feature-settings` / `font-variant-ligatures` 为 `normal`；
 - 加载屏与水印**仍在主题字体**（Arial）上，并各自带着 `tnum` + `ss01`（这两条属性已从 `body` 下移到元素自身，必须跟进）。
+
+**`sarkaz-font.test.js`** 守的是那个**内嵌字体**的 15 条事实。`src/styles/sarkaz-font.css` 是生成物，
+里面是 19KB base64，三类故障都不会让页面报错、只会安静地错：与 `assets/fonts/EndfieldByButan.ttf`
+漂移（换了字体没重新生成）、掉到样式表模板字面量**外面**（manifest 顺序是唯一的护栏，掉出去就是
+整张样式表变成 JS）、以及字体里的授权说明被删掉（这是本仓库唯一**不是 MIT** 的资产）。断言：
+sfnt 头、`cmap` 真的覆盖 `A-Z` 与 `0-9`（直接解析 format 4 表，而不是相信 README）、内嵌副本与
+ttf 的 SHA-256 一致、片段里没有反引号与 `${`、manifest 里排在 `theme.css` 之前、`client.js` 里
+恰好内嵌一份、萨卡兹规则把字体排在字体栈首位并压掉继承的 `700`（合成加粗会把几何字形撑变形）、
+以及 `assets/fonts/README.md` 与 README 素材归属里的 CC BY-NC 4.0 署名仍在。
 
 > 变异验证：把旧的 `:root { --dsw-font-family: Arial… }` 注回去，本脚本报「挂件字体被主题偷走」（4 条红），`check.js` 同时报「令牌被主题声明」，`selftest.js` 也有一条对应注入用例。
 

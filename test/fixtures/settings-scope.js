@@ -69,6 +69,11 @@ const FIELD_DEFAULTS = {
   loader: '0',
   thunder: '0',
   thunderAnim: '0',
+  /* 播报词 — blank means "use the shipped words", so the projection carries
+     empty strings exactly like index.js FIELD_DEFAULTS. The footer line under
+     the big word is fixed decoration and has no field. */
+  thunderStartText: '',
+  thunderDoneText: '',
   balanceCapsule: '0',
   creditDisplay: 'remaining',
   balanceCapsulePosition: 'center',
@@ -112,6 +117,8 @@ const KEY_TO_FIELD = {
   'dsh-theme-endfield-loader': 'loader',
   'dsh-theme-endfield-thunder': 'thunder',
   'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+  'dsh-theme-endfield-thunder-start-text': 'thunderStartText',
+  'dsh-theme-endfield-thunder-done-text': 'thunderDoneText',
   'dsh-theme-endfield-balance-capsule': 'balanceCapsule',
   'dsh-theme-endfield-credit-display': 'creditDisplay',
   'dsh-theme-endfield-balance-capsule-position': 'balanceCapsulePosition',

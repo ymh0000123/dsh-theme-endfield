@@ -36,8 +36,8 @@ dsh plugin --profile web rm dsh-theme-endfield
 - **主题**：总开关、谷地黄／武陵青／重燃赤／浸蓝／基石蓝配色（下拉选择）、直角／圆角模式。
 - **背景**：等高线背景（默认关闭）及动态开关、`24 / 60 / 120 FPS`、速度 `1x / 2x / 4x`；可选鼠标轨迹（鼠标附近的等高线局部变形并逐渐恢复，默认关闭）；背景水印及持续显示。
 - **动画**：输出滚动动画（默认开启，强度分 `柔和 / 标准 / 轻快`）——把模型流式输出的「整段跳一大格」摊成逐帧滑动，不改动应用自己的滚动位置，因此跟随不会中断，向上滚动、读者手势与系统「减少动态效果」下都保持瞬时；启动加载动画。
-- **娱乐**：雷霆大字及入场动画；顶部余额胶囊（默认关闭）。
-- **音频**：启动音、任务开始／结束音、需要回应时提示，音量与自定义音效目录可调（默认关闭）。
+- **娱乐**：雷霆大字及入场动画（播报词可改；大字下方那行萨卡兹字母跟着该句走——拉丁词显示它自己的字形，中文词用内置落款）；顶部余额胶囊（默认关闭）。
+- **音频**：启动音、任务开始／结束音、需要回应时提示，音量可调，每个槽位都能「上传 wav」直接替换并「恢复内置」；也支持自定义音效目录（默认关闭）。
 
 几处需要单独说明的行为：
 
@@ -90,6 +90,7 @@ dsh plugin --profile web rm dsh-theme-endfield
 | [docs/contour-worker.md](docs/contour-worker.md) | 可选 Worker / WebGL 等高线渲染与回退 |
 | [docs/contour-scan-bounds.md](docs/contour-scan-bounds.md) | 等高线提取的分块边界算法 |
 | [docs/audio-notifications.md](docs/audio-notifications.md) | 音频通知的实现、防噪规则与自定义音效 |
+| [docs/sarkaz-script.md](docs/sarkaz-script.md) | 萨卡兹字形对照、社区词汇表与在主题里的用法 |
 | [docs/glass.md](docs/glass.md) | 可选磨砂玻璃：模糊档位与刻意排除的部件 |
 | [docs/PR-description.md](docs/PR-description.md) | 音频通知那次改动的 PR 描述草稿 |
 
@@ -142,12 +143,18 @@ screenshots.json   界面截图清单（对应 assets/ 下的 webp）
 `npm run check` 与 CI 都用 `--check` 验证产物没有过期：产物与源码不一致时报出第一个差异行。
 片段划分与改动规则见 [docs/engineering-notes.md](docs/engineering-notes.md) 的「源码是真源，产物是拼出来的」。
 
+## 致谢
+
+- **社区字体 `EndfieldByButan`** —— 感谢**罗醭坦**（[lhclbt/Endfield_Font](https://github.com/lhclbt/Endfield_Font)）把这套萨卡兹字形整理成可直接使用的字体，并以 CC BY-NC 4.0 开放。主题里大字下方那行萨卡兹落款、以及 `assets/sarkaz-alphabet.png` 对照表，全部来自这份工作；没有它，那行字只能用普通拉丁字母假装。
+- **萨卡兹语的整理与破译** —— 感谢 [PRTS 泰拉文字](https://prts.wiki/w/泰拉文字)、森空岛《萨卡兹语词汇表》与 [Micfong's Space](https://www.micfong.space/x-srkz-Latn/blogs/12/zh-Hans) 的社区工作，[docs/sarkaz-script.md](docs/sarkaz-script.md) 里的词表、语法与转写说明取自这些来源。
+
 ## 素材归属
 
 本插件是**非官方同人作品**，与鹰角网络（Hypergryph）不存在任何隶属、赞助或背书关系。
 
 - 《明日方舟：终末地》（Arknights: Endfield）的游戏名称、标识、商标、官网视觉与设计语言及相关美术素材，版权归**鹰角网络（上海鹰角网络科技有限公司，Hypergryph Network Technology）**所有。
 - 本仓库中的**部分素材**（如 `assets/` 下的界面截图，以及主题中还原的 `ENDFIELD` 字标、信号黄配色与工业编辑风版式）源自或参考上述作品及其官网，仅用于**学习、展示与非商业用途**；其权利仍归鹰角网络所有，**不在本项目的 MIT 许可证覆盖范围内**。
+- **萨卡兹字形**使用社区字体 `EndfieldByButan`（作者**罗醭坦**，[lhclbt/Endfield_Font](https://github.com/lhclbt/Endfield_Font)），以 **CC BY-NC 4.0** 发布：可自由使用与二创、**不得商用**、须署名。字体随 `client.js` 内嵌分发，来源与许可见 [assets/fonts/README.md](assets/fonts/README.md)。若你要把本项目用于商业用途，请先移除该字体。
 - 本项目的原创代码（`client.js`、`index.js`、`src/`、`scripts/`、`test/` 等）以 MIT 许可证发布。
 - 若权利方认为本仓库中的任何素材使用不当，请通过 Issue 联系，我们会立即删除或替换相关内容。
 

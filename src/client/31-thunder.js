@@ -26,8 +26,67 @@
        With it off the word still appears instantly, holds 3s and leaves; only the
        scale punch and the fade are dropped. */
     const THUNDER_ANIM_KEY = 'dsh-theme-endfield-thunder-anim'
+    /* 播报词：默认值仍是这两句，自定义字段留空即沿用它们——升级不会改变任何人
+       的界面，清空输入框也就等于恢复默认。 */
     const THUNDER_START = '任务开始'
     const THUNDER_DONE = '任务完成'
+    const THUNDER_START_TEXT_KEY = 'dsh-theme-endfield-thunder-start-text'
+    const THUNDER_DONE_TEXT_KEY = 'dsh-theme-endfield-thunder-done-text'
+    /* 大字下方的字母行——**跟着这张板走，但仍然不是可编辑字段**。
+       它不写死成同一个串：开始与完成各有一个内置落款，播报词本身若是一串
+       拉丁字母（用户把大字改成英文时），就取那串词做落款——上面写什么，下面
+       就是它的大写字形，两行才像同一块板上的东西。
+       为什么仍然不给输入框：这行用萨卡兹字形渲染，字形只与 A-Z / 0-9 一一对应，
+       而游戏里这类串本身也多是装饰性直替。让用户直接填，等于把「这串字读作
+       什么」这个项目自己都答不出的问题丢给别人；跟随大字则是可验证的——下面
+       永远是上面的字形化，不是另一句需要翻译的话。 */
+    const THUNDER_FOOTER_START = 'MISSION START'
+    const THUNDER_FOOTER_DONE = 'MISSION COMPLETE'
+    /* 落款比大字多一档余量：拉丁串转大写后最容易撞上的是窄屏换行，18 个字符位
+       在最小字号下仍能放进 88vw（样式表里是同一条 nowrap 规则）。 */
+    const THUNDER_FOOTER_LIMIT = 18
+    const THUNDER_TEXT_LIMIT = 24
+    const clampText = (value, limit) => Array.from(value).slice(0, limit).join('')
+    /**
+     * One announcement word, custom or shipped.
+     *
+     * Read at the moment the word is shown, never cached at apply() time: the
+     * settings field writes the pref and the next task boundary uses it, with no
+     * reload and no second source of truth for the default.
+     *
+     * @param key - the pref key holding the custom text.
+     * @param fallback - the shipped word, used when the field is blank.
+     */
+    const thunderWord = (key, fallback) => {
+      const raw = prefsGet(key)
+      if (typeof raw !== 'string') return fallback
+      const text = raw.trim()
+      return text === '' ? fallback : clampText(text, THUNDER_TEXT_LIMIT)
+    }
+    const thunderStartWord = () => thunderWord(THUNDER_START_TEXT_KEY, THUNDER_START)
+    const thunderDoneWord = () => thunderWord(THUNDER_DONE_TEXT_KEY, THUNDER_DONE)
+    /**
+     * The letter line that goes under one announcement word.
+     *
+     * A Latin word is used AS the footer — uppercased, punctuation dropped — so the
+     * two lines always belong to each other: `DEPLOY` up top means `DEPLOY` below,
+     * in Sarkaz glyphs. A Chinese word (the shipped default, and the common custom
+     * case) cannot be transcribed — the font maps glyphs to A-Z/0-9 only — so it
+     * falls back to the built-in caption for that kind of plate.
+     *
+     * The whole word must be printable ASCII, not merely contain some: 「开工 v2」
+     * would otherwise produce a two-character footer that reads as a typo. Falling
+     * back is the honest outcome there, and it keeps the rule one sentence long.
+     *
+     * @param word - the announcement word actually being shown.
+     * @param fallback - the built-in caption for this kind of plate.
+     */
+    const thunderFooter = (word, fallback) => {
+      if (typeof word !== 'string' || !/^[\x20-\x7E]+$/.test(word)) return fallback
+      const latin = word.toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+      if (latin === '') return fallback
+      return clampText(latin, THUNDER_FOOTER_LIMIT)
+    }
     // Hold time, per the request: visible for 3s, then gone.
     const THUNDER_MS = 3000
     // Default OFF (=== '1' rather than !== '0'): opt-in, like the boot animation.
@@ -57,8 +116,12 @@
     /* Announce one word. A second call inside the 3s window REPLACES the first
        (turn/end immediately followed by a queued turn/start is a real sequence), so
        the node is rebuilt rather than reused — that restarts the CSS animation,
-       which merely re-setting textContent would not. */
-    const showThunder = (text) => {
+       which merely re-setting textContent would not.
+
+       `caption` is the fallback letter line, not the final one: the plate derives its
+       footer from the word it is about to draw (see thunderFooter), so a caller only
+       has to say which KIND of plate this is. */
+    const showThunder = (text, caption) => {
       if (!isEnabled() || !isThunderOn()) return
       if (typeof document === 'undefined' || !document.body) return
       destroyThunder()
@@ -76,6 +139,13 @@
       word.setAttribute('data-endfield-thunder-word', '')
       word.textContent = text
       el.appendChild(word)
+      /* 底部字母行：装饰签名，内容由大字派生（见 thunderFooter）。独立节点而不是
+         并进 word.textContent，否则它会继承大字那条 clamp(44px, 13vw, 176px)，
+         变成第二行铺满屏幕的字。 */
+      const line = document.createElement('span')
+      line.setAttribute('data-endfield-thunder-footer', '')
+      line.textContent = thunderFooter(text, caption)
+      el.appendChild(line)
       document.body.appendChild(el)
       thunderEl = el
       /* CLICK ANYWHERE TO DISMISS EARLY, without waiting out the 3s.
@@ -298,7 +368,8 @@
           thunderLastRunning = next
           // First readable value is the baseline, not an edge — see the note above.
           if (prev === null) return
-          showThunder(next ? THUNDER_START : THUNDER_DONE)
+          showThunder(next ? thunderStartWord() : thunderDoneWord(),
+            next ? THUNDER_FOOTER_START : THUNDER_FOOTER_DONE)
         })
       } catch (e) {
         unsub = null

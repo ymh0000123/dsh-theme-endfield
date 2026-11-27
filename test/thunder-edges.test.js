@@ -92,6 +92,13 @@ const shownWord = () => {
   const w = p[p.length - 1].children.find((c) => c.hasAttribute('data-endfield-thunder-word'))
   return w ? w.textContent : null
 }
+/** The optional 底部字母行 of the visible plate, or null when it has none. */
+const shownFooter = () => {
+  const p = plates()
+  if (p.length === 0) return null
+  const f = p[p.length - 1].children.find((c) => c.hasAttribute('data-endfield-thunder-footer'))
+  return f ? f.textContent : null
+}
 
 /* ---------- controllable clock ---------- */
 let now = 0
@@ -774,6 +781,87 @@ else fail('a list without subscribe() left the feature silent (got ' + noSubA.su
 noSubA.set({ running: true })
 if (shownWord() === '任务开始') pass('列表不可订阅时仍能正常播报')
 else fail('expected 任务开始 without list subscribe(), got ' + JSON.stringify(shownWord()))
+advance(3000)
+
+/* --- 16. 播报词与底部字母行 (issue #47) ---
+   The two words are editable; the letter line under them is NOT — it is DERIVED
+   from the word being drawn. A Latin custom word is reused as the footer (that is
+   what makes the two lines read as one plate), while a Chinese word — the shipped
+   default, and the common custom case — falls back to the built-in caption for
+   its kind. Both rules are asserted here, including the trap they avoid: never
+   emit a half-transcribed footer for a mixed 「上线 v2」.
+   Driven through the real pref store between two edges, which also proves the
+   render path re-reads the words per announcement instead of caching them at
+   apply(). --- */
+const copyA = makeObservable({ running: false })
+const copySlot = { value: undefined }
+const copyPref = mountFresh({ thunder: '1' }, copySlot)
+copySlot.value = {
+  list: makeObservable({
+    ids: ['session-a'],
+    phase: 'ready',
+    byId: { 'session-a': { id: 'session-a', retainedBy: { mainView: 1 } } },
+  }),
+  binding: (id) => (id === 'session-a' ? { sessionId: id, session: copyA } : undefined),
+}
+advance(500)
+copyA.set({ running: true })
+if (shownWord() === '任务开始' && shownFooter() === 'MISSION START') pass('开始板：默认播报词配内置落款 MISSION START')
+else fail('the shipped start plate changed: word=' + JSON.stringify(shownWord())
+  + ' footer=' + JSON.stringify(shownFooter()))
+if (plates()[0].children.length === 2) pass('底部字母行是独立节点，不并进大字文本')
+else fail('expected word + footer as two nodes, got ' + plates()[0].children.length)
+advance(3000)
+
+/* The whole point of the change: the line is no longer one constant. */
+copyA.set({ running: false })
+if (shownWord() === '任务完成' && shownFooter() === 'MISSION COMPLETE') pass('完成板换成另一条落款（不再恒为同一串）')
+else fail('the shipped finish plate changed: word=' + JSON.stringify(shownWord())
+  + ' footer=' + JSON.stringify(shownFooter()))
+advance(3000)
+
+/* 拉丁播报词：落款就是上面那行字本身——两行才属于同一块板。 */
+copyPref.setField('thunderStartText', 'Deploy')
+copyPref.setField('thunderDoneText', 'All done!')
+copyA.set({ running: true })
+if (shownWord() === 'Deploy' && shownFooter() === 'DEPLOY') pass('拉丁播报词的落款取自该词本身')
+else fail('the footer did not follow a Latin word: word=' + JSON.stringify(shownWord())
+  + ' footer=' + JSON.stringify(shownFooter()))
+advance(3000)
+copyA.set({ running: false })
+if (shownWord() === 'All done!' && shownFooter() === 'ALL DONE') pass('拉丁落款丢掉标点、保留词间空格')
+else fail('punctuation handling changed: footer=' + JSON.stringify(shownFooter()))
+advance(3000)
+
+/* 中文词没有字形可套：落回内置落款，而不是把能转的字符拼成半句。 */
+copyPref.setField('thunderStartText', '开工')
+copyPref.setField('thunderDoneText', '上线 v2')
+copyA.set({ running: true })
+if (shownWord() === '开工' && shownFooter() === 'MISSION START') pass('中文播报词落回内置落款，不拼半句')
+else fail('a Chinese word produced ' + JSON.stringify(shownFooter()))
+advance(3000)
+copyA.set({ running: false })
+if (shownWord() === '上线 v2' && shownFooter() === 'MISSION COMPLETE') pass('中英混排的播报词同样落回内置落款')
+else fail('a mixed word produced ' + JSON.stringify(shownFooter()))
+advance(3000)
+
+/* Blank restores the shipped word — clearing the field is the documented way
+   back, so it must not need a reload — and the footer follows it back. */
+copyPref.setField('thunderStartText', '')
+copyPref.setField('thunderDoneText', '')
+copyA.set({ running: true })
+if (shownWord() === '任务开始' && shownFooter() === 'MISSION START') pass('清空播报词即恢复默认，落款随之回到内置')
+else fail('clearing the fields did not restore the default: word=' + JSON.stringify(shownWord())
+  + ' footer=' + JSON.stringify(shownFooter()))
+advance(3000)
+
+/* 这一行曾经是可编辑字段：如果哪天有人把字段加回来，或者旧文档里还留着同名键，
+   渲染层都不该再读它。写入 build 期的残留值，断言画面上仍是派生出来的落款。 */
+copyPref.setSection('thunderFooter', 'CUSTOM')
+copyPref.setSection('thunderFooterSarkaz', '0')
+copyA.set({ running: false })
+if (shownFooter() === 'MISSION COMPLETE') pass('残留的 thunderFooter 偏好不会复活输入框行为')
+else fail('a stale thunderFooter pref changed the decoration: ' + JSON.stringify(shownFooter()))
 advance(3000)
 
 console.log('')

@@ -490,6 +490,88 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     check(h.spawns.length === before, 'an agent error plays nothing (silent by design)');
   }
 
+  /* --- 上传路由 (issue #47): raw wav in, JSON out ---
+
+     The lib-level rules (validation, precedence, restore) are covered by
+     test/audio-upload.test.js; what this drives is the WIRING the browser
+     actually talks to — query parsing, the raw body reader, the 8 MB ceiling and
+     the JSON envelope. DSH_HOME is pointed at a temp dir for the duration of the
+     mount so a test can never write into the developer's real ~/.dsh. */
+  {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'endfield-upload-route-'));
+    const previousHome = process.env.DSH_HOME;
+    process.env.DSH_HOME = tmpHome;
+    const routes = [];
+    const h = makeHost();
+    h.roots.push(rootAgent);
+    const ctx = Object.assign({}, h.ctx, {
+      get(name) {
+        if (name === 'webServer') return { register(route) { routes.push(route); return () => {}; } };
+        return h.ctx.get(name);
+      },
+    });
+    host.installAudio(ctx, h.scope);
+    if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome;
+
+    /** One request through the real prefix handler; `bytes` present = POST. */
+    const call = (url, bytes) => new Promise((resolve) => {
+      const listeners = new Map();
+      const req = {
+        /* Uploads are POST whether or not they carry a body (`action=remove`
+           posts no bytes), everything else here is a GET. */
+        method: (bytes !== undefined || url.indexOf('/audio/upload') >= 0) ? 'POST' : 'GET',
+        url,
+        headers: {},
+        on(name, fn) { listeners.set(name, fn); return req; },
+      };
+      const res = {
+        statusCode: 0,
+        writeHead(code) { this.statusCode = code; },
+        end(body) { resolve({ status: this.statusCode, body: body === undefined ? {} : JSON.parse(body) }); },
+      };
+      Promise.resolve(routes[0].handler(req, res)).catch(() => resolve({ status: 500, body: {} }));
+      /* The handler subscribes synchronously inside readBytes before its first
+         await, so emitting on the next tick is always after the listeners exist. */
+      setImmediate(() => {
+        if (listeners.has('data') && bytes !== undefined) listeners.get('data')(bytes);
+        if (listeners.has('end')) listeners.get('end')();
+      });
+    });
+
+    const clip = renderWav({ duration: 0.4, peakDbfs: -3,
+      notes: [{ note: 'A4', start: 0, duration: 0.3, gain: 0.4, timbre: 'blip' }] });
+
+    const uploaded = await call('/theme-endfield/audio/upload?slot=turn-start', clip);
+    check(uploaded.status === 200 && uploaded.body.ok === true,
+      'POST /upload 接受合法 WAV 并回 JSON');
+    check(fs.existsSync(path.join(tmpHome, 'theme-endfield', 'sounds', 'turn-start.wav')),
+      '文件写进 <dshHome>/theme-endfield/sounds（DSH_HOME 生效）');
+
+    const afterUpload = await call('/theme-endfield/audio/state');
+    const startSlot = afterUpload.body.slots.find((s) => s.id === 'turn-start');
+    check(startSlot.uploaded === true, '/state 报告该槽位已被上传覆盖（面板据此显示「恢复内置」）');
+    check(afterUpload.body.uploadDir === path.join(tmpHome, 'theme-endfield', 'sounds'),
+      '/state 带出托管目录');
+
+    const notWav = await call('/theme-endfield/audio/upload?slot=turn-start', Buffer.from('definitely not a wav'));
+    check(notWav.status === 400 && notWav.body.ok === false,
+      '非 WAV 体：400 + 明确理由');
+
+    const tooBig = await call('/theme-endfield/audio/upload?slot=turn-start', Buffer.alloc(9 * 1024 * 1024));
+    check(tooBig.status === 413, '请求体超过 8 MB：413（不是把宿主内存吃满）');
+
+    const restored = await call('/theme-endfield/audio/upload?slot=turn-start&action=remove');
+    check(restored.status === 200 && restored.body.removed === true, 'action=remove 删除上传覆盖');
+    const afterRestore = await call('/theme-endfield/audio/state');
+    check(afterRestore.body.slots.find((s) => s.id === 'turn-start').uploaded === false,
+      '恢复后 /state 不再标记 uploaded');
+
+    const badSlot = await call('/theme-endfield/audio/upload?slot=..%2Fevil', clip);
+    check(badSlot.status === 400 && badSlot.body.ok === false, '查询串里的非法槽位被拒绝');
+
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+
   /* --- the tools/execute seam must stay untouched ---
 
      This plugin must NOT listen on `tools/execute`. That event is a waterfall

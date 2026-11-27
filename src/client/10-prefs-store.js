@@ -91,6 +91,10 @@
       loader: '0',
       thunder: '0',
       thunderAnim: '0',
+      /* 播报词。空串 = 沿用内置文案（「任务开始」/「任务完成」），这样升级本身
+         不会改变任何人的界面。底部那行字母是固定装饰，没有字段。 */
+      thunderStartText: '',
+      thunderDoneText: '',
       /* 顶部余额胶囊 — opt-in, like thunder: a fixed capsule at the top center
          of the frame showing the account balance, fed by the host-side
          /theme-endfield/balance route. Ships OFF so an upgrade never adds a
@@ -191,6 +195,8 @@
       'dsh-theme-endfield-loader': 'loader',
       'dsh-theme-endfield-thunder': 'thunder',
       'dsh-theme-endfield-thunder-anim': 'thunderAnim',
+      'dsh-theme-endfield-thunder-start-text': 'thunderStartText',
+      'dsh-theme-endfield-thunder-done-text': 'thunderDoneText',
       'dsh-theme-endfield-balance-capsule': 'balanceCapsule',
       'dsh-theme-endfield-credit-display': 'creditDisplay',
       'dsh-theme-endfield-balance-capsule-position': 'balanceCapsulePosition',

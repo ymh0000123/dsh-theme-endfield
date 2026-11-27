@@ -126,6 +126,10 @@ const FIELD_DEFAULTS = {
   loader: '0',              // 启动加载动画 —— default off
   thunder: '0',             // 雷霆大字 —— default off
   thunderAnim: '0',         // 大字入场动画 —— default off
+  /* 播报词。留空 = 用内置的「任务开始」/「任务完成」，所以这两个字段的默认值
+     不会把任何人的界面改掉。底部那行萨卡兹字母是固定的装饰签名，没有字段。 */
+  thunderStartText: '',     // 开始播报词，留空用「任务开始」
+  thunderDoneText: '',      // 结束播报词，留空用「任务完成」
   balanceCapsule: '0',      // 顶部余额胶囊 —— default off
   creditDisplay: 'remaining', // 渠道额度主读数 —— remaining（剩余）| used（已用）
   balanceCapsulePosition: 'center', // 余额胶囊位置 —— center（居中）| left（靠左）| right（靠右）
@@ -990,6 +994,35 @@ function installAudio(ctx, settingsScope) {
       res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify(payload));
     };
+    /* Uploads are binary and far bigger than a JSON control message: the
+       preview/attention routes cap their bodies at 64 KB, while a 2.5 s stereo
+       wav is a few hundred KB. 8 MB is the hard ceiling — roomy for any clip the
+       duration rule will accept, small enough that one stray request cannot
+       exhaust the host's memory. */
+    const UPLOAD_LIMIT = 8 * 1024 * 1024;
+    /**
+     * Read a raw request body into one Buffer.
+     *
+     * @returns the bytes, or null when the body exceeded `limit` (the stream is
+     *   still drained so the response can be written instead of reset).
+     */
+    const readBytes = (req, limit) => new Promise((resolve) => {
+      const chunks = [];
+      let total = 0;
+      let over = false;
+      req.on('data', (chunk) => {
+        if (over) return;
+        total += chunk.length;
+        if (total > limit) {
+          over = true;
+          chunks.length = 0;
+          return;
+        }
+        chunks.push(chunk);
+      });
+      req.on('end', () => resolve(over ? null : Buffer.concat(chunks)));
+      req.on('error', () => resolve(null));
+    });
     try {
       webServer.register({
         kind: 'prefix',
@@ -1056,6 +1089,31 @@ function installAudio(ctx, settingsScope) {
               }
               const result = audio.play('attention', { reason: `page: ${attentionSeen.uiLastKind}` });
               return send(res, result.played ? 200 : 409, result);
+            }
+            /* 上传 / 恢复 one slot's own sound.
+
+               The body is the RAW wav (`application/octet-stream`), not
+               multipart and not base64: the page already holds the File, and
+               base64 would inflate a 400 KB clip by a third to no benefit. The
+               slot arrives in the query string; `action=remove` drops the
+               uploaded override instead of writing one.
+
+               Writes are confined to the plugin's own upload directory (see
+               `saveUpload` in lib/audio.js) — the route has no way to write
+               anywhere else, which is what makes it acceptable on a host bridge
+               that a page can call. */
+            if (req.method === 'POST' && pathname === '/theme-endfield/audio/upload') {
+              const slot = String(query.get('slot') || '');
+              if (query.get('action') === 'remove') {
+                const removed = audio.removeUpload(slot);
+                return send(res, removed.ok ? 200 : 400, removed);
+              }
+              const bytes = await readBytes(req, UPLOAD_LIMIT);
+              if (bytes === null) {
+                return send(res, 413, { ok: false, why: `body larger than ${UPLOAD_LIMIT} bytes` });
+              }
+              const saved = audio.saveUpload(slot, bytes);
+              return send(res, saved.ok ? 200 : 400, saved);
             }
             return send(res, 404, { error: 'not found' });
           } catch (error) {

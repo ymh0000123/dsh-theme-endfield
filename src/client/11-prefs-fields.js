@@ -16,6 +16,11 @@
     const AUDIO_STATE_URL = '/theme-endfield/audio/state'
     const AUDIO_PREVIEW_URL = '/theme-endfield/audio/preview'
     const AUDIO_ATTENTION_URL = '/theme-endfield/audio/attention'
+    /* One slot at a time, raw wav body. The host caps the body at the same
+       number, so this check only saves a doomed round trip; the authoritative
+       limits (wav format, 2.5 s duration) live in lib/audio.js. */
+    const AUDIO_UPLOAD_URL = '/theme-endfield/audio/upload'
+    const AUDIO_UPLOAD_LIMIT = 8 * 1024 * 1024
     /* ---------- 顶部余额胶囊 (host half owns the balance query) ----------
        The page cannot reach the account service itself — only Host consumers
        can obtain the request credential — so the capsule polls the host-side

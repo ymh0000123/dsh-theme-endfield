@@ -58,6 +58,9 @@ module.exports = [
   { file: '40-balance-pricing.js' },
   { file: '41-mount-tokens.js' },
 
+  /* ---- 萨卡兹字形：内嵌字体（@font-face + base64），必须排在样式表之前 ---- */
+  { file: '../styles/sarkaz-font.css' },
+
   /* ---- 主题样式表：唯一那个巨型模板字面量的内容 ---------------------- */
   { file: '../styles/theme.css' },
 

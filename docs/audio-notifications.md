@@ -75,7 +75,7 @@
 
 ## 5. 自定义音效（覆盖内置电子音）
 
-把 wav 按槽位名放进 **自定义目录 → 工作区根目录 → 桌面 → 内置合成音** 的第一处命中位置：
+把 wav 按槽位名放进 **上传目录 → 自定义目录 → 工作区根目录 → 桌面 → 内置合成音** 的第一处命中位置：
 
 ```
 boot.wav  turn-start.wav  turn-done.wav  attention.wav  turn-fail.wav
@@ -83,6 +83,22 @@ boot.wav  turn-start.wav  turn-done.wav  attention.wav  turn-fail.wav
 
 要求 **16-bit PCM WAV**、44.1kHz、单声道或立体声；推荐 0.5–1.5 秒，**上限 2.5 秒**（防抖窗）。
 设置页「当前音源」行显示每个槽位实际解析到的文件路径，可确认是否已替换成功。
+
+### 5.1 上传入口（设置页「上传 wav」）
+
+设置页每个槽位行都有「上传 wav」：选文件后页面把**原始字节**POST 给宿主，
+宿主校验、落盘、重新解析，随后「当前音源」行显示结果。三处设计取舍：
+
+- **上传目录排在第一位，且按文件生效。** 用户刚点了「上传」，那一个槽位就必须是它发声；
+  否则同名的旧文件（自定义目录 / 桌面）会把它静默盖掉，「按钮成功但没变化」。
+  没有上传的槽位照常走后面的链路。
+- **只写插件自己的目录** `<dshHome>/theme-endfield/sounds/`（`DSH_HOME` 优先，否则 `~/.dsh`）。
+  这条路径是「恢复内置」安全的前提：删掉的是插件自己写的文件，不是用户的素材。
+- **写盘走 `临时文件 + rename`。** 上传与播报是并发的：一个通知完全可能落在写入过程中，
+  半截的 wav 交给播放器就是一声杂音。`rename` 在各平台都是原子的，且会覆盖同名文件。
+
+校验在写之前完成，拒绝的理由会原样回给页面：非 PCM WAV（把 mp3 改名成 .wav 是最常见的误用）、
+空音频、超过 2.5 秒。请求体硬上限 8 MB（路由层截断，超限返回 413）。
 
 内置音不是二进制素材，而是由 `lib/tone.js` 按 `lib/slots.js` 的音符定义**算出来**的：
 
@@ -98,6 +114,8 @@ node scripts/build-sounds.js --check  # 校验生成物与定义一致
 | `GET` | `/theme-endfield/audio/state` | 槽位快照、解析到的文件、计数、诊断环形日志 |
 | `GET`/`POST` | `/theme-endfield/audio/preview?slot=<id>` | 试听：**强制播放**（跳过防抖），但仍尊重槽位开关 |
 | `POST` | `/theme-endfield/audio/attention` | 页面报告"看到确认框了"：**不强制**，尊重开关/音量/防抖 |
+| `POST` | `/theme-endfield/audio/upload?slot=<id>` | 原始 WAV 请求体：校验后写进托管目录并覆盖该槽位 |
+| `POST` | `/theme-endfield/audio/upload?slot=<id>&action=remove` | 删除该槽位的上传覆盖，回落到后面的链路 |
 
 ## 7. 平台与性能
 
